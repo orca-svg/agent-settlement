@@ -109,12 +109,13 @@ DEV_SEED=1 npm start   # http://localhost:4500/room.html → '데모 방 만들�
 지금은 **데모용 배포**입니다. 저장소가 메모리(`MemoryStore`)라서 인스턴스를 1대로 고정해야 방이 사라지지 않고, 누구나 개발용 데모 방을 만들 수 있게(`DEV_SEED=1`) 둡니다. 따라서 가상의 데모 데이터만 넣습니다. #2 로그인·#3 Firestore가 들어오면 인스턴스 고정과 `DEV_SEED`를 뺍니다.
 
 ```bash
-gcloud run deploy agent-settlement --source . --region asia-northeast3 \
+gcloud run deploy agent-settlement --source . --region asia-northeast1 \
   --allow-unauthenticated --min-instances 1 --max-instances 1 --memory 1Gi \
   --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
   --set-env-vars DEV_SEED=1,CRON_SECRET=<임의의 긴 문자열>
 ```
 
+- 리전은 도쿄(`asia-northeast1`)입니다. Cloud Run 가격표에서 Tier 1이라 서울(`asia-northeast3`, Tier 2)보다 CPU·메모리 단가가 낮습니다. 화면이 부르는 서버 주소는 `public/api.js`에 있습니다.
 - 때가 된 송금 알림은 Cloud Scheduler 작업 `agent-settlement-tick`이 1분마다 `POST /api/cron/tick`을 `x-cron-secret` 헤더와 함께 부릅니다. Cloud Run은 요청이 없을 때 CPU를 거의 주지 않아 서버 안의 30초 타이머만으로는 부족하기 때문입니다.
 - `.env`와 작업 기록(`.superpowers/`)은 `.gitignore`·`.gcloudignore`·`.dockerignore`에서 모두 제외되어 저장소와 이미지에 들어가지 않습니다.
 - 서버는 `https://orca-svg.github.io`에서 온 요청만 브라우저에 허용(CORS)합니다. 또 Gemini 호출은 IP당 10분에 30회로 제한하고, 요청 본문은 비서의 기억(사람당 5개, 60자)만 받습니다.
