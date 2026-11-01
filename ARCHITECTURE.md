@@ -7,8 +7,10 @@
 ```
 브라우저
   ├─ public/index.html + app.js   데모 화면(로그인 없이 보는 오사카 시나리오). 동작을 바꾸지 않아요
-  └─ public/room.html + room.js   실제 방 화면
-        │  room-api.js: api(), subscribeRoom(), currentUid()
+  ├─ public/room.html + room.js   실제 방 화면
+  │     │  room-api.js: api(), subscribeRoom(), currentUid()
+  └─ public/log-pop.js            좁은 화면(920px 이하)에서 비서끼리 기록을 상단바 종으로 여는 패널. 두 화면이 함께 씀
+        │
         ▼
 API 서버 (server.mjs → src/app.mjs)
   ├─ src/identity.mjs     누가 요청했나 (#2가 교체)
@@ -20,7 +22,8 @@ API 서버 (server.mjs → src/app.mjs)
 
 ## 지키는 원칙
 
-- **LLM은 금액을 계산하지 않아요.** Gemini는 '누가 먹었나', '영수증에 뭐가 있나', '중재안'만 내고, 금액은 `public/core.js`가 계산해요. 모델 출력은 스키마로 제한하고 서버가 다시 검증해요. 실패하면 규칙으로 대신하고 화면에 `규칙`이라고 표시해요.
+- **LLM은 금액을 계산하지 않아요.** Gemini는 '줄마다 누구 몫인가', '영수증에 뭐가 있나', '중재안'만 내고, 금액은 `public/core.js`가 계산해요. 모델 출력은 스키마로 제한하고 서버가 다시 검증해요. 실패하면 규칙으로 대신하고 화면에 `규칙`이라고 표시해요.
+- **LLM은 필요할 때만 불러요.** 함께 있던 사람이 한 명이거나 줄이 하나뿐인 영수증은 묻지 않고 똑같이 나눠요(`obviousAlloc`). 모델에 보낼 내용이 이전과 같으면 이전 답을 다시 써요(`src/agents/cache.mjs`, 서버 메모리). 응답의 `how`(`obvious`·`cache`·`gemini`·`rules`)로 어떻게 나눴는지 화면에 보여요.
 - **비서는 사람이 정한 범위 안에서만 움직여요.** 자동 수락 한도를 넘거나 근거가 없는 일은 반드시 주인에게 물어요.
 - **우리 서비스는 돈을 보관하거나 이체하지 않아요.** 송금은 사용자의 송금 앱에서 일어나요. 우리는 금액이 채워진 송금 화면을 승인하는 순간 열어 줄 뿐이에요.
 - **비서 기록(이벤트)은 서버만 써요.** 화면은 읽기만 해요.
@@ -48,6 +51,7 @@ API 서버 (server.mjs → src/app.mjs)
 | --- | --- |
 | `get(col, id)` | 문서 하나, 없으면 `null` |
 | `put(col, doc)` | `doc.id`로 저장(덮어쓰기) |
+| `delete(col, id)` | 문서 지우기(없어도 오류 아님) |
 | `list(col, where = {})` | 필드 동등 비교로 거르기(Firestore의 `==`와 같은 범위) |
 | `appendEvent(roomId, ev)` | 비서 기록 추가. `seq`(방마다 1부터)와 `at`(ISO 시각)을 채워서 돌려줌 |
 | `listEvents(roomId, afterSeq = 0)` | `seq > afterSeq`인 기록 |
@@ -64,6 +68,7 @@ API 서버 (server.mjs → src/app.mjs)
 | `invoices` | `Invoice` | `rooms/{roomId}/invoices/{invoiceId}` |
 | `disputes` | `Dispute` | `rooms/{roomId}/disputes/{disputeId}` |
 | `transfers` | `Transfer` | `rooms/{roomId}/transfers/{transferId}` |
+| `receipts` | 영수증 사진 `{ id(=지출 id), roomId, mimeType, data }` | Firebase Storage `receipts/{roomId}/{expenseId}.jpg` 권장 |
 | 비서 기록 | `AgentEvent` | `rooms/{roomId}/events/{seq}` |
 
 ## 도메인 타입 요약
@@ -89,13 +94,19 @@ API 서버 (server.mjs → src/app.mjs)
 | GET | `/api/config` | Gemini 연결 상태 |
 | POST | `/api/allocate`, `/api/mediate` | 데모 화면용 메뉴 배분·중재 |
 | POST | `/api/dev/seed` | 개발용 데모 방 만들기(`DEV_SEED=1`일 때만) |
-| GET | `/api/rooms/:id` | 방, 지출, 청구서, 이의, 송금, 사람별 차액 |
+| GET | `/api/rooms/:id` | 방, 지출, 청구서, 이의, 송금, 사람별 차액, 그리고 **내가 처리할 일(`actions`)** |
 | GET | `/api/rooms/:id/events?after=n` | 비서 기록 |
+| POST | `/api/rooms/:id/expenses` | 지출 남기기(직접 입력, 또는 확인을 마친 영수증 줄). 영수증 지출은 `receipt: { mimeType, data }`로 줄인 사진을 함께 저장해요. 방 `version`이 올라가요 |
+| POST | `/api/rooms/:id/expenses/:eid/delete` | 지출 지우기. 영수증 사진도 함께 지워요 |
+| GET | `/api/rooms/:id/expenses/:eid/receipt` | 저장된 영수증 사진 `{ mimeType, data }`(방 멤버만) |
+| POST | `/api/rooms/:id/expenses/:eid` | 지출 고치기. 같은 검증을 거쳐 덮어써요. 영수증 줄이나 함께한 사람이 바뀌면 메뉴 배분을 지워 다시 나누게 해요 |
+| POST | `/api/rooms/:id/receipts/extract` | 영수증 사진(긴 변 1600px JPEG, base64) → 초안. **저장하지 않아요** |
+| POST | `/api/rooms/:id/expenses/:eid/allocate` | 비서들이 공유한 기억으로 영수증 줄 배분. 근거 없는 줄은 지출을 남긴 사람에게 물어요. 응답 `{ expense, source, how, latencyMs }` |
+| POST | `/api/rooms/:id/expenses/:eid/lines/:itemId` | 줄 하나를 사람이 확정(`{ consumers }`) |
 
-다음 작업에서 더해질 것이에요(#6, #9). 경로가 정해지면 이 표로 옮겨요.
+`actions`는 이벤트 기록에서 세지 않고 서버가 현재 상태에서 계산해요(`src/actions.mjs`). 그래서 처리한 일은 자동으로 빠져요. 지금은 `confirm_line`만 있고, 다음 작업(#9)에서 청구서 답하기·이의 동의·송금 승인·받았어요 확인이 더해져요.
 
-- 지출: 직접 입력, 영수증 사진 읽기(저장 전 사람 확인), 메뉴 배분, 줄 확정
-- 비서: 청구서 보내기·답하기, 이의 제기·중재·동의, 송금 승인·보냈어요·받았어요, 일정 처리(`/api/cron/tick`)
+다음 작업(#9)에서 더해질 것: 청구서 보내기·답하기, 이의 제기·중재·동의, 송금 승인·보냈어요·받았어요, 일정 처리(`/api/cron/tick`).
 
 ## 로컬에서 실행
 

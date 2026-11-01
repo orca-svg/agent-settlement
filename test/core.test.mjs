@@ -68,3 +68,12 @@ test('presentAfter: 22:55 이후 줄에서 민수 제외', () => {
   assert.ok(!leftEarly(whisky).includes('민수'));
   assert.ok(leftEarly(nuts).includes('민수'));
 });
+
+test('shares: 나누고 남은 원은 rest로 알려 주고 낸 사람 몫에 더한다', () => {
+  const room = { members: [{ uid: 'a', name: '가' }, { uid: 'b', name: '나' }, { uid: 'c', name: '다' }], fx: null };
+  const exp = { currency: 'KRW', amount: 10000, method: 'card', payer: 'a', present: ['a', 'b', 'c'], split: 'equal' };
+  const s = shares(exp, room, 'actual');
+  assert.equal(s.rest, 1);
+  assert.deepEqual(s.krwShare, { a: 3334, b: 3333, c: 3333 });
+  assert.equal(shares({ ...exp, amount: 9000 }, room, 'actual').rest, 0);
+});

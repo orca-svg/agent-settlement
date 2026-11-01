@@ -31,6 +31,9 @@ export function router() {
   return api;
 }
 
+// 영수증 사진(긴 변 1600px JPEG, base64)이 실리는 요청의 본문 한도
+export const MAX_RECEIPT = 2_100_000;
+
 export async function readJson(req, { limit = 20_000 } = {}) {
   let body = '';
   for await (const chunk of req) {

@@ -1,5 +1,6 @@
 // 데모 화면과 실제 방 화면이 함께 쓰는 UI 부품. import할 때 DOM을 건드리지 않는다(테스트에서 불러올 수 있게).
 import { Spring, VelocityTracker, project, rubberband, reduceMotion } from './motion.js';
+import { won } from './core.js';
 
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export const chip = (text, cls = '') => `<span class="chip ${cls}">${esc(text)}</span>`;
@@ -13,6 +14,21 @@ const hasBatchim = (w) => {
 };
 export const topic = (w) => `${w}${hasBatchim(w) ? '은' : '는'}`;
 export const subj = (w) => (w === '나' ? '내가' : `${w}${hasBatchim(w) ? '이' : '가'}`);
+export const obj = (w) => `${w}${hasBatchim(w) ? '을' : '를'}`;
+// '○○ 몫'의 앞말. 나 혼자면 '내 몫'.
+export const whose = (w) => (w === '나' ? '내' : w);
+
+// 메뉴 배분을 어떻게 했는지(서버 응답의 how) 영수증 줄 위에 짧게 보인다.
+export function allocLabel({ source, how, latencyMs }) {
+  if (how === 'obvious') return 'AI 없이 나눔';
+  const sec = latencyMs ? ` · ${(latencyMs / 1000).toFixed(1)}초` : '';
+  if (!source || source === 'rules') return `규칙${sec}`;
+  const model = source.replace(/^gemini-/, 'Gemini ').replace(/-flash/, ' Flash').replace(/-preview/, ' Preview');
+  return `${model}${how === 'cache' ? ' · 이전 답 재사용' : sec}`;
+}
+
+// 사람별 몫 아래 한 줄. 원 단위로 나누고 남은 돈이 있을 때만 보인다(core.js의 shares().rest).
+export const restNote = (rest) => (rest ? `<p class="group-note">나누고 남은 ${won(rest)}은 낸 사람 몫에 더했어요.</p>` : '');
 
 const ICONS = {
   stay: '<path d="M3 19V6M3 15h18v4M21 15v-3a3 3 0 0 0-3-3h-7v6"/><circle cx="7" cy="11.5" r="2"/>',
@@ -28,13 +44,24 @@ export const CHECK = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidde
 export const ARROW = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 // 비서끼리 기록 한 줄
-export const logItemHtml = ({ avatar, who, time, text, meta = '', tagHtml = '', enter = false }) => `<li class="${enter ? 'enter' : ''}">
+export const logItemHtml = ({ avatar, who, time, text, meta = '', tagHtml = '', enter = false, unread = false, extraHtml = '' }) => `<li class="${enter ? 'enter' : ''}${unread ? ' unread' : ''}">
     ${avatar}
     <div><div class="who"><span>${esc(who)}</span><time>${esc(time)}</time></div>
       <p class="text">${esc(text)}</p>
       ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}
-      ${tagHtml ? `<div class="tag">${tagHtml}</div>` : ''}</div>
+      ${tagHtml ? `<div class="tag">${tagHtml}</div>` : ''}${extraHtml}</div>
   </li>`;
+
+// 이어진 같은 종류의 기록(같은 비서, 같은 kind, 할 일 없음)을 한 묶음으로. kind가 없는 기록은 묶지 않는다.
+export function groupRuns(list) {
+  const out = [];
+  for (const e of list) {
+    const head = out.at(-1)?.[0];
+    if (head && e.kind && !e.action && !head.action && head.kind === e.kind && head.from === e.from) out.at(-1).push(e);
+    else out.push([e]);
+  }
+  return out;
+}
 
 // 시트: 스프링으로 올라오고, 손잡이를 끌어 내리면 놓는 속도로 닫힐지 정한다.
 // open(beforeMeasure)는 내용을 그린 뒤 높이를 재야 하므로 그리는 함수를 받는다.

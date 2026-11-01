@@ -9,7 +9,10 @@ import { ledger } from '../public/core.js';
 import { router, readJson, send, allowCors, createRateLimiter, clientIp, HttpError } from './http.mjs';
 import { identify } from './identity.mjs';
 import { seedDemoRoom } from './dev/seed.mjs';
+import { registerExpenseRoutes } from './expenses/routes.mjs';
+import { pendingActions } from './actions.mjs';
 import { allocateWithGemini } from './agents/allocate.mjs';
+import { createCache } from './agents/cache.mjs';
 import { mediateWithGemini } from './agents/mediate.mjs';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -50,7 +53,8 @@ function serveStatic(pathname, res) {
 export function createApp({ store, gemini = null, clock = () => new Date(), evidenceFor = async () => [], env = {} }) {
   const origins = (env.ALLOWED_ORIGINS || 'https://orca-svg.github.io').split(',');
   const overLimit = createRateLimiter({ max: 30, windowMs: 600_000 });
-  const ctx = { store, gemini, clock, evidenceFor, env, overLimit };
+  const allocCache = createCache(); // 같은 입력의 메뉴 배분은 Gemini에게 다시 묻지 않는다
+  const ctx = { store, gemini, clock, evidenceFor, env, overLimit, allocCache };
   const routes = router();
 
   const limitGemini = (key) => {
@@ -64,10 +68,10 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     limitGemini(clientIp(req));
     const memory = cleanMemory((await readJson(req)).memory, DEMO_ROOM.members);
     const started = Date.now();
-    const out = await allocateWithGemini(gemini, demoIzakaya, DEMO_ROOM, memory);
+    const out = await allocateWithGemini(gemini, demoIzakaya, DEMO_ROOM, memory, { cache: allocCache });
     const latencyMs = Date.now() - started;
-    console.log(`[/api/allocate] ${out.source} ${latencyMs}ms`);
-    return { lines: out.alloc, source: out.source, latencyMs };
+    console.log(`[/api/allocate] ${out.how} ${out.source} ${latencyMs}ms`);
+    return { lines: out.alloc, source: out.source, how: out.how, latencyMs };
   });
 
   routes.post('/api/mediate', async ({ req }) => {
@@ -112,6 +116,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       disputes,
       transfers: transfers.map((t) => redactTransfer(t, me.uid)),
       ledger: ledger(room, expenses, room.policy),
+      actions: pendingActions({ room, expenses }).filter((x) => x.for === me.uid),
     };
   });
 
@@ -119,6 +124,8 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     await member(req, params.id);
     return { events: await store.listEvents(params.id, Number(url.searchParams.get('after') || 0)) };
   });
+
+  registerExpenseRoutes(routes, { ...ctx, member });
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');

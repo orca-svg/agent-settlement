@@ -1,5 +1,5 @@
 // 돈 계산은 모두 여기서 한다. 화면·서버·테스트가 함께 쓴다.
-// AI는 '누가 먹었나'만 추정하고, 환율 적용·나누기·송금 경로는 코드가 정한다.
+// AI는 '줄마다 누구 몫인가'만 추정하고, 환율 적용·나누기·송금 경로는 코드가 정한다.
 // 모든 함수는 방(room)과 지출(expense)을 인자로 받는다. 사람 키는 member.uid다.
 
 export const won = (n) => `₩${Math.round(n).toLocaleString('ko-KR')}`;
@@ -35,8 +35,8 @@ export function toKrw(exp, room, policy) {
   return { krw: Math.round((amount * rate) / 100), how: `현금: ${cur} × ${nameOf(room.members, exp.payer)}가 환전한 평균 ${rate.toFixed(2)}원/100` };
 }
 
-// 사람별 몫. split이 'items'면 줄마다 먹은 사람끼리 나누고, 아니면 함께 있던 사람이 똑같이 나눈다.
-// 원 단위 끝전은 낸 사람이 안는다.
+// 사람별 몫. split이 'items'면 줄마다 그 줄의 몫인 사람끼리 나누고, 아니면 함께 있던 사람이 똑같이 나눈다.
+// 원 단위로 나누고 남은 돈(rest)은 낸 사람 몫에 더한다.
 export function shares(exp, room, policy, alloc = exp.alloc) {
   const { krw } = toKrw(exp, room, policy);
   const amount = amountOf(exp);
@@ -55,8 +55,9 @@ export function shares(exp, room, policy, alloc = exp.alloc) {
     krwShare[p] = Math.floor((krw * share[p]) / amount);
     sum += krwShare[p];
   }
-  krwShare[exp.payer] = (krwShare[exp.payer] || 0) + (krw - sum);
-  return { krw, share, krwShare };
+  const rest = krw - sum;
+  krwShare[exp.payer] = (krwShare[exp.payer] || 0) + rest;
+  return { krw, share, krwShare, rest };
 }
 
 // 사람별 낸 돈, 내 몫, 차액(+면 받을 돈, −면 보낼 돈)
@@ -120,7 +121,7 @@ export function ruleAllocate(exp, memoryByUid, members, presentAt = () => exp.pr
     } else if (it.tags.includes('무알코올 음료') && sober.length === it.qty) {
       out[it.id] = { consumers: sober, confidence: 0.75, reason: `술을 마시지 않는 ${sober.map(name).join('·')}의 음료로 봤어요.` };
     } else {
-      out[it.id] = { consumers: eligible, confidence: 0.35, reason: '누가 먹었는지 비서들의 기억에 없어요. 확인이 필요해요.' };
+      out[it.id] = { consumers: eligible, confidence: 0.35, reason: '누구 몫인지 비서들의 기억에 근거가 없어요. 확인이 필요해요.' };
     }
   }
   return out;

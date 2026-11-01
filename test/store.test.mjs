@@ -53,3 +53,11 @@ test('get이 돌려준 문서를 고쳐도 저장본은 안 바뀐다(복사본 
   listed[0].name = '바뀜';
   assert.equal((await store.get('rooms', 'r1')).name, undefined);
 });
+
+test('delete는 문서를 지우고, 없는 문서를 지워도 오류가 아니다', async () => {
+  const store = new MemoryStore();
+  await store.put('rooms', { id: 'r1' });
+  await store.delete('rooms', 'r1');
+  assert.equal(await store.get('rooms', 'r1'), null);
+  await store.delete('rooms', 'nope');
+});

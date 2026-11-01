@@ -45,7 +45,7 @@ function ruleSummary(exp, room, dispute) {
   const n = exp.present.length;
   const before = COUNT[n] ? `${COUNT[n]}이` : '모두가';
   const after = COUNT[n - 1] ? `${COUNT[n - 1]}이` : '나머지가';
-  const head = left ? `${left.time} 이전 주문은 ${before}, 이후 주문은 ${by}를 뺀 ${after} 나눠요.` : '주문마다 먹은 사람끼리 나눠요.';
+  const head = left ? `${left.time} 이전 주문은 ${before}, 이후 주문은 ${by}를 뺀 ${after} 나눠요.` : '주문마다 그 몫인 사람끼리 나눠요.';
   return `${head} 술을 마시지 않는 사람은 술값에서 빠져요.`;
 }
 
