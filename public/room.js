@@ -7,7 +7,7 @@ import { API_BASE } from './api.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
-const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, expId: null, edits: {}, allocating: null, allocSource: {} };
+const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, expId: null, edits: {}, allocating: null, allocSource: {} };
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
@@ -86,7 +86,10 @@ async function saveExpense() {
   state.formError = '';
   renderSheet();
   try {
-    await api(`/api/rooms/${encodeURIComponent(roomId)}/expenses`, {
+    const path = state.editing
+      ? `/api/rooms/${encodeURIComponent(roomId)}/expenses/${encodeURIComponent(state.editing)}`
+      : `/api/rooms/${encodeURIComponent(roomId)}/expenses`;
+    await api(path, {
       method: 'POST',
       body: {
         expense: state.addMode === 'photo' && d.items
@@ -95,7 +98,13 @@ async function saveExpense() {
       },
     });
     remember(d);
-    sheet.close();
+    if (state.editing) {
+      state.sheet = 'exp';
+      state.expId = state.editing;
+      state.editing = null;
+    } else {
+      sheet.close();
+    }
     await load();
   } catch (e) {
     state.formError = e.message;
@@ -243,13 +252,28 @@ function expSheetHtml(exp) {
     <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>${exp.split === 'items' ? '먹은 만큼' : '1/N'}</span></h3>
       <div class="list">${room.members.filter((m) => s.krwShare[m.uid] !== undefined).map((m) => `<div class="row" style="--inset:52px">${avatar(m.uid)}
         <span class="grow">${esc(m.name)}${m.uid === exp.payer ? ' <span class="meta">· 낸 사람, 끝전 포함</span>' : ''}</span>
-        <span class="amount num">${won(s.krwShare[m.uid])}</span></div>`).join('')}</div></section>`;
+        <span class="amount num">${won(s.krwShare[m.uid])}</span></div>`).join('')}</div></section>
+    <button class="btn plain" style="width:100%" data-action="edit-exp" data-id="${esc(exp.id)}">지출 고치기</button>`;
 }
 
 const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit) || 0), 0);
 
 async function act(name, d) {
-  if (name === 'add-expense') {
+  if (name === 'edit-exp') {
+    const exp = state.data.expenses.find((e) => e.id === d.id);
+    state.draft = {
+      title: exp.title, amount: exp.amount != null ? String(exp.amount) : '', currency: exp.currency, payer: exp.payer,
+      method: exp.method, present: [...exp.present], date: exp.date, time: exp.time, kind: exp.kind,
+      items: exp.items ? structuredClone(exp.items) : undefined,
+    };
+    state.addMode = exp.items ? 'photo' : 'manual';
+    state.editing = exp.id;
+    state.readNotes = exp.alloc && exp.items ? ['줄이나 함께한 사람을 바꾸면 메뉴 배분을 다시 해야 해요'] : [];
+    state.formError = '';
+    state.sheet = 'add';
+    renderSheet();
+  } else if (name === 'add-expense') {
+    state.editing = null;
     state.draft = newDraft();
     state.addMode = d.mode === 'photo' ? 'photo' : 'manual';
     state.readNotes = [];
@@ -395,7 +419,7 @@ function addSheetHtml() {
     ? `<input type="date" data-field="date" value="${esc(d.date)}" aria-label="날짜">`
     : `<select data-field="date" aria-label="날짜">${fxDates().map((x) => `<option value="${x}" ${x === d.date ? 'selected' : ''}>${dayLabel(x)}</option>`).join('')}</select>`;
   const picks = room.members.map((m) => `<button type="button" class="pick" aria-pressed="${d.present.includes(m.uid)}" data-action="draft-present" data-id="${esc(m.uid)}">${avatar(m.uid)}${esc(m.name)}</button>`).join('');
-  const tabs = `<div style="margin-bottom:16px">${seg('add-mode', 'mode', [['manual', '직접 입력'], ['photo', '영수증 사진']], state.addMode).replaceAll('data-action="draft-set"', 'data-action="add-mode"')}</div>`;
+  const tabs = state.editing ? '' : `<div style="margin-bottom:16px">${seg('add-mode', 'mode', [['manual', '직접 입력'], ['photo', '영수증 사진']], state.addMode).replaceAll('data-action="draft-set"', 'data-action="add-mode"')}</div>`;
   if (state.addMode === 'photo' && !d.items) return tabs + photoPickHtml();
   const amountRow = state.addMode === 'photo' && d.items
     ? linesEditHtml(d)
@@ -412,7 +436,7 @@ function addSheetHtml() {
     <section class="group"><div class="list"><div class="row field"><span class="grow">날짜</span>${dateField}</div>
       <label class="row field"><span class="grow">시각</span><input type="time" data-field="time" value="${esc(d.time)}" aria-label="시각"></label></div></section>
     ${state.formError ? `<p class="form-error" role="alert">${esc(state.formError)}</p>` : ''}
-    <button class="btn" style="width:100%" data-action="save-expense" ${state.saving ? 'disabled' : ''}>${state.saving ? '남기는 중…' : '지출 남기기'}</button>`;
+    <button class="btn" style="width:100%" data-action="save-expense" ${state.saving ? 'disabled' : ''}>${state.saving ? '저장하는 중…' : state.editing ? '고친 내용 저장' : '지출 남기기'}</button>`;
 }
 
 function photoPickHtml() {
@@ -448,7 +472,7 @@ function renderSheet() {
   const body = $('#sheet-body');
   const top = body.scrollTop;
   const exp = state.sheet === 'exp' ? state.data.expenses.find((e) => e.id === state.expId) : null;
-  $('#sheet-title').textContent = exp ? exp.title : '지출 남기기';
+  $('#sheet-title').textContent = exp ? exp.title : state.editing ? '지출 고치기' : '지출 남기기';
   body.innerHTML = exp ? expSheetHtml(exp) : addSheetHtml();
   body.scrollTop = top;
   mountSegs(body);
@@ -530,7 +554,7 @@ document.addEventListener('change', (e) => {
   const f = e.target.dataset?.field;
   if (f && state.draft) state.draft[f] = e.target.value;
 });
-const sheet = createSheet($('#sheet-root'), { onClosed: () => { state.sheet = null; } });
+const sheet = createSheet($('#sheet-root'), { onClosed: () => { state.sheet = null; state.editing = null; } });
 const nav = $('#nav');
 addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 56), { passive: true });
 addEventListener('resize', () => {

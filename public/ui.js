@@ -13,6 +13,7 @@ const hasBatchim = (w) => {
 };
 export const topic = (w) => `${w}${hasBatchim(w) ? '은' : '는'}`;
 export const subj = (w) => (w === '나' ? '내가' : `${w}${hasBatchim(w) ? '이' : '가'}`);
+export const obj = (w) => `${w}${hasBatchim(w) ? '을' : '를'}`;
 
 const ICONS = {
   stay: '<path d="M3 19V6M3 15h18v4M21 15v-3a3 3 0 0 0-3-3h-7v6"/><circle cx="7" cy="11.5" r="2"/>',

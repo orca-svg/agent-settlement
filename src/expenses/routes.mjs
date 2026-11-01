@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { readJson, send, HttpError } from '../http.mjs';
 import { toKrw, won } from '../../public/core.js';
-import { subj, topic } from '../../public/ui.js';
+import { subj, topic, obj } from '../../public/ui.js';
 import { allocateWithGemini } from '../agents/allocate.mjs';
 import { isFlagged } from '../actions.mjs';
 import { validateExpense } from './validate.mjs';
@@ -45,6 +45,22 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     if (!exp || exp.roomId !== room.id) throw new HttpError(404, '지출을 찾을 수 없어요');
     return { room, me, exp };
   }
+
+  // 지출 고치기. 같은 검증을 거쳐 덮어쓴다. 줄·함께한 사람이 바뀌면 메뉴 배분은 지우고 다시 나누게 한다.
+  routes.post('/api/rooms/:id/expenses/:eid', async ({ req, params }) => {
+    const { room, me, exp } = await roomExpense(req, params.id, params.eid);
+    const input = (await readJson(req)).expense ?? {};
+    const checked = validateExpense({ ...input, source: exp.source }, room);
+    if (!checked.ok) throw new HttpError(400, checked.errors.join(' '));
+    const next = checked.expense;
+    const lineKey = (e) => JSON.stringify((e.items ?? []).map((it) => [it.id, it.qty, it.unit]));
+    const keepAlloc = exp.alloc && next.items && lineKey(next) === lineKey(exp) && next.present.join() === exp.present.join();
+    const saved = { ...next, id: exp.id, roomId: room.id, createdBy: exp.createdBy, ...(keepAlloc ? { alloc: exp.alloc } : {}) };
+    await store.put('expenses', saved);
+    await store.put('rooms', { ...room, version: room.version + 1 });
+    await store.appendEvent(room.id, { from: 'system', to: 'all', kind: 'expense_edited', text: `${subj(me.name)} ${obj(`‘${saved.title}’`)} 고쳤어요` });
+    return { expense: saved };
+  });
 
   // 비서들이 공유한 기억(#5의 agents 문서)으로 영수증 줄을 나눈다. 근거 없는 줄은 지출을 남긴 사람에게 묻는다.
   routes.post('/api/rooms/:id/expenses/:eid/allocate', async ({ req, params }) => {
