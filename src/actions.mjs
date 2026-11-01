@@ -10,7 +10,7 @@ export function pendingActions({ expenses }) {
   for (const exp of expenses) {
     for (const it of exp.items ?? []) {
       if (isFlagged(exp.alloc?.[it.id])) {
-        out.push({ type: 'confirm_line', ref: `${exp.id}:${it.id}`, for: exp.createdBy, text: `${topic(`‘${it.name}’`)} 누가 먹었나요?`, expenseId: exp.id, itemId: it.id });
+        out.push({ type: 'confirm_line', ref: `${exp.id}:${it.id}`, for: exp.createdBy, text: `${topic(`‘${it.name}’`)} 어떻게 나눌까요?`, expenseId: exp.id, itemId: it.id });
       }
     }
   }

@@ -41,6 +41,8 @@ test('배분 후 확인 필요 줄마다 confirm_line 액션 이벤트', async (
   assert.deepEqual(asks.map((e) => e.action), [{ type: 'confirm_line', ref: `${eid}:ochazuke`, for: 'cs' }]);
   const forCs = (await (await call(`/api/rooms/${roomId}`, 'cs')).json()).actions;
   assert.deepEqual(forCs.map((a) => a.ref), [`${eid}:ochazuke`]);
+  assert.equal(forCs[0].text, '‘오차즈케’는 어떻게 나눌까요?');
+  assert.equal(asks[0].text, '‘오차즈케’는 어떻게 나눌지 비서들의 기억에 근거가 없어요. 짐작하지 않고 물어볼게요.');
   assert.deepEqual((await (await call(`/api/rooms/${roomId}`, 'me')).json()).actions, []);
 });
 
@@ -67,7 +69,7 @@ test('확정하면 그 줄의 confidence와 관계없이 flagged 아님', async 
   assert.deepEqual((await (await call(`/api/rooms/${roomId}`, 'cs')).json()).actions, []);
   const last = (await store.listEvents(roomId)).at(-1);
   assert.equal(last.kind, 'line_confirmed');
-  assert.equal(last.text, '‘오차즈케’는 영희가 먹은 걸로 확인했어요');
+  assert.equal(last.text, '‘오차즈케’는 영희 몫으로 확인했어요');
 });
 
 test('영수증 줄이 없는 지출은 나눌 수 없어 400', async () => {

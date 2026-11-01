@@ -1,7 +1,7 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, segArrowKeys, topic } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, segArrowKeys, topic, restNote, allocLabel } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { API_BASE } from './api.js';
 
@@ -185,7 +185,7 @@ async function allocateExpense(eid) {
   renderSheet();
   try {
     const out = await api(`/api/rooms/${encodeURIComponent(roomId)}/expenses/${encodeURIComponent(eid)}/allocate`, { method: 'POST', body: {} });
-    state.allocSource[eid] = `${out.source === 'rules' ? '규칙' : out.source.replace(/^gemini-/, 'Gemini ').replace('-flash', ' Flash')} · ${(out.latencyMs / 1000).toFixed(1)}초`;
+    state.allocSource[eid] = allocLabel(out);
     delete state.edits[eid];
   } catch (e) {
     state.formError = e.message;
@@ -240,10 +240,10 @@ function expSheetHtml(exp) {
   const s = shares(exp, room, room.policy);
   const busy = state.allocating === exp.id;
   const lines = exp.items?.length
-    ? `<section class="group"><h3 class="group-label"><span>영수증 ${exp.items.length}줄 · 누가 먹었나</span><span>${esc(state.allocSource[exp.id] ?? (exp.alloc ? '' : '나누기 전'))}</span></h3>
+    ? `<section class="group"><h3 class="group-label"><span>영수증 ${exp.items.length}줄 · 어떻게 나눌까요</span><span>${esc(state.allocSource[exp.id] ?? (exp.alloc ? '' : '나누기 전'))}</span></h3>
         ${busy ? '<div class="next" aria-busy="true" style="margin:0 0 12px"><h2 style="font-size:1.0625rem">비서들이 기억으로 나누는 중이에요</h2><div class="progress"><i></i></div></div>' : ''}
         <div class="list">${linesHtml(exp)}</div>
-        <p class="group-note">${exp.alloc ? '이름을 눌러 고친 뒤 확인하면 그 줄은 더 묻지 않아요.' : '각자의 비서가 공유한 기억으로 줄마다 먹은 사람을 정해요. 근거가 없는 줄은 짐작하지 않고 물어봐요.'}</p>
+        <p class="group-note">${exp.alloc ? '이름을 눌러 고친 뒤 확인하면 그 줄은 더 묻지 않아요.' : '각자의 비서가 공유한 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄은 짐작하지 않고 물어봐요.'}</p>
         <button class="btn ${exp.alloc ? 'secondary' : ''}" style="width:100%;margin-top:10px" data-action="allocate-exp" data-id="${esc(exp.id)}" ${busy ? 'disabled' : ''}>${exp.alloc ? '비서에게 다시 나누기' : '비서에게 나누기 맡기기'}</button></section>`
     : `<p class="how">영수증 줄이 없어서 함께 있던 ${exp.present.length}명이 똑같이 나눠요.</p>`;
   return `<div class="big"><div class="amt">${won(krw)}</div>
@@ -252,10 +252,10 @@ function expSheetHtml(exp) {
     ${exp.hasReceipt ? `<button class="btn secondary" style="width:100%;margin-bottom:20px" data-action="show-receipt" data-id="${esc(exp.id)}">영수증 확인하기</button>` : ''}
     ${state.formError ? `<p class="form-error" role="alert">${esc(state.formError)}</p>` : ''}
     ${lines}
-    <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>${exp.split === 'items' ? '먹은 만큼' : '1/N'}</span></h3>
+    <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>${exp.split === 'items' ? '쓴 만큼' : '1/N'}</span></h3>
       <div class="list">${room.members.filter((m) => s.krwShare[m.uid] !== undefined).map((m) => `<div class="row" style="--inset:52px">${avatar(m.uid)}
-        <span class="grow">${esc(m.name)}${m.uid === exp.payer ? ' <span class="meta">· 낸 사람, 끝전 포함</span>' : ''}</span>
-        <span class="amount num">${won(s.krwShare[m.uid])}</span></div>`).join('')}</div></section>
+        <span class="grow">${esc(m.name)}${m.uid === exp.payer ? ' <span class="meta">· 낸 사람</span>' : ''}</span>
+        <span class="amount num">${won(s.krwShare[m.uid])}</span></div>`).join('')}</div>${restNote(s.rest)}</section>
     <div style="display:grid;gap:8px">
       <button class="btn plain" data-action="edit-exp" data-id="${esc(exp.id)}">지출 고치기</button>
       <button class="btn danger ${state.armedDelete === exp.id ? 'armed' : ''}" data-action="delete-exp" data-id="${esc(exp.id)}">${state.armedDelete === exp.id ? '한 번 더 누르면 지워요' : '지출 지우기'}</button>
@@ -416,7 +416,7 @@ function nextCard() {
     const unsplit = state.data.expenses.find((e) => e.items?.length && !e.alloc);
     if (unsplit) {
       return `<section class="next"><p class="eyebrow">다음에 할 일</p><h2>${esc(topic(`‘${unsplit.title}’`))} 아직 메뉴별로 나누지 않았어요</h2>
-        <p>각자의 비서가 공유한 기억으로 줄마다 먹은 사람을 정해요. 근거가 없는 줄만 사람에게 물어봐요.</p>
+        <p>각자의 비서가 공유한 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄만 사람에게 물어봐요.</p>
         <div class="actions"><button class="btn" data-action="open-exp" data-id="${esc(unsplit.id)}">나누러 가기</button>${add.replace('class="btn"', 'class="btn plain"')}</div></section>`;
     }
     return `<section class="next"><p class="eyebrow">${esc(state.data.me.name)}의 할 일</p><h2>지금은 할 일이 없어요</h2>
@@ -513,7 +513,7 @@ function linesEditHtml(d) {
   return `<section class="group"><h3 class="group-label"><span>영수증 ${d.items.length}줄 · 이름 · 수량 · 단가</span>
       <span id="line-sum">줄 합 ${money(lineSum(d.items), d.currency)}${d.total ? ` · 영수증 합계 ${money(d.total, d.currency)}` : ''}</span></h3>
     <div class="list">${rows}</div>
-    <p class="group-note">메뉴별로 누가 먹었는지는 저장한 뒤 '비서에게 나누기'로 정해요.</p></section>`;
+    <p class="group-note">줄마다 어떻게 나눌지는 저장한 뒤 '비서에게 나누기'로 정해요.</p></section>`;
 }
 
 function renderSheet() {

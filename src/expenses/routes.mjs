@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { readJson, send, HttpError } from '../http.mjs';
 import { toKrw, won } from '../../public/core.js';
-import { subj, topic, obj } from '../../public/ui.js';
+import { subj, topic, obj, whose } from '../../public/ui.js';
 import { MAX_RECEIPT } from '../http.mjs';
 import { allocateWithGemini } from '../agents/allocate.mjs';
 import { isFlagged } from '../actions.mjs';
@@ -11,7 +11,7 @@ import { extractReceipt } from './receipt.mjs';
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
-export function registerExpenseRoutes(routes, { store, gemini, member, overLimit }) {
+export function registerExpenseRoutes(routes, { store, gemini, member, overLimit, allocCache }) {
   routes.post('/api/rooms/:id/expenses', async ({ req, res, params }) => {
     const { room, me } = await member(req, params.id);
     const body = await readJson(req, { limit: MAX_RECEIPT });
@@ -92,7 +92,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     if (overLimit(`uid:${me.uid}`)) throw new HttpError(429, '요청이 너무 많아요. 10분 뒤에 다시 시도해 주세요.');
     const memory = Object.fromEntries(await Promise.all(room.members.map(async (m) => [m.uid, (await store.get('agents', m.uid))?.memory ?? []])));
     const started = Date.now();
-    const out = await allocateWithGemini(gemini, exp, room, memory);
+    const out = await allocateWithGemini(gemini, exp, room, memory, { cache: allocCache });
     const latencyMs = Date.now() - started;
     const alloc = Object.fromEntries(Object.entries(out.alloc).map(([id, a]) => [id, { consumers: a.consumers, confidence: a.confidence, reason: a.reason }]));
     const saved = { ...exp, split: 'items', alloc };
@@ -102,18 +102,20 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     const label = out.source === 'rules' ? '규칙' : out.source;
     await store.appendEvent(room.id, {
       from: exp.createdBy, to: 'all', kind: 'allocated',
-      text: `${exp.title} 영수증 ${exp.items.length}줄을 비서들이 공유한 기억 ${used}개로 나눴어요.`,
-      meta: `allocate · ${label} · ${(latencyMs / 1000).toFixed(1)}초`,
+      text: out.how === 'obvious' ? `${topic(`‘${exp.title}’`)} ${out.why}` : `${exp.title} 영수증 ${exp.items.length}줄을 비서들이 공유한 기억 ${used}개로 나눴어요.`,
+      meta: out.how === 'obvious' ? 'allocate · AI 호출 없음'
+        : out.how === 'cache' ? `allocate · ${label} · 이전 답 재사용`
+        : `allocate · ${label} · ${(latencyMs / 1000).toFixed(1)}초`,
     });
     for (const it of exp.items.filter((x) => isFlagged(alloc[x.id]))) {
       await store.appendEvent(room.id, {
         from: exp.createdBy, to: exp.createdBy, kind: 'confirm_line',
-        text: `${topic(`‘${it.name}’`)} 누가 먹었는지 기억에 없어요. 짐작하지 않고 물어볼게요.`,
+        text: `${topic(`‘${it.name}’`)} 어떻게 나눌지 비서들의 기억에 근거가 없어요. 짐작하지 않고 물어볼게요.`,
         action: { type: 'confirm_line', ref: `${exp.id}:${it.id}`, for: exp.createdBy },
       });
     }
-    console.log(`[allocate] ${out.source} ${latencyMs}ms`);
-    return { expense: saved, source: out.source, latencyMs };
+    console.log(`[allocate] ${out.how} ${out.source} ${latencyMs}ms`);
+    return { expense: saved, source: out.source, how: out.how, latencyMs };
   });
 
   // 줄 하나를 사람이 확정한다. 확정한 줄은 확신도와 관계없이 더 묻지 않는다.
@@ -133,7 +135,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     await store.put('expenses', saved);
     await store.put('rooms', { ...room, version: room.version + 1 });
     const names = consumers.map((u) => room.members.find((m) => m.uid === u)?.name ?? u).join('·');
-    await store.appendEvent(room.id, { from: me.uid, to: 'all', kind: 'line_confirmed', text: `${topic(`‘${item.name}’`)} ${subj(names)} 먹은 걸로 확인했어요` });
+    await store.appendEvent(room.id, { from: me.uid, to: 'all', kind: 'line_confirmed', text: `${topic(`‘${item.name}’`)} ${whose(names)} 몫으로 확인했어요` });
     return { expense: saved };
   });
 }

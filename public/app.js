@@ -2,7 +2,7 @@
 import { DEMO_ROOM as ROOM, POLICIES, DEMO_EXPENSES as EXPENSES, DEMO_MEMORY as MEMORY, MEMORY_LIMIT, DEMO_RULES as RULES, DEMO_DISPUTE as DISPUTE } from './data.js';
 import { won, yen, dayLabel, amountOf, toKrw, shares, ledger, settle, ruleAllocate, presentAfter } from './core.js';
 import { reduceMotion } from './motion.js';
-import { esc, chip, avatarHtml, topic, subj, tile, CHEVRON, CHECK, ARROW, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys } from './ui.js';
+import { esc, chip, avatarHtml, topic, subj, tile, CHEVRON, CHECK, ARROW, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, whose, restNote, allocLabel } from './ui.js';
 import { API_BASE } from './api.js';
 
 const PEOPLE = ROOM.members.map((m) => m.uid);
@@ -51,12 +51,6 @@ const flagged = () => {
 };
 const needsHuman = (t) => t.amount > RULES[t.from].autoAccept && !state.sent[tKey(t)];
 
-function sourceLabel(out) {
-  const sec = out.latencyMs ? ` · ${(out.latencyMs / 1000).toFixed(1)}초` : '';
-  if (!out.source || out.source === 'rules') return `규칙${sec}`;
-  return `${out.source.replace(/^gemini-/, 'Gemini ').replace(/-flash/, ' Flash').replace(/-preview/, ' Preview')}${sec}`;
-}
-
 function log(from, to, text, { meta = '', tag = '' } = {}) {
   state.clock += 6000;
   const t = new Date(state.clock + 9 * 3600_000).toISOString().slice(11, 19);
@@ -104,13 +98,13 @@ async function allocate() {
   }
   busy = null;
   state.allocs.izakaya = out.lines;
-  state.allocSource = sourceLabel(out) + (out.fallback ? ' (서버 응답이 없어 규칙으로)' : '');
+  state.allocSource = allocLabel(out) + (out.fallback ? ' (서버 응답이 없어 규칙으로)' : '');
   state.memoryDirty = false;
   const used = PEOPLE.reduce((n, p) => n + state.memory[p].length, 0);
   log('나', '모두의 비서', `이자카야 영수증 ${izakaya.items.length}줄을 비서들이 공유한 기억 ${used}개로 나눴어요.`, { meta: `allocate · ${state.allocSource}` });
   const ask = flagged();
   if (ask.length) {
-    log('나', '나', `${topic(ask.map((it) => `‘${it.name}’`).join(', '))} 누가 먹었는지 기억에 없어요. 짐작하지 않고 물어볼게요.`, { tag: chip('사람 확인', 'warn') });
+    log('나', '나', `${topic(ask.map((it) => `‘${it.name}’`).join(', '))} 어떻게 나눌지 비서들의 기억에 근거가 없어요. 짐작하지 않고 물어볼게요.`, { tag: chip('사람 확인', 'warn') });
   }
   state.stage = ask.length ? 'review' : 'ready';
   render();
@@ -175,7 +169,7 @@ async function mediate() {
     };
   }
   busy = null;
-  state.proposal = { ...out, label: sourceLabel(out) + (out.fallback ? ' (서버 응답이 없어 규칙으로)' : '') };
+  state.proposal = { ...out, label: allocLabel(out) + (out.fallback ? ' (서버 응답이 없어 규칙으로)' : '') };
   log('중재', '나·민수의 비서', out.summary, { meta: `mediate · ${state.proposal.label}` });
   state.stage = 'proposal';
   render();
@@ -241,7 +235,7 @@ function act(name, d) {
       const a = state.allocs[d.exp][d.line];
       const set = new Set(a.consumers);
       if (set.has(d.p)) set.delete(d.p); else set.add(d.p);
-      if (!set.size) return undefined; // 적어도 한 명은 먹었다
+      if (!set.size) return undefined; // 적어도 한 명의 몫이다
       // 물어본 줄은 '이대로 확인'을 눌러야 확정된다. 고르는 도중의 상태가 청구서로 새지 않게.
       const asked = a.confidence < 0.7 && !a.confirmed;
       Object.assign(a, { consumers: PEOPLE.filter((p) => set.has(p)), reason: '직접 고쳤어요.', edited: true, confirmed: !asked });
@@ -251,7 +245,7 @@ function act(name, d) {
       const a = state.allocs[d.exp][d.line];
       a.confirmed = true;
       const it = byId(d.exp).items.find((x) => x.id === d.line);
-      log('나', '모두의 비서', `${topic(`‘${it.name}’`)} ${subj(a.consumers.join('·'))} 먹은 걸로 확인했어요.`, { meta: `human: 확인${a.edited ? ' (직접 고침)' : ''}` });
+      log('나', '모두의 비서', `${topic(`‘${it.name}’`)} ${whose(a.consumers.join('·'))} 몫으로 확인했어요.`, { meta: `human: 확인${a.edited ? ' (직접 고침)' : ''}` });
       maybeReady();
       return render();
     }
@@ -299,7 +293,7 @@ function nextCard() {
       return progress('비서들이 영수증을 나누는 중이에요', '이자카야 영수증 7줄을 4명의 비서가 공유한 기억과 맞춰 보고 있어요. 보통 10초 안팎이에요.');
     case 'review': {
       const names = flagged().map((it) => `‘${esc(it.name)}’`).join(', ');
-      return card('warn', '확인이 필요해요', `${topic(names)} 누가 먹었나요?`,
+      return card('warn', '확인이 필요해요', `${topic(names)} 어떻게 나눌까요?`,
         '비서들의 기억에 근거가 없는 줄이에요. 그래서 비서가 짐작으로 청구하지 않고 먼저 물어봐요.',
         '<button class="btn" data-action="open-exp" data-id="izakaya">이자카야 영수증 확인하기</button>');
     }
@@ -490,7 +484,7 @@ function linesHtml(exp, alloc, { editable, timed }) {
 function sharesHtml(exp, mode, alloc) {
   const s = shares({ ...exp, split: mode }, ROOM, TRIP.agreedPolicy, alloc);
   return PEOPLE.filter((p) => s.krwShare[p] !== undefined).map((p) => `<div class="row" style="--inset:52px">${avatar(p)}
-      <span class="grow">${esc(p)}${p === exp.payer ? ' <span class="meta">· 낸 사람, 끝전 포함</span>' : ''}</span>
+      <span class="grow">${esc(p)}${p === exp.payer ? ' <span class="meta">· 낸 사람</span>' : ''}</span>
       <span class="amount num">${won(s.krwShare[p])}</span></div>`).join('');
 }
 
@@ -504,7 +498,7 @@ function expenseSheet(id) {
     const editable = ['review', 'ready'].includes(state.stage);
     const note = editable ? '이름을 눌러 고칠 수 있어요. 청구서를 보내기 전까지는 언제든 바꿀 수 있어요.'
       : alloc ? '청구서를 보낸 뒤라 고칠 수 없어요.' : '‘비서에게 나누기 맡기기’를 누르면 비서들이 기억으로 나눠요.';
-    detail = `<section class="group"><h3 class="group-label"><span>영수증 ${e.items.length}줄 · 누가 먹었나</span><span>${esc(state.allocSource || '나누기 전')}</span></h3>
+    detail = `<section class="group"><h3 class="group-label"><span>영수증 ${e.items.length}줄 · 어떻게 나눌까요</span><span>${esc(state.allocSource || '나누기 전')}</span></h3>
       <div class="list">${linesHtml(e, alloc, { editable })}</div>
       <p class="group-note">${note}</p></section>`;
   } else if (e.id === DISPUTE.expense && mode === 'items') {
@@ -520,8 +514,8 @@ function expenseSheet(id) {
         <p class="sub">${yen(amountOf(e))} · ${esc(subj(e.payer))} ${e.method === 'card' ? '카드로' : '현금으로'} 냄 · ${dayLabel(e.date)} ${e.time} · ${esc(e.source)}에서</p></div>
       <p class="how">${esc(policyLabel(TRIP.agreedPolicy))} 정책: ${esc(how)}</p>
       ${detail}
-      <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>${mode === 'items' ? '먹은 만큼' : '1/N'}</span></h3>
-        <div class="list">${sharesHtml(e, mode, alloc)}</div></section>
+      <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>${mode === 'items' ? '쓴 만큼' : '1/N'}</span></h3>
+        <div class="list">${sharesHtml(e, mode, alloc)}</div>${restNote(shares({ ...e, split: mode }, ROOM, TRIP.agreedPolicy, alloc).rest)}</section>
       ${state.stage === 'ready' && id === 'izakaya' ? '<button class="btn" style="width:100%" data-action="send">비서들에게 청구서 보내기</button>' : ''}`,
   };
 }
@@ -683,7 +677,7 @@ async function loadConfig() {
     const res = await fetch(`${API_BASE}/api/config`, { signal: AbortSignal.timeout(8000) });
     config = await res.json();
     if (config.mode === 'gemini') {
-      mode.textContent = `${sourceLabel({ source: config.model })} 연결됨`;
+      mode.textContent = `${allocLabel({ source: config.model })} 연결됨`;
       mode.classList.add('live');
     } else {
       mode.textContent = '규칙 모드';

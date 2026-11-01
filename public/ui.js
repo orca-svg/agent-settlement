@@ -1,5 +1,6 @@
 // 데모 화면과 실제 방 화면이 함께 쓰는 UI 부품. import할 때 DOM을 건드리지 않는다(테스트에서 불러올 수 있게).
 import { Spring, VelocityTracker, project, rubberband, reduceMotion } from './motion.js';
+import { won } from './core.js';
 
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export const chip = (text, cls = '') => `<span class="chip ${cls}">${esc(text)}</span>`;
@@ -14,6 +15,20 @@ const hasBatchim = (w) => {
 export const topic = (w) => `${w}${hasBatchim(w) ? '은' : '는'}`;
 export const subj = (w) => (w === '나' ? '내가' : `${w}${hasBatchim(w) ? '이' : '가'}`);
 export const obj = (w) => `${w}${hasBatchim(w) ? '을' : '를'}`;
+// '○○ 몫'의 앞말. 나 혼자면 '내 몫'.
+export const whose = (w) => (w === '나' ? '내' : w);
+
+// 메뉴 배분을 어떻게 했는지(서버 응답의 how) 영수증 줄 위에 짧게 보인다.
+export function allocLabel({ source, how, latencyMs }) {
+  if (how === 'obvious') return 'AI 없이 나눔';
+  const sec = latencyMs ? ` · ${(latencyMs / 1000).toFixed(1)}초` : '';
+  if (!source || source === 'rules') return `규칙${sec}`;
+  const model = source.replace(/^gemini-/, 'Gemini ').replace(/-flash/, ' Flash').replace(/-preview/, ' Preview');
+  return `${model}${how === 'cache' ? ' · 이전 답 재사용' : sec}`;
+}
+
+// 사람별 몫 아래 한 줄. 원 단위로 나누고 남은 돈이 있을 때만 보인다(core.js의 shares().rest).
+export const restNote = (rest) => (rest ? `<p class="group-note">나누고 남은 ${won(rest)}은 낸 사람 몫에 더했어요.</p>` : '');
 
 const ICONS = {
   stay: '<path d="M3 19V6M3 15h18v4M21 15v-3a3 3 0 0 0-3-3h-7v6"/><circle cx="7" cy="11.5" r="2"/>',

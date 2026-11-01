@@ -1,10 +1,12 @@
-// 영수증 줄을 비서들이 공유한 기억으로 '누가 먹었나' 배분한다. 금액은 계산하지 않는다.
+// 영수증 줄을 비서들이 공유한 기억으로 '누구 몫인가' 배분한다. 금액은 계산하지 않는다.
 import { ruleAllocate } from '../../public/core.js';
 import { memoryText, receiptTable, presentNames, lineSchema, cleanLines } from './lines.mjs';
+import { promptKey } from './cache.mjs';
+import { whose } from '../../public/ui.js';
 
 export function allocatePrompt(exp, room, memoryByUid) {
   const system = [
-    '너는 정산을 돕는 비서들의 공동 작업자다. 영수증의 각 줄을 누가 먹고 마셨는지 추정한다.',
+    '너는 정산을 돕는 비서들의 공동 작업자다. 영수증의 각 줄이 누구 몫인지(누가 먹고 마시거나 쓴 것인지) 추정한다.',
     '근거는 각 사람의 비서가 공유한 기억과 영수증 줄의 정보(항목·수량·태그)뿐이다. 기억에 없는 사실을 지어내지 않는다.',
     '',
     '규칙:',
@@ -26,15 +28,40 @@ export function allocatePrompt(exp, room, memoryByUid) {
   return { system, user, schema };
 }
 
-// → { alloc: Record<itemId, LineAlloc>, source: 모델 이름 | 'rules', error? }
-export async function allocateWithGemini(gemini, exp, room, memoryByUid) {
+// Gemini에게 묻지 않아도 답이 정해지는 영수증이면 { alloc, why }, 아니면 null.
+// 함께 있던 사람이 한 명이거나, 줄이 하나이고 비서 기억이 그 줄에서 누구를 빼거나 고르지 않으면 함께 있던 사람이 똑같이 나눈다.
+export function obviousAlloc(exp, room, memoryByUid) {
+  const present = room.members.map((m) => m.uid).filter((u) => exp.present.includes(u));
+  const all = (reason, confidence) => Object.fromEntries(exp.items.map((it) => [it.id, { consumers: [...present], confidence, reason }]));
+  if (present.length === 1) {
+    const name = room.members.find((m) => m.uid === present[0]).name;
+    return { alloc: all(`함께 있던 사람이 ${name}뿐이에요.`, 1), why: `함께 있던 사람이 ${name}뿐이라 모두 ${whose(name)} 몫으로 했어요.` };
+  }
+  if (exp.items.length === 1 && ruleAllocate(exp, memoryByUid, room.members)[exp.items[0].id].consumers.length === present.length) {
+    return { alloc: all(`줄이 하나라 함께 있던 ${present.length}명이 똑같이 나눠요.`, 0.9), why: `줄이 하나라 함께 있던 ${present.length}명이 똑같이 나눴어요.` };
+  }
+  return null;
+}
+
+// → { alloc: Record<itemId, LineAlloc>, source: 모델 이름 | 'rules', how, why?, error? }
+// how: 'obvious'(묻지 않아도 정해짐) | 'cache'(같은 입력의 이전 답) | 'gemini' | 'rules'(키가 없거나 실패)
+export async function allocateWithGemini(gemini, exp, room, memoryByUid, { cache } = {}) {
+  const obvious = obviousAlloc(exp, room, memoryByUid);
+  if (obvious) return { ...obvious, source: 'rules', how: 'obvious' };
   const fallback = ruleAllocate(exp, memoryByUid, room.members);
-  if (!gemini) return { alloc: fallback, source: 'rules' };
+  if (!gemini) return { alloc: fallback, source: 'rules', how: 'rules' };
+  const prompt = allocatePrompt(exp, room, memoryByUid);
+  const key = cache && promptKey(gemini.model, prompt);
   try {
-    const raw = await gemini.generate(allocatePrompt(exp, room, memoryByUid));
-    return { alloc: cleanLines(exp, room.members, raw.lines, fallback, () => exp.present), source: gemini.model };
+    let raw = key && cache.get(key);
+    const how = raw ? 'cache' : 'gemini';
+    if (!raw) {
+      raw = await gemini.generate(prompt);
+      if (key && Array.isArray(raw?.lines) && raw.lines.length) cache.set(key, raw);
+    }
+    return { alloc: cleanLines(exp, room.members, raw.lines, fallback, () => exp.present), source: gemini.model, how };
   } catch (e) {
     console.warn('[allocate] Gemini 실패, 규칙으로 대신:', e.message);
-    return { alloc: fallback, source: 'rules', error: e.message };
+    return { alloc: fallback, source: 'rules', how: 'rules', error: e.message };
   }
 }
