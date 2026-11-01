@@ -7,7 +7,7 @@ import { API_BASE } from './api.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
-const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, expId: null, edits: {}, allocating: null, allocSource: {} };
+const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {} };
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
@@ -92,6 +92,7 @@ async function saveExpense() {
     await api(path, {
       method: 'POST',
       body: {
+        ...(!state.editing && state.addMode === 'photo' && d.items && state.lastImage ? { receipt: state.lastImage } : {}),
         expense: state.addMode === 'photo' && d.items
           ? { ...d, amount: undefined, source: 'receipt' }
           : { ...d, items: undefined, amount: Number(String(d.amount).replace(/[^\d]/g, '')) },
@@ -139,6 +140,7 @@ async function readReceipt(file) {
   renderSheet();
   try {
     const image = await downscale(file);
+    state.lastImage = image;
     const { draft } = await api(`/api/rooms/${encodeURIComponent(roomId)}/receipts/extract`, { method: 'POST', body: { image }, signal: controller.signal });
     applyReceipt(draft);
   } catch (e) {
@@ -247,19 +249,65 @@ function expSheetHtml(exp) {
   return `<div class="big"><div class="amt">${won(krw)}</div>
       <p class="sub">${money(amountOf(exp), exp.currency)} · ${esc(nameOf(exp.payer))} ${exp.method === 'card' ? '카드' : '현금'} · ${dayLabel(exp.date)} ${esc(exp.time)}</p></div>
     <p class="how">${esc(how)}</p>
+    ${exp.hasReceipt ? `<button class="btn secondary" style="width:100%;margin-bottom:20px" data-action="show-receipt" data-id="${esc(exp.id)}">영수증 확인하기</button>` : ''}
     ${state.formError ? `<p class="form-error" role="alert">${esc(state.formError)}</p>` : ''}
     ${lines}
     <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>${exp.split === 'items' ? '먹은 만큼' : '1/N'}</span></h3>
       <div class="list">${room.members.filter((m) => s.krwShare[m.uid] !== undefined).map((m) => `<div class="row" style="--inset:52px">${avatar(m.uid)}
         <span class="grow">${esc(m.name)}${m.uid === exp.payer ? ' <span class="meta">· 낸 사람, 끝전 포함</span>' : ''}</span>
         <span class="amount num">${won(s.krwShare[m.uid])}</span></div>`).join('')}</div></section>
-    <button class="btn plain" style="width:100%" data-action="edit-exp" data-id="${esc(exp.id)}">지출 고치기</button>`;
+    <div style="display:grid;gap:8px">
+      <button class="btn plain" data-action="edit-exp" data-id="${esc(exp.id)}">지출 고치기</button>
+      <button class="btn danger ${state.armedDelete === exp.id ? 'armed' : ''}" data-action="delete-exp" data-id="${esc(exp.id)}">${state.armedDelete === exp.id ? '한 번 더 누르면 지워요' : '지출 지우기'}</button>
+    </div>`;
+}
+
+// ---------------------------------------------------------------- 영수증 사진 모달
+async function showReceipt(eid) {
+  try {
+    const { mimeType, data } = await api(`/api/rooms/${encodeURIComponent(roomId)}/expenses/${encodeURIComponent(eid)}/receipt`);
+    $('#photo-img').src = `data:${mimeType};base64,${data}`;
+    const modal = $('#photo-modal');
+    modal.hidden = false;
+    requestAnimationFrame(() => modal.classList.add('shown'));
+    modal.querySelector('button').focus({ preventScroll: true });
+  } catch (e) {
+    state.formError = e.message;
+    renderSheet();
+  }
+}
+function closePhoto() {
+  const modal = $('#photo-modal');
+  if (modal.hidden) return;
+  modal.classList.remove('shown');
+  setTimeout(() => { modal.hidden = true; $('#photo-img').removeAttribute('src'); }, 200);
 }
 
 const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit) || 0), 0);
 
 async function act(name, d) {
-  if (name === 'edit-exp') {
+  if (name === 'show-receipt') {
+    showReceipt(d.id);
+  } else if (name === 'close-photo') {
+    closePhoto();
+  } else if (name === 'delete-exp') {
+    // 되돌릴 수 없는 동작이라 한 번 더 눌러야 지운다(3초 안에)
+    if (state.armedDelete !== d.id) {
+      state.armedDelete = d.id;
+      renderSheet();
+      setTimeout(() => { if (state.armedDelete === d.id) { state.armedDelete = null; renderSheet(); } }, 3000);
+      return;
+    }
+    state.armedDelete = null;
+    try {
+      await api(`/api/rooms/${encodeURIComponent(roomId)}/expenses/${encodeURIComponent(d.id)}/delete`, { method: 'POST', body: {} });
+      sheet.close();
+    } catch (e) {
+      state.formError = e.message;
+      renderSheet();
+    }
+    await load();
+  } else if (name === 'edit-exp') {
     const exp = state.data.expenses.find((e) => e.id === d.id);
     state.draft = {
       title: exp.title, amount: exp.amount != null ? String(exp.amount) : '', currency: exp.currency, payer: exp.payer,
@@ -274,6 +322,7 @@ async function act(name, d) {
     renderSheet();
   } else if (name === 'add-expense') {
     state.editing = null;
+    state.lastImage = null;
     state.draft = newDraft();
     state.addMode = d.mode === 'photo' ? 'photo' : 'manual';
     state.readNotes = [];
@@ -532,7 +581,10 @@ document.addEventListener('click', (e) => {
   act(el.dataset.action, el.dataset);
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') sheet.close();
+  if (e.key === 'Escape') {
+    if (!$('#photo-modal').hidden) closePhoto();
+    else sheet.close();
+  }
   else segArrowKeys(e, (btn) => act(btn.dataset.action, btn.dataset));
 });
 // 입력칸은 다시 그리지 않고 값만 기억한다(타이핑 중 초점을 잃지 않게)

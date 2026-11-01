@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readJson, send, HttpError } from '../http.mjs';
 import { toKrw, won } from '../../public/core.js';
 import { subj, topic, obj } from '../../public/ui.js';
+import { MAX_RECEIPT } from '../http.mjs';
 import { allocateWithGemini } from '../agents/allocate.mjs';
 import { isFlagged } from '../actions.mjs';
 import { validateExpense } from './validate.mjs';
@@ -13,10 +14,14 @@ const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 export function registerExpenseRoutes(routes, { store, gemini, member, overLimit }) {
   routes.post('/api/rooms/:id/expenses', async ({ req, res, params }) => {
     const { room, me } = await member(req, params.id);
-    const checked = validateExpense((await readJson(req)).expense, room);
+    const body = await readJson(req, { limit: MAX_RECEIPT });
+    const checked = validateExpense(body.expense, room);
     if (!checked.ok) throw new HttpError(400, checked.errors.join(' '));
-    const expense = { ...checked.expense, id: `${room.id}-${randomUUID().slice(0, 8)}`, roomId: room.id, createdBy: me.uid };
+    const photo = checked.expense.source === 'receipt' && IMAGE_TYPES.includes(body.receipt?.mimeType) && typeof body.receipt?.data === 'string' && body.receipt.data ? body.receipt : null;
+    const expense = { ...checked.expense, id: `${room.id}-${randomUUID().slice(0, 8)}`, roomId: room.id, createdBy: me.uid, ...(photo ? { hasReceipt: true } : {}) };
     await store.put('expenses', expense);
+    // 영수증 사진은 지출과 따로 둔다(목록을 불러올 때마다 사진을 싣지 않도록). #3에서 Firebase Storage로 옮긴다
+    if (photo) await store.put('receipts', { id: expense.id, roomId: room.id, mimeType: photo.mimeType, data: photo.data });
     await store.put('rooms', { ...room, version: room.version + 1 });
     await store.appendEvent(room.id, {
       from: 'system',
@@ -31,7 +36,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
   routes.post('/api/rooms/:id/receipts/extract', async ({ req, params }) => {
     const { room, me } = await member(req, params.id);
     if (overLimit(`uid:${me.uid}`)) throw new HttpError(429, '요청이 너무 많아요. 10분 뒤에 다시 시도해 주세요.');
-    const { image } = await readJson(req, { limit: 2_100_000 });
+    const { image } = await readJson(req, { limit: MAX_RECEIPT });
     if (!IMAGE_TYPES.includes(image?.mimeType) || typeof image?.data !== 'string' || !image.data) throw new HttpError(400, '사진 파일이 아니에요');
     const started = Date.now();
     const draft = await extractReceipt(gemini, { image: { mimeType: image.mimeType, data: image.data }, room });
@@ -55,11 +60,29 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     const next = checked.expense;
     const lineKey = (e) => JSON.stringify((e.items ?? []).map((it) => [it.id, it.qty, it.unit]));
     const keepAlloc = exp.alloc && next.items && lineKey(next) === lineKey(exp) && next.present.join() === exp.present.join();
-    const saved = { ...next, id: exp.id, roomId: room.id, createdBy: exp.createdBy, ...(keepAlloc ? { alloc: exp.alloc } : {}) };
+    const saved = { ...next, id: exp.id, roomId: room.id, createdBy: exp.createdBy, ...(exp.hasReceipt ? { hasReceipt: true } : {}), ...(keepAlloc ? { alloc: exp.alloc } : {}) };
     await store.put('expenses', saved);
     await store.put('rooms', { ...room, version: room.version + 1 });
     await store.appendEvent(room.id, { from: 'system', to: 'all', kind: 'expense_edited', text: `${subj(me.name)} ${obj(`‘${saved.title}’`)} 고쳤어요` });
     return { expense: saved };
+  });
+
+  // 지출 지우기. 영수증 사진도 함께 지운다
+  routes.post('/api/rooms/:id/expenses/:eid/delete', async ({ req, params }) => {
+    const { room, me, exp } = await roomExpense(req, params.id, params.eid);
+    await store.delete('expenses', exp.id);
+    await store.delete('receipts', exp.id);
+    await store.put('rooms', { ...room, version: room.version + 1 });
+    await store.appendEvent(room.id, { from: 'system', to: 'all', kind: 'expense_deleted', text: `${subj(me.name)} ${obj(`‘${exp.title}’`)} 지웠어요` });
+    return { deleted: exp.id };
+  });
+
+  // 영수증 사진 보기(방 멤버만)
+  routes.get('/api/rooms/:id/expenses/:eid/receipt', async ({ req, params }) => {
+    const { exp } = await roomExpense(req, params.id, params.eid);
+    const photo = await store.get('receipts', exp.id);
+    if (!photo) throw new HttpError(404, '저장된 영수증 사진이 없어요');
+    return { mimeType: photo.mimeType, data: photo.data };
   });
 
   // 비서들이 공유한 기억(#5의 agents 문서)으로 영수증 줄을 나눈다. 근거 없는 줄은 지출을 남긴 사람에게 묻는다.

@@ -23,6 +23,10 @@ export class MemoryStore {
     return structuredClone(doc);
   }
 
+  async delete(col, id) {
+    this.#col(col).delete(id);
+  }
+
   // where는 필드 동등 비교만 한다(Firestore의 == 조건과 같은 범위)
   async list(col, where = {}) {
     const conds = Object.entries(where);

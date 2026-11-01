@@ -45,6 +45,14 @@
     </section>
   </div>
 
+  <div class="photo-modal" id="photo-modal" role="dialog" aria-modal="true" aria-label="영수증 사진" hidden>
+    <div class="photo-scrim" data-action="close-photo"></div>
+    <figure>
+      <img id="photo-img" alt="저장된 영수증 사진">
+      <figcaption><button class="btn plain sm" type="button" data-action="close-photo">닫기</button></figcaption>
+    </figure>
+  </div>
+
   <script type="module" src="room.js"></script>
 </body>
 </html>

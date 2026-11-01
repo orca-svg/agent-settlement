@@ -48,6 +48,7 @@ API 서버 (server.mjs → src/app.mjs)
 | --- | --- |
 | `get(col, id)` | 문서 하나, 없으면 `null` |
 | `put(col, doc)` | `doc.id`로 저장(덮어쓰기) |
+| `delete(col, id)` | 문서 지우기(없어도 오류 아님) |
 | `list(col, where = {})` | 필드 동등 비교로 거르기(Firestore의 `==`와 같은 범위) |
 | `appendEvent(roomId, ev)` | 비서 기록 추가. `seq`(방마다 1부터)와 `at`(ISO 시각)을 채워서 돌려줌 |
 | `listEvents(roomId, afterSeq = 0)` | `seq > afterSeq`인 기록 |
@@ -64,6 +65,7 @@ API 서버 (server.mjs → src/app.mjs)
 | `invoices` | `Invoice` | `rooms/{roomId}/invoices/{invoiceId}` |
 | `disputes` | `Dispute` | `rooms/{roomId}/disputes/{disputeId}` |
 | `transfers` | `Transfer` | `rooms/{roomId}/transfers/{transferId}` |
+| `receipts` | 영수증 사진 `{ id(=지출 id), roomId, mimeType, data }` | Firebase Storage `receipts/{roomId}/{expenseId}.jpg` 권장 |
 | 비서 기록 | `AgentEvent` | `rooms/{roomId}/events/{seq}` |
 
 ## 도메인 타입 요약
@@ -91,7 +93,9 @@ API 서버 (server.mjs → src/app.mjs)
 | POST | `/api/dev/seed` | 개발용 데모 방 만들기(`DEV_SEED=1`일 때만) |
 | GET | `/api/rooms/:id` | 방, 지출, 청구서, 이의, 송금, 사람별 차액, 그리고 **내가 처리할 일(`actions`)** |
 | GET | `/api/rooms/:id/events?after=n` | 비서 기록 |
-| POST | `/api/rooms/:id/expenses` | 지출 남기기(직접 입력, 또는 확인을 마친 영수증 줄). 방 `version`이 올라가요 |
+| POST | `/api/rooms/:id/expenses` | 지출 남기기(직접 입력, 또는 확인을 마친 영수증 줄). 영수증 지출은 `receipt: { mimeType, data }`로 줄인 사진을 함께 저장해요. 방 `version`이 올라가요 |
+| POST | `/api/rooms/:id/expenses/:eid/delete` | 지출 지우기. 영수증 사진도 함께 지워요 |
+| GET | `/api/rooms/:id/expenses/:eid/receipt` | 저장된 영수증 사진 `{ mimeType, data }`(방 멤버만) |
 | POST | `/api/rooms/:id/expenses/:eid` | 지출 고치기. 같은 검증을 거쳐 덮어써요. 영수증 줄이나 함께한 사람이 바뀌면 메뉴 배분을 지워 다시 나누게 해요 |
 | POST | `/api/rooms/:id/receipts/extract` | 영수증 사진(긴 변 1600px JPEG, base64) → 초안. **저장하지 않아요** |
 | POST | `/api/rooms/:id/expenses/:eid/allocate` | 비서들이 공유한 기억으로 영수증 줄 배분. 근거 없는 줄은 지출을 남긴 사람에게 물어요 |
