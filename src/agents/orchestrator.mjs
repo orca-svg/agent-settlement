@@ -8,7 +8,7 @@ import { HttpError } from '../http.mjs';
 import { isFlagged } from '../actions.mjs';
 import { evaluateInvoice, nextSendAt } from './rules.mjs';
 import { tossSendLink, payoutFallback } from '../payments/toss.mjs';
-import { signQrToken } from '../payments/qr.mjs';
+import { signQrToken, QR_TTL_MS } from '../payments/qr.mjs';
 import { mediateWithGemini } from './mediate.mjs';
 
 const OPEN = ['open', 'proposed'];
@@ -193,9 +193,8 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
   // ---------------------------------------------------------------- 송금
   // 받는 계좌가 있으면 토스 링크를 지금 만들어 둔다. 브라우저는 사용자 제스처 안에서만 앱을 열어 주므로, 승인 순간에는 서버를 기다리지 않는다
   const paymentOf = (payout, amount) => {
-    if (!payout) return { link: null, fallback: null, qrToken: null };
-    const link = tossSendLink({ ...payout, amount });
-    return { link, fallback: payoutFallback(payout, amount), qrToken: signQrToken(link, { now: () => clock().getTime() }) };
+    if (!payout) return { link: null, fallback: null };
+    return { link: tossSendLink({ ...payout, amount }), fallback: payoutFallback(payout, amount) };
   };
   const whenText = (iso) => {
     const kst = new Date(new Date(iso).getTime() + 9 * 3600_000).toISOString();
@@ -271,6 +270,16 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return saved;
   }
 
+  // 데스크톱 QR(#8). 토큰은 수명이 짧아서, 송금이 생길 때 미리 만들어 두면 월급날처럼 며칠 뒤 열었을 때 이미 죽어 있다.
+  // 그래서 보내는 사람이 송금 화면을 열 때마다 새로 만든다. 화면은 expiresAt 전에 다시 부른다
+  async function qrFor(roomId, tid, actorUid) {
+    const { t } = await transferOf(roomId, tid, actorUid, 'from');
+    if (!['scheduled', 'due', 'opened'].includes(t.status)) throw new HttpError(409, '이미 보냈거나 바뀐 송금이에요');
+    if (!t.link) throw new HttpError(409, '받을 계좌가 아직 없어요');
+    const now = clock().getTime();
+    return { qrToken: signQrToken(t.link, { now: () => now }), expiresAt: new Date(now + QR_TTL_MS).toISOString() };
+  }
+
   async function markSent(roomId, tid, actorUid) {
     const { t, name } = await transferOf(roomId, tid, actorUid, 'from');
     if (!['scheduled', 'due', 'opened'].includes(t.status)) throw new HttpError(409, '이미 보냈거나 바뀐 송금이에요');
@@ -318,5 +327,5 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return { due, reminded };
   }
 
-  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers, setPayout, approveTransfer, markSent, confirmReceipt, tick };
+  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers, setPayout, approveTransfer, qrFor, markSent, confirmReceipt, tick };
 }

@@ -1,7 +1,7 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, topic, subj, whose, restNote, allocLabel, groupRuns, logItemHtml, qrImageUrl } from '../public/ui.js';
+import { esc, topic, subj, whose, restNote, allocLabel, groupRuns, logItemHtml, qrImageUrl, qrIsFresh } from '../public/ui.js';
 
 test('조사: 받침에 따라 은/는, 이/가, 나는 내가', () => {
   assert.equal(topic('오차즈케'), '오차즈케는');
@@ -52,6 +52,15 @@ test('qrImageUrl: 데이터를 인코딩해 QR 이미지 주소를 만든다', (
     qrImageUrl('supertoss://send?bank=토스뱅크&accountNo=1&amount=1'),
     'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=supertoss%3A%2F%2Fsend%3Fbank%3D%ED%86%A0%EC%8A%A4%EB%B1%85%ED%81%AC%26accountNo%3D1%26amount%3D1',
   );
+});
+
+test('qrIsFresh: 같은 송금의 QR 토큰이 1분 넘게 남았을 때만 그대로 쓴다', () => {
+  const now = Date.parse('2026-11-25T00:00:00Z');
+  const qr = { id: 't1', token: 'x', expiresAt: '2026-11-25T00:15:00.000Z' };
+  assert.equal(qrIsFresh(qr, 't1', now), true);
+  assert.equal(qrIsFresh(qr, 't2', now), false); // 다른 송금의 토큰
+  assert.equal(qrIsFresh(qr, 't1', Date.parse('2026-11-25T00:14:30Z')), false); // 30초 남음 → 새로 받는다
+  assert.equal(qrIsFresh(null, 't1', now), false);
 });
 
 test('qrImageUrl: 빈 값이면 null', () => {

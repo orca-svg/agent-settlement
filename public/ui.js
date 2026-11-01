@@ -52,6 +52,12 @@ export function qrImageUrl(data, size = 220) {
   return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(data)}`;
 }
 
+// 가지고 있는 QR 토큰({ id: 송금 id, token, expiresAt })을 이 송금에 그대로 써도 되는지(#8).
+// 만료까지 marginMs(기본 1분)보다 적게 남았으면 false다. 휴대폰을 꺼내 찍는 사이에 만료되지 않게 미리 새로 받는다.
+export function qrIsFresh(qr, transferId, now = Date.now(), marginMs = 60_000) {
+  return Boolean(qr) && qr.id === transferId && Date.parse(qr.expiresAt) - marginMs > now;
+}
+
 // 비서끼리 기록 한 줄
 export const logItemHtml = ({ avatar, who, time, text, meta = '', tagHtml = '', enter = false, unread = false, extraHtml = '' }) => `<li class="${enter ? 'enter' : ''}${unread ? ' unread' : ''}">
     ${avatar}

@@ -4,7 +4,8 @@
 // 토큰 자체에 링크를 담아 서명만 하면(이전 방식) base64만 풀어도 계좌가 보이므로 쓰지 않는다.
 import crypto from 'node:crypto';
 
-const TTL_MS = 15 * 60_000;
+// 외부 QR 이미지 서비스가 토큰 주소를 보므로 짧게 둔다. 화면이 만료 전에 새로 받는다(public/ui.js qrIsFresh)
+export const QR_TTL_MS = 15 * 60_000;
 const tokens = new Map(); // token → { link, exp }
 
 function sweep(now) {
@@ -14,7 +15,7 @@ function sweep(now) {
 export function signQrToken(link, { now = Date.now } = {}) {
   sweep(now());
   const token = crypto.randomBytes(16).toString('base64url');
-  tokens.set(token, { link, exp: now() + TTL_MS });
+  tokens.set(token, { link, exp: now() + QR_TTL_MS });
   return token;
 }
 
