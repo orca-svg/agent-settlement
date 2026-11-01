@@ -391,6 +391,31 @@ button.row:active { background: var(--fill); }
 }
 .quota { font-size: 0.75rem; color: var(--label-3); }
 
+/* ---------- 입력 폼: 인셋 목록 안의 한 줄 입력 ---------- */
+.field { cursor: text; }
+.field input, .field select {
+  font: inherit;
+  border: 0;
+  background: none;
+  color: var(--label);
+  text-align: right;
+  min-width: 0;
+  flex: 1;
+  padding: 4px 0;
+  outline: none;
+}
+.field select { text-align-last: right; cursor: pointer; }
+.field input::placeholder { color: var(--label-3); }
+.form-error {
+  font-size: 0.875rem;
+  color: var(--orange);
+  background: var(--orange-soft);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  letter-spacing: 0;
+}
+
 /* ---------- 비서끼리 채널 ---------- */
 .channel {
   position: sticky;

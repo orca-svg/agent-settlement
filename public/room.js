@@ -1,13 +1,13 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, logItemHtml, mountSegs, resetSegs, segArrowKeys } from './ui.js';
+import { esc, chip, avatarHtml, tile, logItemHtml, createSheet, mountSegs, resetSegs, segArrowKeys } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { API_BASE } from './api.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
-const state = { data: null, events: [], error: null, renderedLog: 0 };
+const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false };
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
@@ -42,8 +42,84 @@ function watch() {
   });
 }
 
+// ---------------------------------------------------------------- 지출 추가(직접 입력)
+const LAST_KEY = `agent-settlement.last-expense.${roomId}`;
+const kstNow = () => new Date(Date.now() + 9 * 3600_000).toISOString();
+function lastUsed() {
+  try {
+    return JSON.parse(localStorage.getItem(LAST_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+function remember(d) {
+  try {
+    localStorage.setItem(LAST_KEY, JSON.stringify({ currency: d.currency, payer: d.payer, method: d.method, present: d.present }));
+  } catch {}
+}
+// 외화는 환율이 있는 날짜만 고를 수 있다
+const fxDates = () => Object.keys(state.data.room.fx?.base ?? {}).sort();
+function fitDate(d) {
+  if (d.currency !== 'KRW' && !fxDates().includes(d.date)) d.date = fxDates()[0];
+  return d;
+}
+function newDraft() {
+  const { room, me } = state.data;
+  const uids = room.members.map((m) => m.uid);
+  const last = lastUsed();
+  const currencies = ['KRW', room.fx?.currency].filter(Boolean);
+  return fitDate({
+    title: '',
+    amount: '',
+    currency: currencies.includes(last.currency) ? last.currency : 'KRW',
+    payer: uids.includes(last.payer) ? last.payer : me.uid,
+    method: last.method === 'cash' ? 'cash' : 'card',
+    present: Array.isArray(last.present) && last.present.every((u) => uids.includes(u)) && last.present.length ? last.present : uids,
+    date: kstNow().slice(0, 10),
+    time: kstNow().slice(11, 16),
+  });
+}
+
+async function saveExpense() {
+  const d = state.draft;
+  state.saving = true;
+  state.formError = '';
+  renderSheet();
+  try {
+    await api(`/api/rooms/${encodeURIComponent(roomId)}/expenses`, {
+      method: 'POST',
+      body: { expense: { ...d, amount: Number(String(d.amount).replace(/[^\d]/g, '')) } },
+    });
+    remember(d);
+    sheet.close();
+    await load();
+  } catch (e) {
+    state.formError = e.message;
+  }
+  state.saving = false;
+  renderSheet();
+}
+
 async function act(name, d) {
-  if (name === 'who') {
+  if (name === 'add-expense') {
+    state.draft = newDraft();
+    state.formError = '';
+    state.sheet = 'add';
+    sheet.open(renderSheet);
+  } else if (name === 'close-sheet') {
+    sheet.close();
+  } else if (name === 'draft-set') {
+    state.draft[d.field] = d.id;
+    fitDate(state.draft);
+    renderSheet();
+  } else if (name === 'draft-present') {
+    const set = new Set(state.draft.present);
+    if (set.has(d.id)) set.delete(d.id); else set.add(d.id);
+    if (set.size) state.draft.present = members().map((m) => m.uid).filter((u) => set.has(u));
+    renderSheet();
+  } else if (name === 'save-expense') {
+    if (!state.saving) saveExpense();
+  } else if (name === 'who') {
     setCurrentUid(d.id);
     await load();
     watch();
@@ -101,7 +177,7 @@ function expensesSection() {
         <span class="meta" style="display:block">${esc(nameOf(e.payer))} · ${e.method === 'card' ? '카드' : '현금'} ${money(amountOf(e), e.currency)} · ${dayLabel(e.date)} ${esc(e.time)}</span></span>
       <span class="end"><span class="amount">${won(toKrw(e, room, room.policy).krw)}</span></span>
     </div>`).join('');
-  return `<section class="group"><h2 class="group-label"><span>지출 ${expenses.length}건</span></h2>
+  return `<section class="group"><h2 class="group-label"><span>지출 ${expenses.length}건</span><button class="text-btn" data-action="add-expense">지출 추가</button></h2>
     <div class="list">${rows || '<p class="empty">아직 지출이 없어요.</p>'}</div></section>`;
 }
 
@@ -117,6 +193,41 @@ function transfersSection() {
       <span class="end"><span class="amount num">${won(t.amount)}</span></span></div>`).join('');
   return `<section class="group"><h2 class="group-label"><span>누가 누구에게</span><span>송금 ${list.length}번</span></h2>
     <div class="list">${rows || '<p class="empty">주고받을 돈이 없어요.</p>'}</div></section>`;
+}
+
+const seg = (key, field, options, value) => `<div class="seg" role="radiogroup" data-seg="${key}"><span class="seg-thumb"></span>
+  ${options.map(([id, label]) => `<button type="button" role="radio" aria-checked="${id === value}" data-action="draft-set" data-field="${field}" data-id="${esc(id)}">${esc(label)}</button>`).join('')}</div>`;
+
+function addSheetHtml() {
+  const d = state.draft;
+  const { room } = state.data;
+  const currencies = ['KRW', room.fx?.currency].filter(Boolean);
+  const dateField = d.currency === 'KRW'
+    ? `<input type="date" data-field="date" value="${esc(d.date)}" aria-label="날짜">`
+    : `<select data-field="date" aria-label="날짜">${fxDates().map((x) => `<option value="${x}" ${x === d.date ? 'selected' : ''}>${dayLabel(x)}</option>`).join('')}</select>`;
+  const picks = room.members.map((m) => `<button type="button" class="pick" aria-pressed="${d.present.includes(m.uid)}" data-action="draft-present" data-id="${esc(m.uid)}">${avatar(m.uid)}${esc(m.name)}</button>`).join('');
+  return `<section class="group"><div class="list">
+      <label class="row field"><span class="grow">제목</span><input data-field="title" value="${esc(d.title)}" placeholder="예: 편의점 간식" maxlength="40"></label>
+      <label class="row field"><span class="grow">금액</span><input data-field="amount" value="${esc(d.amount)}" inputmode="numeric" placeholder="0" aria-label="금액"></label>
+    </div></section>
+    ${currencies.length > 1 ? `<section class="group"><h3 class="group-label"><span>통화</span>${d.currency !== 'KRW' ? '<span>환율이 있는 날짜만 고를 수 있어요</span>' : ''}</h3>${seg('cur', 'currency', currencies.map((c) => [c, c === 'KRW' ? '원' : c === 'JPY' ? '엔' : c]), d.currency)}</section>` : ''}
+    <section class="group"><h3 class="group-label"><span>낸 사람</span></h3>${seg('payer', 'payer', room.members.map((m) => [m.uid, m.name]), d.payer)}</section>
+    <section class="group"><h3 class="group-label"><span>결제 수단</span></h3>${seg('method', 'method', [['card', '카드'], ['cash', '현금']], d.method)}</section>
+    <section class="group"><h3 class="group-label"><span>함께한 사람</span><span>${d.present.length}명이 나눠요</span></h3><div class="picks">${picks}</div></section>
+    <section class="group"><div class="list"><div class="row field"><span class="grow">날짜</span>${dateField}</div>
+      <label class="row field"><span class="grow">시각</span><input type="time" data-field="time" value="${esc(d.time)}" aria-label="시각"></label></div></section>
+    ${state.formError ? `<p class="form-error" role="alert">${esc(state.formError)}</p>` : ''}
+    <button class="btn" style="width:100%" data-action="save-expense" ${state.saving ? 'disabled' : ''}>${state.saving ? '남기는 중…' : '지출 남기기'}</button>`;
+}
+
+function renderSheet() {
+  if (!state.sheet || !state.data) return;
+  const body = $('#sheet-body');
+  const top = body.scrollTop;
+  $('#sheet-title').textContent = '지출 남기기';
+  body.innerHTML = addSheetHtml();
+  body.scrollTop = top;
+  mountSegs(body);
 }
 
 function renderChannel() {
@@ -170,7 +281,20 @@ document.addEventListener('click', (e) => {
   if (!el || el.disabled) return;
   act(el.dataset.action, el.dataset);
 });
-document.addEventListener('keydown', (e) => segArrowKeys(e, (btn) => act(btn.dataset.action, btn.dataset)));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') sheet.close();
+  else segArrowKeys(e, (btn) => act(btn.dataset.action, btn.dataset));
+});
+// 입력칸은 다시 그리지 않고 값만 기억한다(타이핑 중 초점을 잃지 않게)
+document.addEventListener('input', (e) => {
+  const f = e.target.dataset?.field;
+  if (f && state.draft) state.draft[f] = e.target.value;
+});
+document.addEventListener('change', (e) => {
+  const f = e.target.dataset?.field;
+  if (f && state.draft) state.draft[f] = e.target.value;
+});
+const sheet = createSheet($('#sheet-root'), { onClosed: () => { state.sheet = null; } });
 const nav = $('#nav');
 addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 56), { passive: true });
 addEventListener('resize', () => {

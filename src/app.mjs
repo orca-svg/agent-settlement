@@ -9,6 +9,7 @@ import { ledger } from '../public/core.js';
 import { router, readJson, send, allowCors, createRateLimiter, clientIp, HttpError } from './http.mjs';
 import { identify } from './identity.mjs';
 import { seedDemoRoom } from './dev/seed.mjs';
+import { registerExpenseRoutes } from './expenses/routes.mjs';
 import { allocateWithGemini } from './agents/allocate.mjs';
 import { mediateWithGemini } from './agents/mediate.mjs';
 
@@ -119,6 +120,8 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     await member(req, params.id);
     return { events: await store.listEvents(params.id, Number(url.searchParams.get('after') || 0)) };
   });
+
+  registerExpenseRoutes(routes, { ...ctx, member });
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
