@@ -1,14 +1,14 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, ARROW, qrImageUrl } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, ARROW, qrImageUrl, qrIsFresh } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
-const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null };
+const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null };
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
@@ -731,6 +731,47 @@ const copyRow = (label, value, key) => `<div class="row"><span class="grow"><spa
     <span class="title num" style="user-select:all">${esc(value)}</span></span>
     <button type="button" class="btn sm secondary" data-action="copy" data-text="${esc(value)}" data-key="${key}">${state.copied === key ? '복사했어요' : '복사'}</button></div>`;
 
+// 데스크톱 QR(#8). 토큰은 수명이 15분이라, 송금 화면을 열 때마다 서버에서 새로 받는다.
+// QR에는 계좌·금액이 든 t.link를 바로 담지 않는다. 우리 서버의 짧은 수명 토큰(/api/qr/:token)을 담아,
+// QR 이미지를 만들어 주는 외부 서비스는 그 토큰만 보고 실제 계좌 정보는 보지 못하게 한다.
+const isDesktop = () => matchMedia('(min-width: 640px)').matches; // style.css의 .qr-desktop 기준과 같게
+let qrTimer = 0;
+let qrAsked = { id: null, at: 0 };
+
+async function refreshQr(tid) {
+  // 서버가 실패하거나 컴퓨터 시계가 어긋나 늘 '만료'로 보여도 계속 부르지 않게, 같은 송금은 30초에 한 번만 요청한다
+  if (qrAsked.id === tid && Date.now() - qrAsked.at < 30_000) return;
+  qrAsked = { id: tid, at: Date.now() };
+  const stillOpen = () => state.sheet === 'transfer' && state.ref === tid; // 응답을 기다리는 사이 닫았거나 다른 송금으로 바꿨으면 버린다
+  try {
+    const { qrToken, expiresAt } = await api(`/api/rooms/${enc(roomId)}/transfers/${enc(tid)}/qr`, { method: 'POST', body: {} });
+    if (!stillOpen()) return;
+    state.qr = { id: tid, token: qrToken, expiresAt };
+    // 화면을 오래 열어 두면 만료 1분 전에 다시 그린다. 그때 qrIsFresh가 false라 새 토큰을 받는다
+    clearTimeout(qrTimer);
+    qrTimer = setTimeout(() => {
+      if (stillOpen()) renderSheet();
+    }, Math.max(30_000, Date.parse(expiresAt) - 60_000 - Date.now()));
+  } catch {
+    if (!stillOpen()) return;
+    state.qr = { id: tid, token: null, failed: true };
+  }
+  renderSheet();
+}
+
+function qrBlock(t) {
+  if (!t.link || !isDesktop()) return '';
+  if (!qrIsFresh(state.qr, t.id)) refreshQr(t.id);
+  const qr = state.qr?.id === t.id ? state.qr : null;
+  // 휴대폰 카메라가 찍을 절대 주소가 필요해서, API_BASE가 비어 있으면(로컬 개발) 지금 페이지 origin을 쓴다
+  const img = qr?.token
+    ? `<img src="${qrImageUrl(`${API_BASE || location.origin}/api/qr/${enc(qr.token)}`)}" width="220" height="220" alt="휴대폰으로 토스 송금 화면을 여는 QR 코드" referrerpolicy="no-referrer">`
+    : `<div class="qr-wait">${qr?.failed ? 'QR을 만들지 못했어요.<br>위 계좌번호를 복사해 보내 주세요.' : 'QR을 만드는 중이에요'}</div>`;
+  // 휴대폰으로 보내고 돌아온 사람이 슬라이더(데스크톱에선 토스가 안 열림)를 거치지 않고 바로 끝낼 수 있게
+  return `<div class="qr-desktop"><p class="group-note">컴퓨터라면 휴대폰으로 QR을 찍어 토스를 열어요.</p>${img}
+    <button class="btn secondary" style="width:100%;margin-top:12px" data-action="mark-sent" data-id="${esc(t.id)}">휴대폰으로 보냈어요</button></div>`;
+}
+
 // 송금: 밀어서 보내면 그 제스처 안에서 토스를 연다. 앱이 안 열리면 계좌·금액을 복사해 둔다
 function transferSheet() {
   const t = byId('transfers', state.ref);
@@ -745,16 +786,12 @@ function transferSheet() {
   }[state.transferNote];
   let actions = '';
   if (t.from === me && ['scheduled', 'due'].includes(t.status)) {
-    // QR에는 계좌·금액이 든 t.link를 바로 담지 않는다. 우리 서버의 짧은 수명 토큰(/api/qr/:token)을 담아,
-    // QR 이미지를 만들어 주는 외부 서비스는 그 토큰만 보고 실제 계좌 정보는 보지 못하게 한다.
-    // 휴대폰 카메라가 찍을 절대 주소가 필요해서, API_BASE가 비어 있으면(로컬 개발) 지금 페이지 origin을 쓴다.
-    const qr = t.qrToken ? qrImageUrl(`${API_BASE || location.origin}/api/qr/${encodeURIComponent(t.qrToken)}`) : null;
     actions = t.link || t.fallback
       ? `<div class="slider" data-commit="send" data-id="${esc(t.id)}"><span class="slider-fill"></span>
           <span class="slider-label">${t.link ? '밀어서 토스로 보내기' : '밀어서 계좌 복사하기'}</span>
           <button type="button" class="slider-thumb" aria-label="${t.link ? '밀어서 토스로 보내기' : '밀어서 계좌 복사하기'}. Enter 키로도 할 수 있어요">${ARROW}</button></div>
         <p class="slider-hint">${t.link ? '토스가 열리지 않으면 계좌번호를 복사해 드려요' : '받는 사람의 계좌를 복사해 드려요'}</p>
-        ${qr ? `<div class="qr-desktop"><p class="group-note">컴퓨터라면 휴대폰으로 QR을 찍어 토스를 열어요.</p><img src="${qr}" width="220" height="220" alt="휴대폰으로 토스 송금 화면을 여는 QR 코드" referrerpolicy="no-referrer" loading="lazy"></div>` : ''}`
+        ${qrBlock(t)}`
       : `<p class="group-note">${esc(subj(toName))} 받을 계좌를 아직 알려 주지 않았어요. 알려 주면 바로 보낼 수 있어요.</p>`;
   } else if (t.from === me && t.status === 'opened') {
     actions = `<h3 style="margin:0 0 10px">보냈나요?</h3><div style="display:grid;gap:8px">
@@ -993,6 +1030,10 @@ const sheet = createSheet($('#sheet-root'), {
     state.ref = null;
     state.disputeDraft = null;
     state.transferNote = null;
+    // QR 토큰은 버린다. 다시 열면 새로 받는다
+    state.qr = null;
+    clearTimeout(qrTimer);
+    qrAsked = { id: null, at: 0 };
   },
 });
 const nav = $('#nav');

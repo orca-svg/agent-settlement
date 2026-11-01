@@ -39,11 +39,62 @@ test('받는 정보가 있으면 link와 fallback이 미리 채워진다', async
   assert.deepEqual(t.fallback, { bank: '토스뱅크', accountNo: '100000000003', amount: 41155 });
 });
 
-test('link가 있으면 qrToken도 있고, 그 토큰을 풀면 link가 나온다(계좌가 외부로 그대로 안 나가게)', async () => {
+// 데스크톱 QR(#8): 토큰을 송금이 생길 때 미리 만들어 두면 15분 뒤 죽는다. 보내는 사람이 화면을 열 때마다 새로 만든다
+test('송금 문서에는 QR 토큰을 미리 넣어 두지 않는다', async () => {
   const { transfers } = await setup();
-  const t = pair(await transfers(), 'cs', 'yh');
-  assert.ok(t.qrToken);
-  assert.equal(verifyQrToken(t.qrToken), t.link);
+  assert.ok((await transfers()).every((t) => !('qrToken' in t)));
+});
+
+test('월급날 며칠 뒤에 송금 화면을 열어도, 그때 만든 QR은 토스 링크로 풀린다', async () => {
+  const { orch, clock, transfers } = await setup();
+  clock.now = new Date('2026-11-25T00:00:00Z'); // 철수의 월급날 알림 시각(송금이 생기고 15일 뒤)
+  await orch.tick();
+  const t = pair(await transfers(), 'cs', 'me');
+  const { qrToken, expiresAt } = await orch.qrFor('demo-t', t.id, 'cs');
+  assert.equal(verifyQrToken(qrToken, { now: () => clock.now.getTime() }), t.link);
+  assert.equal(expiresAt, '2026-11-25T00:15:00.000Z');
+});
+
+test('QR은 보내는 사람만 만들 수 있다(받는 사람은 403)', async () => {
+  const { orch, transfers } = await setup();
+  const t = pair(await transfers(), 'cs', 'me');
+  await assert.rejects(orch.qrFor('demo-t', t.id, 'me'), (e) => e.status === 403);
+});
+
+test('이미 보냈거나 지출이 바뀐 송금에는 QR을 만들지 않는다(409)', async () => {
+  const { store, orch, transfers } = await setup();
+  const sent = pair(await transfers(), 'ms', 'me');
+  await orch.markSent('demo-t', sent.id, 'ms');
+  await assert.rejects(orch.qrFor('demo-t', sent.id, 'ms'), (e) => e.status === 409);
+  const t = pair(await transfers(), 'cs', 'me');
+  await store.put('rooms', { ...(await store.get('rooms', 'demo-t')), version: 2 });
+  await assert.rejects(orch.qrFor('demo-t', t.id, 'cs'), (e) => e.status === 409);
+});
+
+test('받을 계좌가 없으면 QR을 만들지 않는다(409)', async () => {
+  const { orch, transfers } = await setup({ withoutPayout: 'me' });
+  const t = pair(await transfers(), 'cs', 'me');
+  await assert.rejects(orch.qrFor('demo-t', t.id, 'cs'), (e) => e.status === 409);
+});
+
+test('HTTP: 보내는 사람이 QR을 요청하면 새 토큰을 주고, 그 토큰 주소는 토스 링크로 보낸다', async () => {
+  const { store, transfers } = await setup();
+  const t = pair(await transfers(), 'cs', 'me');
+  const server = createApp({ store, env: {} });
+  await new Promise((r) => server.listen(0, r));
+  const base = `http://localhost:${server.address().port}`;
+  const qr = (uid) => fetch(`${base}/api/rooms/demo-t/transfers/${encodeURIComponent(t.id)}/qr`, { method: 'POST', headers: { 'x-demo-user': uid } });
+  try {
+    assert.equal((await qr('me')).status, 403);
+    const res = await qr('cs');
+    assert.equal(res.status, 200);
+    const { qrToken } = await res.json();
+    const hop = await fetch(`${base}/api/qr/${qrToken}`, { redirect: 'manual' });
+    assert.equal(hop.status, 302);
+    assert.equal(hop.headers.get('location'), t.link);
+  } finally {
+    server.close();
+  }
 });
 
 test('받는 정보가 없으면 link=null, fallback도 null이고 받는 사람에게 set_payout', async () => {

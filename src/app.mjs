@@ -45,7 +45,7 @@ const demoDispute = {
 };
 
 // 계좌·송금 링크는 송금 당사자에게만 보여 준다
-export const redactTransfer = (t, uid) => (t.from === uid || t.to === uid ? t : { ...t, link: null, fallback: null, qrToken: null });
+export const redactTransfer = (t, uid) => (t.from === uid || t.to === uid ? t : { ...t, link: null, fallback: null });
 
 function serveStatic(pathname, res) {
   const file = path.normalize(path.join(publicDir, pathname === '/' ? 'index.html' : pathname));

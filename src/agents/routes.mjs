@@ -42,7 +42,8 @@ export function registerAgentRoutes(routes, { orchestrator, member, overLimit = 
     return orchestrator.setPayout(params.id, me.uid, await readJson(req));
   });
 
-  const step = { approve: 'approveTransfer', sent: 'markSent', confirm: 'confirmReceipt' };
+  // qr: 데스크톱 송금 화면을 열 때 휴대폰으로 넘길 QR 토큰을 새로 받는다(보내는 사람만)
+  const step = { approve: 'approveTransfer', qr: 'qrFor', sent: 'markSent', confirm: 'confirmReceipt' };
   for (const [path, fn] of Object.entries(step)) {
     routes.post(`/api/rooms/:id/transfers/:tid/${path}`, async ({ req, params }) => {
       const { me } = await member(req, params.id);
