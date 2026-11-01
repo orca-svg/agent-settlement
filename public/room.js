@@ -5,6 +5,7 @@ import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSe
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
+import { BANKS } from './banks.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
@@ -776,14 +777,19 @@ function transferSheet() {
 
 function payoutSheet() {
   const p = state.payoutDraft;
+  // 은행은 목록에서 고른다(#8). 토스는 모르는 은행 이름이면 에러를 내서, 실기기로 확인한 은행만 목록에 둔다(public/banks.js).
+  // 목록에 없는 은행만 직접 쓴다
+  const options = BANKS.map((b) => `<option value="${esc(b.label)}"${!p.other && p.bank === b.label ? ' selected' : ''}>${esc(b.label)}</option>`).join('');
   return {
     title: '받을 계좌',
     html: `<p class="how">계좌번호는 나에게 돈을 보낼 사람에게만 보여요. 받을 송금이 있으면 바로 토스 링크가 채워져요.</p>
       <section class="group"><div class="list">
-        <label class="row field"><span class="grow">은행</span><input data-pf="bank" value="${esc(p.bank)}" maxlength="30" placeholder="예: 토스뱅크"></label>
+        <label class="row field"><span class="grow">은행</span><select data-bank-pick>${options}<option value=""${p.other ? ' selected' : ''}>목록에 없어요</option></select></label>
+        ${p.other ? `<label class="row field"><span class="grow">은행 이름</span><input data-pf="bank" value="${esc(p.bank)}" maxlength="30" placeholder="예: 경남은행"></label>` : ''}
         <label class="row field"><span class="grow">계좌번호</span><input data-pf="accountNo" value="${esc(p.accountNo)}" inputmode="numeric" maxlength="30" placeholder="숫자만 또는 - 포함"></label>
         <label class="row field"><span class="grow">예금주</span><input data-pf="holder" value="${esc(p.holder)}" maxlength="30"></label>
-      </div></section>${formError()}
+      </div></section>
+      ${p.other ? '<p class="group-note">목록에 없는 은행은 토스가 알아보지 못할 수 있어요. 그때는 보내는 사람에게 계좌번호를 복사해 보내도록 안내해요.</p>' : ''}${formError()}
       <button class="btn" style="width:100%" data-action="save-payout">저장</button>`,
   };
 }
@@ -903,7 +909,7 @@ async function agentAct(name, d) {
     await post(`/transfers/${enc(d.id)}/confirm`);
   } else if (name === 'open-payout') {
     const mine = state.data.me;
-    state.payoutDraft = { bank: '토스뱅크', accountNo: '', holder: mine.name };
+    state.payoutDraft = { bank: BANKS[0].label, accountNo: '', holder: mine.name, other: false };
     openAgentSheet('payout');
   } else if (name === 'save-payout') {
     if (await post('/payout', state.payoutDraft)) sheet.close();
@@ -985,6 +991,12 @@ document.addEventListener('change', (e) => {
 document.addEventListener('change', (e) => {
   const f = e.target.dataset?.field;
   if (f && state.draft) state.draft[f] = e.target.value;
+  // 받을 계좌의 은행 선택. '목록에 없어요'(빈 값)면 직접 쓰는 칸을 보여 주려고 다시 그린다
+  if (e.target.matches?.('select[data-bank-pick]') && state.payoutDraft) {
+    state.payoutDraft.other = !e.target.value;
+    state.payoutDraft.bank = e.target.value;
+    renderSheet();
+  }
 });
 const sheet = createSheet($('#sheet-root'), {
   onClosed: () => {
