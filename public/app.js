@@ -373,8 +373,9 @@ function expensesSection() {
     return `<button class="row" data-action="open-exp" data-id="${e.id}">
       ${tile(e.kind)}
       <span class="grow"><span class="title">${esc(e.title)}</span>
-        <span class="meta" style="display:block">${esc(e.payer)} · ${e.method === 'card' ? '카드' : '현금'} ${yen(jpyOf(e))} · ${dayLabel(e.date)} ${e.time}</span></span>
-      <span class="end"><span class="amount" style="display:block">${won(krw)}</span>${expenseStatus(e)}</span>
+        <span class="meta" style="display:block">${esc(e.payer)} · ${e.method === 'card' ? '카드' : '현금'} ${yen(jpyOf(e))} · ${dayLabel(e.date)} ${e.time}</span>
+        <span style="display:block;margin-top:4px">${expenseStatus(e)}</span></span>
+      <span class="end"><span class="amount">${won(krw)}</span></span>
       ${CHEVRON}
     </button>`;
   }).join('');
@@ -883,7 +884,8 @@ async function loadConfig() {
     }
   } catch {
     config = { mode: 'offline' };
-    mode.textContent = '규칙 모드 · 서버 연결 안 됨';
+    mode.textContent = '규칙 모드';
+    mode.title = 'AI 서버에 연결되지 않아 규칙으로 나누고 중재해요';
   }
 }
 
