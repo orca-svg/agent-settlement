@@ -251,7 +251,7 @@ const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (
 async function act(name, d) {
   if (name === 'add-expense') {
     state.draft = newDraft();
-    state.addMode = 'manual';
+    state.addMode = d.mode === 'photo' ? 'photo' : 'manual';
     state.readNotes = [];
     state.formError = '';
     state.sheet = 'add';
@@ -338,8 +338,17 @@ function hero() {
 function nextCard() {
   const mine = state.data.actions ?? [];
   if (!mine.length) {
+    const add = `<button class="btn" data-action="add-expense">지출 남기기</button>${state.aiReady ? '<button class="btn secondary" data-action="add-expense" data-mode="photo">영수증 사진으로</button>' : ''}`;
+    // 아직 메뉴별로 나누지 않은 영수증이 있으면 그걸 먼저 권한다
+    const unsplit = state.data.expenses.find((e) => e.items?.length && !e.alloc);
+    if (unsplit) {
+      return `<section class="next"><p class="eyebrow">다음에 할 일</p><h2>${esc(topic(`‘${unsplit.title}’`))} 아직 메뉴별로 나누지 않았어요</h2>
+        <p>각자의 비서가 공유한 기억으로 줄마다 먹은 사람을 정해요. 근거가 없는 줄만 사람에게 물어봐요.</p>
+        <div class="actions"><button class="btn" data-action="open-exp" data-id="${esc(unsplit.id)}">나누러 가기</button>${add.replace('class="btn"', 'class="btn plain"')}</div></section>`;
+    }
     return `<section class="next"><p class="eyebrow">${esc(state.data.me.name)}의 할 일</p><h2>지금은 할 일이 없어요</h2>
-      <p>비서가 처리하다가 확인이 필요하면 여기에 올라와요.</p></section>`;
+      <p>함께 쓴 돈이 있으면 남겨 주세요. 확인이 필요한 일이 생기면 비서가 여기에 올려요.</p>
+      <div class="actions">${add}</div></section>`;
   }
   const first = mine[0];
   const button = first.type === 'confirm_line' ? `<div class="actions"><button class="btn" data-action="open-exp" data-id="${esc(first.expenseId)}">확인하기</button></div>` : '';
@@ -486,6 +495,7 @@ function render() {
     return;
   }
   $('#nav-title').textContent = state.data.room.name;
+  $('#nav-add').hidden = false;
   main.innerHTML = [hero(), whoPicker(), nextCard(), expensesSection(), transfersSection()].join('');
   mountSegs(main);
   if (state.sheet === 'exp') renderSheet();
@@ -533,6 +543,7 @@ async function loadConfig() {
   try {
     const config = await (await fetch(`${API_BASE}/api/config`, { signal: AbortSignal.timeout(8000) })).json();
     state.aiReady = config.mode === 'gemini';
+    if (state.data) render(); // AI가 연결돼 있으면 '영수증 사진으로'를 보여 준다
     mode.textContent = config.mode === 'gemini' ? 'Gemini 연결됨' : '규칙 모드';
     mode.classList.toggle('live', config.mode === 'gemini');
   } catch {

@@ -13,7 +13,11 @@
   <header class="nav" id="nav">
     <div class="nav-inner">
       <span class="nav-title" id="nav-title" aria-hidden="true">정산 방</span>
-      <span class="mode" id="mode">연결 확인 중</span>
+      <div class="nav-actions">
+        <a class="nav-btn" href="./">데모 보기</a>
+        <button class="nav-btn primary" id="nav-add" type="button" data-action="add-expense" hidden><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5v11M1.5 7h11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>지출 남기기</button>
+        <span class="mode" id="mode">연결 확인 중</span>
+      </div>
     </div>
   </header>
 

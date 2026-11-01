@@ -118,6 +118,44 @@ h1, h2, h3, p { margin: 0; }
   white-space: nowrap;
 }
 .mode.live { color: var(--green); background: var(--green-soft); }
+.nav-actions { display: flex; align-items: center; gap: 8px; }
+/* 내비게이션 막대의 버튼: 누르는 순간 반응하고, 손가락으로 누르기 좋게 높이 36px 이상 */
+.nav-btn {
+  appearance: none;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--tint);
+  background: var(--tint-soft);
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 100ms ease-out, opacity 100ms ease-out;
+}
+.nav-btn.primary { color: #fff; background: var(--tint); }
+.nav-btn:active { transform: scale(0.96); opacity: 0.85; }
+.nav-btn[hidden] { display: none; }
+.demo-note {
+  margin-top: 12px;
+  font-size: 0.875rem;
+  color: var(--label-2);
+  letter-spacing: 0;
+}
+.demo-note a { color: var(--tint); font-weight: 600; text-decoration: none; }
+.nav-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 좁은 화면에서는 주 버튼만 남긴다 */
+@media (max-width: 520px) {
+  .nav-actions .nav-btn:not(.primary), .nav-actions .mode { display: none; }
+  .nav-actions .nav-btn#to-room { display: inline-flex; }
+  .nav-actions .nav-btn#to-room[hidden] { display: none; }
+}
 
 /* ---------- 레이아웃 ---------- */
 .layout {

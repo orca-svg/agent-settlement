@@ -278,6 +278,7 @@ function hero() {
     <h1>${esc(TRIP.title)}</h1>
     <p class="sub">${esc(TRIP.dates)} · 4명 · 돈 얘기는 각자의 비서끼리 해요</p>
     <div class="people">${PEOPLE.map((p) => `<span class="person">${avatar(p)}${esc(p)}</span>`).join('')}</div>
+    ${API_BASE === '' ? '<p class="demo-note">정해진 예시 시나리오예요. 지출을 직접 남기고 나눠 보려면 <a href="room.html">실제 방</a>에서 해 보세요.</p>' : ''}
   </section>`;
 }
 
@@ -694,5 +695,7 @@ async function loadConfig() {
   }
 }
 
+// 실제 방 화면은 아직 로컬 서버에서만 동작한다(배포된 화면에는 API 서버가 없다)
+$('#to-room').hidden = API_BASE !== '';
 render();
 loadConfig();
