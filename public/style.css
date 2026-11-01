@@ -643,6 +643,13 @@ button.row:active { background: var(--fill); }
 .slider.pressed .slider-thumb { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24); }
 .slider-hint { font-size: 0.75rem; color: var(--label-3); text-align: center; margin-top: 6px; }
 
+/* 컴퓨터(넓은 화면)에서만 보이는 QR. 휴대폰은 토스가 바로 열리니 필요 없다 */
+.qr-desktop { display: none; margin-top: 16px; text-align: center; }
+.qr-desktop img { border-radius: 12px; width: 220px; height: 220px; }
+@media (min-width: 640px) {
+  .qr-desktop { display: block; }
+}
+
 .phone-label { font-size: 0.8125rem; color: var(--label-2); margin-bottom: 10px; display: flex; gap: 6px; align-items: center; }
 .done-mark {
   display: grid;

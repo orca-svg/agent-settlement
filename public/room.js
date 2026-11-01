@@ -1,7 +1,7 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, ARROW } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, ARROW, qrImageUrl } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
@@ -745,11 +745,13 @@ function transferSheet() {
   }[state.transferNote];
   let actions = '';
   if (t.from === me && ['scheduled', 'due'].includes(t.status)) {
+    const qr = t.link ? qrImageUrl(t.link) : null;
     actions = t.link || t.fallback
       ? `<div class="slider" data-commit="send" data-id="${esc(t.id)}"><span class="slider-fill"></span>
           <span class="slider-label">${t.link ? '밀어서 토스로 보내기' : '밀어서 계좌 복사하기'}</span>
           <button type="button" class="slider-thumb" aria-label="${t.link ? '밀어서 토스로 보내기' : '밀어서 계좌 복사하기'}. Enter 키로도 할 수 있어요">${ARROW}</button></div>
-        <p class="slider-hint">${t.link ? '토스가 열리지 않으면 계좌번호를 복사해 드려요' : '받는 사람의 계좌를 복사해 드려요'}</p>`
+        <p class="slider-hint">${t.link ? '토스가 열리지 않으면 계좌번호를 복사해 드려요' : '받는 사람의 계좌를 복사해 드려요'}</p>
+        ${qr ? `<div class="qr-desktop"><p class="group-note">컴퓨터라면 휴대폰으로 QR을 찍어 토스를 열어요.</p><img src="${qr}" width="220" height="220" alt="휴대폰으로 토스 송금 화면을 여는 QR 코드"></div>` : ''}`
       : `<p class="group-note">${esc(subj(toName))} 받을 계좌를 아직 알려 주지 않았어요. 알려 주면 바로 보낼 수 있어요.</p>`;
   } else if (t.from === me && t.status === 'opened') {
     actions = `<h3 style="margin:0 0 10px">보냈나요?</h3><div style="display:grid;gap:8px">
