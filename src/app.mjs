@@ -15,7 +15,7 @@ import { createOrchestrator } from './agents/orchestrator.mjs';
 import { registerAgentRoutes } from './agents/routes.mjs';
 import { allocateWithGemini } from './agents/allocate.mjs';
 import { createCache } from './agents/cache.mjs';
-import { evidenceFor as demoEvidence } from './agents/evidence.mjs';
+import { evidenceFor as demoEvidence, counterFor } from './agents/evidence.mjs';
 import { mediateWithGemini } from './agents/mediate.mjs';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -129,7 +129,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   });
 
   registerExpenseRoutes(routes, { ...ctx, member });
-  registerAgentRoutes(routes, { orchestrator: createOrchestrator({ store, gemini, clock, evidenceFor }), member });
+  registerAgentRoutes(routes, { orchestrator: createOrchestrator({ store, gemini, clock, evidenceFor, counterFor }), member, overLimit });
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');

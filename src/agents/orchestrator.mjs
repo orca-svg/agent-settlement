@@ -7,11 +7,12 @@ import { topic, subj, obj } from '../../public/ui.js';
 import { HttpError } from '../http.mjs';
 import { isFlagged } from '../actions.mjs';
 import { evaluateInvoice } from './rules.mjs';
+import { mediateWithGemini } from './mediate.mjs';
 
 const OPEN = ['open', 'proposed'];
 const DEFAULT_RULES = { autoAccept: 0, sendWhen: 'now', onDispute: 'ask' };
 
-export function createOrchestrator({ store, gemini = null, clock = () => new Date(), evidenceFor = async () => [] }) {
+export function createOrchestrator({ store, gemini = null, clock = () => new Date(), evidenceFor = async () => [], counterFor = async () => [] }) {
   const say = (roomId, ev) => store.appendEvent(roomId, ev);
   const settingsOf = async (uid) => (await store.get('agents', uid)) ?? { uid, memory: [], rules: DEFAULT_RULES, payout: null };
 
@@ -23,9 +24,9 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return { room, expenses, name };
   }
 
-  // 이 사람이 함께한 지출 중 근거가 있는 첫 지출
-  async function firstEvidence(uid, room, expenses) {
-    for (const exp of expenses.filter((e) => e.present.includes(uid))) {
+  // 이 사람이 함께한 지출 중 근거가 있는 첫 지출. 이미 이의가 해결된 지출은 다시 보지 않는다
+  async function firstEvidence(uid, room, expenses, resolved) {
+    for (const exp of expenses.filter((e) => e.present.includes(uid) && !resolved.has(`${uid}:${e.id}`))) {
       const evidence = await evidenceFor(uid, exp, room);
       if (evidence.length) return { exp, evidence };
     }
@@ -54,12 +55,13 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     if (stale.length) await say(roomId, { from: actorUid, to: 'all', kind: 'invoices_superseded', text: '지출이 바뀌어 다시 보내요' });
 
     const rows = ledger(room, expenses, room.policy);
+    const resolved = new Set((await store.list('disputes', { roomId })).filter((d) => d.status === 'resolved').map((d) => `${d.by}:${d.expenseId}`));
     await say(roomId, { from: actorUid, to: 'all', kind: 'invoices_sent', text: `지출 ${expenses.length}건으로 각자의 비서에게 청구서를 보냈어요`, meta: `version ${room.version}` });
     const invoices = [];
     for (const m of room.members) {
       const r = rows[m.uid];
       const base = { id: `${roomId}:v${room.version}:${m.uid}`, roomId, version: room.version, to: m.uid, owed: r.owed, paid: r.paid, net: r.net };
-      const found = await firstEvidence(m.uid, room, expenses);
+      const found = await firstEvidence(m.uid, room, expenses, resolved);
       const { decision, reasons } = evaluateInvoice({ invoice: base, settings: await settingsOf(m.uid), evidence: found?.evidence ?? [] });
       const invoice = {
         ...base,
@@ -113,7 +115,66 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       from: by, to: exp.payer, kind: 'dispute_raised', text: `${obj(`‘${exp.title}’`)} 다시 나누자고 이의를 제기했어요`,
       ...(evidence.length ? { meta: `근거: ${evidence.map((e) => e.summary).join(' · ')}` } : {}),
     });
+    // 지출을 낸 사람이 이의를 중재 비서에게 맡겨 두었으면 바로 중재한다. 아니면 낸 사람에게 묻는다(pendingActions)
+    if ((await settingsOf(exp.payer)).rules.onDispute === 'mediator') return mediate(roomId, dispute.id, exp.payer);
     return dispute;
+  }
+
+  async function disputeOf(roomId, disputeId) {
+    const dispute = await store.get('disputes', disputeId);
+    if (!dispute || dispute.roomId !== roomId) throw new HttpError(404, '이의를 찾을 수 없어요');
+    const { room, expenses } = await load(roomId);
+    const exp = expenses.find((e) => e.id === dispute.expenseId);
+    return { dispute, room, exp, parties: [exp.payer, dispute.by] };
+  }
+
+  // 근거의 '떠난 시각' 뒤 주문에서 이의를 낸 사람이 빠졌는지
+  const matchesEvidence = (exp, dispute, alloc) => {
+    const left = dispute.evidence.find((e) => e.kind === 'left_at' && e.time);
+    return Boolean(left) && exp.items.filter((it) => it.time && it.time > left.time).every((it) => !alloc[it.id]?.consumers.includes(dispute.by));
+  };
+
+  // 중재 비서가 양쪽 주장·근거·영수증 주문 시각으로 나누는 법을 제안한다
+  async function mediate(roomId, disputeId, actorUid) {
+    const { dispute, room, exp, parties } = await disputeOf(roomId, disputeId);
+    if (!parties.includes(actorUid)) throw new HttpError(403, '이의 당사자만 중재를 맡길 수 있어요');
+    if (dispute.status !== 'open') throw new HttpError(409, '이미 중재안이 나왔어요');
+    if (!exp.items?.length) throw new HttpError(409, '영수증 줄이 없어 중재할 수 없어요. 지출을 고쳐 줄을 넣어 주세요');
+    const memoryByUid = Object.fromEntries(await Promise.all(room.members.map(async (m) => [m.uid, (await settingsOf(m.uid)).memory ?? []])));
+    const started = Date.now();
+    const out = await mediateWithGemini(gemini, { exp, room, dispute, counter: await counterFor(exp, room), memoryByUid });
+    const proposed = { ...dispute, status: 'proposed', proposal: { summary: out.summary, alloc: out.alloc, source: out.source } };
+    await store.put('disputes', proposed);
+    await say(roomId, {
+      from: 'mediator', to: 'all', kind: 'dispute_proposed', text: out.summary,
+      meta: `mediate · ${out.source === 'rules' ? '규칙' : out.source} · ${((Date.now() - started) / 1000).toFixed(1)}초`,
+    });
+    // 이의를 낸 비서는 '근거가 있으면 이의'를 맡았으므로, 제안이 그 근거와 맞으면 스스로 동의한다
+    if ((await settingsOf(dispute.by)).rules.onDispute === 'evidence' && matchesEvidence(exp, dispute, out.alloc)) {
+      return agree(roomId, disputeId, dispute.by, { auto: true });
+    }
+    return proposed;
+  }
+
+  // 양쪽(지출을 낸 사람과 이의를 낸 사람)이 모두 동의하면 지출을 중재안대로 바꾸고 청구서를 다시 보낸다
+  async function agree(roomId, disputeId, actorUid, { auto = false } = {}) {
+    const { dispute, room, exp, parties } = await disputeOf(roomId, disputeId);
+    if (!parties.includes(actorUid)) throw new HttpError(403, '이의 당사자만 동의할 수 있어요');
+    if (dispute.status !== 'proposed') throw new HttpError(409, dispute.status === 'open' ? '아직 중재안이 없어요' : '이미 끝난 이의예요');
+    const saved = { ...dispute, agreedBy: [...new Set([...dispute.agreedBy, actorUid])] };
+    await store.put('disputes', saved);
+    await say(roomId, { from: actorUid, to: 'all', kind: 'dispute_agreed', text: auto ? '근거와 맞는 중재안이라 동의했어요' : '중재안에 동의했어요', ...(auto ? { meta: '규칙 · 근거가 있으면 이의' } : {}) });
+    if (!parties.every((p) => saved.agreedBy.includes(p))) return saved;
+
+    // 두 사람이 동의한 배분이므로 줄마다 확인된 것으로 둔다
+    const alloc = Object.fromEntries(Object.entries(dispute.proposal.alloc).map(([id, a]) => [id, { ...a, confirmed: true }]));
+    await store.put('expenses', { ...exp, split: 'items', alloc });
+    await store.put('rooms', { ...room, version: room.version + 1 });
+    const resolved = { ...saved, status: 'resolved' };
+    await store.put('disputes', resolved);
+    await say(roomId, { from: 'mediator', to: 'all', kind: 'dispute_resolved', text: `양쪽이 동의해서 ${obj(`‘${exp.title}’`)} 중재안대로 다시 나눴어요` });
+    await sendInvoices(roomId, actorUid);
+    return resolved;
   }
 
   // 지금 version의 청구서에 묻는 중인 것도, 열린 이의도 없으면 송금으로 넘어간다
@@ -130,5 +191,5 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return [];
   }
 
-  return { sendInvoices, answerInvoice, raiseDispute, createTransfers };
+  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers };
 }
