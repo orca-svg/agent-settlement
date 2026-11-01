@@ -7,7 +7,7 @@ import { API_BASE } from './api.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
-const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false };
+const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false };
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
@@ -88,7 +88,11 @@ async function saveExpense() {
   try {
     await api(`/api/rooms/${encodeURIComponent(roomId)}/expenses`, {
       method: 'POST',
-      body: { expense: { ...d, amount: Number(String(d.amount).replace(/[^\d]/g, '')) } },
+      body: {
+        expense: state.addMode === 'photo' && d.items
+          ? { ...d, amount: undefined, source: 'receipt' }
+          : { ...d, items: undefined, amount: Number(String(d.amount).replace(/[^\d]/g, '')) },
+      },
     });
     remember(d);
     sheet.close();
@@ -100,9 +104,81 @@ async function saveExpense() {
   renderSheet();
 }
 
+// ---------------------------------------------------------------- 영수증 사진
+// 긴 변 1600px JPEG(품질 0.8)로 줄여 base64로 만든다. 원본 사진은 서버에 저장하지 않는다.
+async function downscale(file, max = 1600, quality = 0.8) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bmp.width * scale);
+  canvas.height = Math.round(bmp.height * scale);
+  canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', quality));
+  const url = await new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = rej;
+    fr.readAsDataURL(blob);
+  });
+  return { mimeType: 'image/jpeg', data: String(url).split(',')[1] };
+}
+
+async function readReceipt(file) {
+  const controller = new AbortController();
+  state.reading = controller;
+  state.formError = '';
+  renderSheet();
+  try {
+    const image = await downscale(file);
+    const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(roomId)}/receipts/extract`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-demo-user': currentUid() },
+      body: JSON.stringify({ image }),
+      signal: controller.signal,
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+    applyReceipt(json.draft);
+  } catch (e) {
+    if (e.name !== 'AbortError') state.formError = `영수증을 읽지 못했어요(${e.message}). 직접 입력해 주세요.`;
+    if (e.name !== 'AbortError') state.addMode = 'manual';
+  }
+  state.reading = null;
+  renderSheet();
+}
+
+// 읽은 초안을 입력 폼에 채운다. 못 읽었으면 직접 입력으로 넘기고, 읽은 만큼만 채운다(금액은 비운다).
+function applyReceipt(r) {
+  const d = state.draft;
+  const currencies = ['KRW', state.data.room.fx?.currency].filter(Boolean);
+  if (r.merchant) d.title = r.merchant;
+  if (currencies.includes(r.currency)) d.currency = r.currency;
+  if (r.time) d.time = r.time;
+  const notes = [...(r.warnings || [])];
+  if (r.date) {
+    d.date = r.date;
+    if (d.currency !== 'KRW' && !fxDates().includes(r.date)) notes.push(`영수증 날짜(${dayLabel(r.date)})의 환율이 없어 날짜를 다시 골라야 해요`);
+  }
+  fitDate(d);
+  if (!r.ok) {
+    state.addMode = 'manual';
+    d.amount = '';
+    state.formError = `${r.reason}. 직접 입력해 주세요.`;
+    state.readNotes = [];
+    return;
+  }
+  d.items = r.items;
+  d.total = r.total;
+  state.readNotes = notes;
+}
+
+const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit) || 0), 0);
+
 async function act(name, d) {
   if (name === 'add-expense') {
     state.draft = newDraft();
+    state.addMode = 'manual';
+    state.readNotes = [];
     state.formError = '';
     state.sheet = 'add';
     sheet.open(renderSheet);
@@ -116,6 +192,16 @@ async function act(name, d) {
     const set = new Set(state.draft.present);
     if (set.has(d.id)) set.delete(d.id); else set.add(d.id);
     if (set.size) state.draft.present = members().map((m) => m.uid).filter((u) => set.has(u));
+    renderSheet();
+  } else if (name === 'add-mode') {
+    state.addMode = d.id;
+    state.formError = '';
+    renderSheet();
+  } else if (name === 'cancel-read') {
+    state.reading?.abort();
+  } else if (name === 'draft-del-item') {
+    state.draft.items.splice(Number(d.i), 1);
+    if (!state.draft.items.length) state.draft.items = undefined;
     renderSheet();
   } else if (name === 'save-expense') {
     if (!state.saving) saveExpense();
@@ -206,10 +292,16 @@ function addSheetHtml() {
     ? `<input type="date" data-field="date" value="${esc(d.date)}" aria-label="날짜">`
     : `<select data-field="date" aria-label="날짜">${fxDates().map((x) => `<option value="${x}" ${x === d.date ? 'selected' : ''}>${dayLabel(x)}</option>`).join('')}</select>`;
   const picks = room.members.map((m) => `<button type="button" class="pick" aria-pressed="${d.present.includes(m.uid)}" data-action="draft-present" data-id="${esc(m.uid)}">${avatar(m.uid)}${esc(m.name)}</button>`).join('');
-  return `<section class="group"><div class="list">
+  const tabs = `<div style="margin-bottom:16px">${seg('add-mode', 'mode', [['manual', '직접 입력'], ['photo', '영수증 사진']], state.addMode).replaceAll('data-action="draft-set"', 'data-action="add-mode"')}</div>`;
+  if (state.addMode === 'photo' && !d.items) return tabs + photoPickHtml();
+  const amountRow = state.addMode === 'photo' && d.items
+    ? linesEditHtml(d)
+    : `<label class="row field"><span class="grow">금액</span><input data-field="amount" value="${esc(d.amount)}" inputmode="numeric" placeholder="0" aria-label="금액"></label>`;
+  return `${tabs}${state.readNotes.length ? state.readNotes.map((n) => `<p class="preview-note" style="margin-bottom:10px">${esc(n)}</p>`).join('') : ''}
+    <section class="group"><div class="list">
       <label class="row field"><span class="grow">제목</span><input data-field="title" value="${esc(d.title)}" placeholder="예: 편의점 간식" maxlength="40"></label>
-      <label class="row field"><span class="grow">금액</span><input data-field="amount" value="${esc(d.amount)}" inputmode="numeric" placeholder="0" aria-label="금액"></label>
     </div></section>
+    ${amountRow}
     ${currencies.length > 1 ? `<section class="group"><h3 class="group-label"><span>통화</span>${d.currency !== 'KRW' ? '<span>환율이 있는 날짜만 고를 수 있어요</span>' : ''}</h3>${seg('cur', 'currency', currencies.map((c) => [c, c === 'KRW' ? '원' : c === 'JPY' ? '엔' : c]), d.currency)}</section>` : ''}
     <section class="group"><h3 class="group-label"><span>낸 사람</span></h3>${seg('payer', 'payer', room.members.map((m) => [m.uid, m.name]), d.payer)}</section>
     <section class="group"><h3 class="group-label"><span>결제 수단</span></h3>${seg('method', 'method', [['card', '카드'], ['cash', '현금']], d.method)}</section>
@@ -218,6 +310,34 @@ function addSheetHtml() {
       <label class="row field"><span class="grow">시각</span><input type="time" data-field="time" value="${esc(d.time)}" aria-label="시각"></label></div></section>
     ${state.formError ? `<p class="form-error" role="alert">${esc(state.formError)}</p>` : ''}
     <button class="btn" style="width:100%" data-action="save-expense" ${state.saving ? 'disabled' : ''}>${state.saving ? '남기는 중…' : '지출 남기기'}</button>`;
+}
+
+function photoPickHtml() {
+  if (state.reading) {
+    return `<section class="next" aria-busy="true" style="margin:0"><p class="eyebrow">AI가 읽는 중</p><h2>영수증을 읽고 있어요</h2>
+      <p>줄마다 메뉴·수량·단가를 읽어요. 보통 몇 초면 끝나요.</p><div class="progress"><i></i></div>
+      <div class="actions"><button class="btn plain sm" data-action="cancel-read">취소</button></div></section>`;
+  }
+  if (!state.aiReady) {
+    return `<p class="preview-note">사진 읽기는 AI 서버가 필요해요. 지금은 '직접 입력'을 써 주세요.</p>`;
+  }
+  return `<section class="next" style="margin:0"><h2>영수증을 찍거나 골라 주세요</h2>
+    <p>AI가 읽은 내용은 저장 전에 직접 확인하고 고칠 수 있어요. 사진 원본은 저장하지 않아요.</p>
+    <div class="actions"><label class="btn" style="display:inline-flex;align-items:center">사진 고르기
+      <input type="file" accept="image/*" capture="environment" data-receipt hidden></label></div></section>`;
+}
+
+// 읽은 줄을 고칠 수 있는 목록. 합계와 줄 합을 나란히 보여 준다.
+function linesEditHtml(d) {
+  const rows = d.items.map((it, i) => `<div class="row field" style="gap:8px">
+      <input data-item="${i}" data-key="name" value="${esc(it.name)}" aria-label="메뉴 이름" style="text-align:left;flex:3">
+      <input data-item="${i}" data-key="qty" value="${it.qty}" inputmode="numeric" aria-label="수량" style="flex:1">
+      <input data-item="${i}" data-key="unit" value="${it.unit}" inputmode="numeric" aria-label="단가" style="flex:2">
+      <button type="button" class="text-btn" data-action="draft-del-item" data-i="${i}" aria-label="${esc(it.name)} 줄 지우기">×</button></div>`).join('');
+  return `<section class="group"><h3 class="group-label"><span>영수증 ${d.items.length}줄 · 이름 · 수량 · 단가</span>
+      <span id="line-sum">줄 합 ${money(lineSum(d.items), d.currency)}${d.total ? ` · 영수증 합계 ${money(d.total, d.currency)}` : ''}</span></h3>
+    <div class="list">${rows}</div>
+    <p class="group-note">메뉴별로 누가 먹었는지는 저장한 뒤 '비서에게 나누기'로 정해요.</p></section>`;
 }
 
 function renderSheet() {
@@ -289,6 +409,16 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('input', (e) => {
   const f = e.target.dataset?.field;
   if (f && state.draft) state.draft[f] = e.target.value;
+  const i = e.target.dataset?.item;
+  if (i !== undefined && state.draft?.items) {
+    const key = e.target.dataset.key;
+    state.draft.items[i][key] = key === 'name' ? e.target.value : Number(String(e.target.value).replace(/[^\d-]/g, ''));
+    const sum = $('#line-sum');
+    if (sum) sum.textContent = `줄 합 ${money(lineSum(state.draft.items), state.draft.currency)}${state.draft.total ? ` · 영수증 합계 ${money(state.draft.total, state.draft.currency)}` : ''}`;
+  }
+});
+document.addEventListener('change', (e) => {
+  if (e.target.matches?.('input[data-receipt]') && e.target.files?.[0]) readReceipt(e.target.files[0]);
 });
 document.addEventListener('change', (e) => {
   const f = e.target.dataset?.field;
@@ -306,6 +436,7 @@ async function loadConfig() {
   const mode = $('#mode');
   try {
     const config = await (await fetch(`${API_BASE}/api/config`, { signal: AbortSignal.timeout(8000) })).json();
+    state.aiReady = config.mode === 'gemini';
     mode.textContent = config.mode === 'gemini' ? 'Gemini 연결됨' : '규칙 모드';
     mode.classList.toggle('live', config.mode === 'gemini');
   } catch {
