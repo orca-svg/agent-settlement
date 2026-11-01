@@ -306,7 +306,7 @@ function hero() {
     <h1>${esc(TRIP.title)}</h1>
     <p class="sub">${esc(TRIP.dates)} · 4명 · 돈 얘기는 각자의 비서끼리 해요</p>
     <div class="people">${PEOPLE.map((p) => `<span class="person">${avatar(p)}${esc(p)}</span>`).join('')}</div>
-    ${API_BASE === '' ? '<p class="demo-note">정해진 예시 시나리오예요. 지출을 직접 남기고 나눠 보려면 <a href="room.html">실제 방</a>에서 해 보세요.</p>' : ''}
+    ${serverUp() ? '<p class="demo-note">정해진 예시 시나리오예요. 지출을 직접 남기고 나눠 보려면 <a href="room.html">실제 방</a>에서 해 보세요.</p>' : ''}
   </section>`;
 }
 
@@ -712,11 +712,17 @@ addEventListener('resize', () => {
   mountSegs(document);
 });
 
+// 실제 방은 API 서버가 있어야 동작한다. 서버가 응답하기 전에는 예시 시나리오만 보여 준다
+const serverUp = () => config.mode === 'gemini' || config.mode === 'rules';
+
 async function loadConfig() {
   const mode = $('#mode');
   try {
     const res = await fetch(`${API_BASE}/api/config`, { signal: AbortSignal.timeout(8000) });
     config = await res.json();
+    // 서버가 응답하면(로컬이든 배포든) 실제 방으로 가는 길을 보여 준다
+    $('#to-room').hidden = false;
+    render();
     if (config.mode === 'gemini') {
       mode.textContent = `${allocLabel({ source: config.model })} 연결됨`;
       mode.classList.add('live');
@@ -730,8 +736,6 @@ async function loadConfig() {
   }
 }
 
-// 실제 방 화면은 아직 로컬 서버에서만 동작한다(배포된 화면에는 API 서버가 없다)
-$('#to-room').hidden = API_BASE !== '';
 logPop.show(true);
 render();
 loadConfig();

@@ -106,13 +106,19 @@ DEV_SEED=1 npm start   # http://localhost:4500/room.html → '데모 방 만들�
 - **화면:** `main`에 push하면 `.github/workflows/pages.yml`이 `public/`을 GitHub Pages에 올립니다.
 - **API 서버:** Cloud Run에 배포합니다. 키는 Secret Manager에 두고 환경변수로만 주입합니다.
 
+지금은 **데모용 배포**입니다. 저장소가 메모리(`MemoryStore`)라서 인스턴스를 최대 1대로 묶어야 방이 여러 서버에 흩어지지 않고, 누구나 개발용 데모 방을 만들 수 있게(`DEV_SEED=1`) 둡니다. 따라서 가상의 데모 데이터만 넣습니다. #2 로그인·#3 Firestore가 들어오면 인스턴스 고정과 `DEV_SEED`를 뺍니다.
+
 ```bash
-gcloud run deploy agent-settlement --source . --region asia-northeast3 \
-  --allow-unauthenticated --max-instances 2 \
-  --set-secrets GEMINI_API_KEY=gemini-api-key:latest
+gcloud run deploy agent-settlement --source . --region asia-northeast1 \
+  --allow-unauthenticated --min-instances 0 --max-instances 1 --memory 1Gi \
+  --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
+  --set-env-vars DEV_SEED=1,CRON_SECRET=<임의의 긴 문자열>
 ```
 
-- `.env`는 `.gitignore`·`.gcloudignore`·`.dockerignore`에서 모두 제외되어 저장소와 이미지에 들어가지 않습니다.
+- 리전은 도쿄(`asia-northeast1`)입니다. Cloud Run 가격표에서 Tier 1이라 서울(`asia-northeast3`, Tier 2)보다 CPU·메모리 단가가 낮습니다. 화면이 부르는 서버 주소는 `public/api.js`에 있습니다.
+- 때가 된 송금 알림은 Cloud Scheduler 작업 `agent-settlement-tick`이 1분마다 `POST /api/cron/tick`을 `x-cron-secret` 헤더와 함께 부릅니다. Cloud Run은 요청이 없을 때 CPU를 거의 주지 않아 서버 안의 30초 타이머만으로는 부족하기 때문입니다.
+- 상시 인스턴스(`--min-instances 1`)는 두지 않습니다. 대신 1분마다 오는 스케줄러 요청이 인스턴스를 깨워 두어 메모리의 방이 대부분 유지되고, 요청 기반 과금이라 Cloud Run 무료 한도 안에 들어갑니다. 다만 Cloud Run이 인스턴스를 교체하면 방이 사라질 수 있으니, 시연 직전에는 데모 방을 새로 만듭니다.
+- `.env`와 작업 기록(`.superpowers/`)은 `.gitignore`·`.gcloudignore`·`.dockerignore`에서 모두 제외되어 저장소와 이미지에 들어가지 않습니다.
 - 서버는 `https://orca-svg.github.io`에서 온 요청만 브라우저에 허용(CORS)합니다. 또 Gemini 호출은 IP당 10분에 30회로 제한하고, 요청 본문은 비서의 기억(사람당 5개, 60자)만 받습니다.
 
 ## 3분 데모 스크립트
