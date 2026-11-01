@@ -11,6 +11,7 @@ import { tossSendLink, payoutFallback } from '../payments/toss.mjs';
 import { mediateWithGemini } from './mediate.mjs';
 
 const OPEN = ['open', 'proposed'];
+const STALE = '지출이 바뀌었어요. 청구서를 다시 보낸 뒤 새 금액으로 보내 주세요';
 const DEFAULT_RULES = { autoAccept: 0, sendWhen: 'now', onDispute: 'ask' };
 
 export function createOrchestrator({ store, gemini = null, clock = () => new Date(), evidenceFor = async () => [], counterFor = async () => [] }) {
@@ -93,6 +94,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     if (!invoice || invoice.roomId !== roomId) throw new HttpError(404, '청구서를 찾을 수 없어요');
     if (invoice.to !== actorUid) throw new HttpError(403, '내 청구서에만 답할 수 있어요');
     if (invoice.status !== 'asked') throw new HttpError(409, '이미 답했거나 바뀐 청구서예요');
+    if (invoice.version !== (await store.get('rooms', roomId)).version) throw new HttpError(409, STALE);
     if (!['accept', 'dispute'].includes(decision)) throw new HttpError(400, '수락하거나 이의를 제기해 주세요');
     if (decision === 'dispute') await raiseDispute(roomId, { by: actorUid, expenseId, claim, evidence: [] });
     const saved = { ...invoice, status: decision === 'accept' ? 'accepted' : 'disputed', decidedBy: 'human' };
@@ -248,7 +250,9 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     const t = await store.get('transfers', tid);
     if (!t || t.roomId !== roomId) throw new HttpError(404, '송금을 찾을 수 없어요');
     if (t[who] !== actorUid) throw new HttpError(403, who === 'from' ? '보내는 사람만 할 수 있어요' : '받는 사람만 확인할 수 있어요');
-    const { name } = await load(roomId);
+    const { room, name } = await load(roomId);
+    // 보내기 전 단계에서 지출이 바뀌었으면 옛 금액으로 보내지 않게 막는다(받았어요 확인은 그대로 받는다)
+    if (who === 'from' && t.version !== room.version) throw new HttpError(409, STALE);
     return { t, name };
   }
 
@@ -287,8 +291,10 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     let due = 0;
     let reminded = 0;
     for (const t of await store.list('transfers')) {
-      const { name } = await load(t.roomId);
-      if (t.status === 'scheduled' && new Date(t.remindAt) <= now) {
+      const { room, name } = await load(t.roomId);
+      if (['scheduled', 'due', 'opened'].includes(t.status) && t.version !== room.version) {
+        await store.put('transfers', { ...t, status: 'superseded' });
+      } else if (t.status === 'scheduled' && new Date(t.remindAt) <= now) {
         await store.put('transfers', { ...t, status: 'due', dueAt: now.toISOString() });
         await say(t.roomId, {
           from: t.from, to: t.from, kind: 'transfer_due', text: `${name(t.to)}에게 ${won(t.amount)}을 보낼 때예요`,

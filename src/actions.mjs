@@ -6,6 +6,8 @@ import { won } from '../public/core.js';
 export const isFlagged = (line) => Boolean(line) && line.confidence < 0.7 && !line.confirmed;
 
 export function pendingActions({ room, expenses = [], invoices = [], disputes = [], transfers = [] }) {
+  // 지출이 바뀌어 방 version이 오르면 이전 version의 청구서·송금은 다시 보낼 때까지 할 일에서 뺀다
+  const current = (x) => !room || x.version === room.version;
   const name = (uid) => room?.members.find((m) => m.uid === uid)?.name ?? uid;
   const out = [];
   for (const exp of expenses) {
@@ -16,7 +18,7 @@ export function pendingActions({ room, expenses = [], invoices = [], disputes = 
     }
   }
   // 자동 수락 한도를 넘어 비서가 주인에게 물은 청구서
-  for (const inv of invoices.filter((i) => i.status === 'asked')) {
+  for (const inv of invoices.filter((i) => i.status === 'asked' && current(i))) {
     out.push({ type: 'answer_invoice', ref: inv.id, for: inv.to, text: `${won(-inv.net)} 청구서를 받을까요?`, invoiceId: inv.id });
   }
   // 이의: 중재 전에는 지출을 낸 사람에게 중재를 맡길지, 중재안이 나오면 아직 동의하지 않은 당사자에게 묻는다
@@ -30,7 +32,7 @@ export function pendingActions({ room, expenses = [], invoices = [], disputes = 
     }
   }
   // 송금: 때가 된 것은 보내는 사람에게, 받는 계좌가 없으면 받는 사람에게(한 번만), 보낸 뒤에는 받는 사람에게 확인을
-  const live = transfers.filter((t) => ['scheduled', 'due', 'opened'].includes(t.status));
+  const live = transfers.filter((t) => ['scheduled', 'due', 'opened'].includes(t.status) && current(t));
   for (const t of live.filter((x) => x.status !== 'scheduled')) {
     out.push({ type: 'approve_transfer', ref: t.id, for: t.from, transferId: t.id, text: t.status === 'opened' ? `${name(t.to)}에게 ${won(t.amount)}을 보냈나요?` : `${name(t.to)}에게 ${won(t.amount)}을 보낼까요?` });
   }

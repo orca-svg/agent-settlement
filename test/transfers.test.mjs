@@ -122,3 +122,30 @@ test('cron tick은 비밀값이 맞을 때만 동작한다', async () => {
     open.close();
   }
 });
+
+test('지출이 바뀌면 다시 보내기 전에도 이전 금액은 할 일에서 빠지고, 보낼 수 없고, tick이 대체한다', async () => {
+  const { store, orch, transfers, actions } = await setup();
+  await orch.tick();
+  const t = pair(await transfers(), 'ms', 'me');
+  const room = await store.get('rooms', 'demo-t');
+  await store.put('rooms', { ...room, version: 2 }); // 누군가 지출을 고쳤다
+  assert.deepEqual((await actions()).filter((a) => a.type === 'approve_transfer'), []);
+  await assert.rejects(orch.approveTransfer('demo-t', t.id, 'ms'), (e) => e.status === 409);
+  await assert.rejects(orch.markSent('demo-t', t.id, 'ms'), (e) => e.status === 409);
+  await orch.tick();
+  assert.ok((await transfers()).every((x) => x.status === 'superseded'));
+});
+
+test('지출이 바뀌면 이전 version의 물은 청구서에는 답할 수 없다', async () => {
+  const { store, orch } = await setup();
+  const cs = await store.get('agents', 'cs');
+  await store.put('agents', { ...cs, rules: { ...cs.rules, autoAccept: 0 } });
+  const room = await store.get('rooms', 'demo-t');
+  await store.put('rooms', { ...room, version: 2 });
+  await orch.sendInvoices('demo-t', 'me');
+  await store.put('invoices', { ...(await store.get('invoices', 'demo-t:v2:cs')), version: 2 });
+  await store.put('rooms', { ...(await store.get('rooms', 'demo-t')), version: 3 });
+  const stale = pendingActions({ room: await store.get('rooms', 'demo-t'), invoices: await store.list('invoices', { roomId: 'demo-t' }) });
+  assert.deepEqual(stale, []);
+  await assert.rejects(orch.answerInvoice('demo-t', 'demo-t:v2:cs', 'cs', { decision: 'accept' }), (e) => e.status === 409);
+});
