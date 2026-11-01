@@ -17,6 +17,7 @@ import { allocateWithGemini } from './agents/allocate.mjs';
 import { createCache } from './agents/cache.mjs';
 import { evidenceFor as demoEvidence, counterFor } from './agents/evidence.mjs';
 import { mediateWithGemini } from './agents/mediate.mjs';
+import { verifyQrToken } from './payments/qr.mjs';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml' };
@@ -44,7 +45,7 @@ const demoDispute = {
 };
 
 // 계좌·송금 링크는 송금 당사자에게만 보여 준다
-export const redactTransfer = (t, uid) => (t.from === uid || t.to === uid ? t : { ...t, link: null, fallback: null });
+export const redactTransfer = (t, uid) => (t.from === uid || t.to === uid ? t : { ...t, link: null, fallback: null, qrToken: null });
 
 function serveStatic(pathname, res) {
   const file = path.normalize(path.join(publicDir, pathname === '/' ? 'index.html' : pathname));
@@ -65,6 +66,14 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   };
 
   routes.get('/api/config', async () => ({ mode: gemini ? 'gemini' : 'rules', model: gemini?.model ?? null }));
+
+  // 데스크톱 QR이 가리키는 곳. 계좌·금액이 든 진짜 링크는 여기서만 풀린다(QR 이미지 서비스는 이 토큰만 본다)
+  routes.get('/api/qr/:token', async ({ res, params }) => {
+    const link = verifyQrToken(params.token);
+    if (!link) throw new HttpError(404, '만료되었거나 잘못된 QR이에요');
+    res.writeHead(302, { Location: link });
+    res.end();
+  });
 
   // 데모 화면용: 응답 모양은 { lines, source, latencyMs }로 유지한다
   routes.post('/api/allocate', async ({ req }) => {
