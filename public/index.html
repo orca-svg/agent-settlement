@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>정산은 비서끼리</title>
+  <meta name="description" content="돈 얘기는 각자의 AI 비서끼리 하고, 사람은 승인만 하는 정산 웹 앱 프로토타입">
+  <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="nav" id="nav">
+    <div class="nav-inner">
+      <span class="nav-title" aria-hidden="true">오사카 2박 3일</span>
+      <span class="mode" id="mode">연결 확인 중</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <main id="main" class="main"></main>
+    <aside id="channel" class="channel" aria-label="비서끼리 나눈 기록" aria-live="polite"></aside>
+  </div>
+
+  <footer class="foot">
+    <p>모든 금액·환율·기록은 가상의 샘플이에요. 실제 송금은 일어나지 않아요.</p>
+    <p>GDGoC DevFest 2026 「Tell the Vision」 · Team 06 Money is Our Life</p>
+  </footer>
+
+  <div class="sheet-root" id="sheet-root" hidden>
+    <div class="scrim" data-action="close-sheet"></div>
+    <section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1">
+      <div class="sheet-head" id="sheet-handle">
+        <div class="grabber" aria-hidden="true"></div>
+        <div class="sheet-bar">
+          <h2 id="sheet-title"></h2>
+          <button class="text-btn" type="button" data-action="close-sheet">닫기</button>
+        </div>
+      </div>
+      <div class="sheet-body" id="sheet-body"></div>
+    </section>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "agent-settlement",
+  "private": true,
+  "version": "0.0.1",
+  "description": "돈 얘기는 각자의 AI 비서끼리 하고, 사람은 승인만 하는 정산 웹 앱 프로토타입",
+  "type": "module",
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node test/sanity.mjs"
+  }
+}
