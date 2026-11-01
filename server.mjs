@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './src/app.mjs';
-import { createGemini, resolveModel } from './src/gemini.mjs';
+import { createGemini, resolveModel, withMonthlyBudget } from './src/gemini.mjs';
 import { MemoryStore } from './src/store/memory.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -21,9 +21,12 @@ const KEY = process.env.GEMINI_API_KEY || '';
 const PORT = Number(process.env.PORT || 4500);
 const MODEL = KEY ? await resolveModel(KEY, process.env.GEMINI_MODEL) : null;
 
+// 요금이 갑자기 느는 걸 막는 안전장치. 한도를 넘으면 그 달은 규칙 모드로만 동작한다(#10)
+const GEMINI_MONTHLY_LIMIT = Number(process.env.GEMINI_MONTHLY_LIMIT || 2000);
+
 const app = createApp({
   store: new MemoryStore(),
-  gemini: createGemini({ key: KEY, model: MODEL }),
+  gemini: withMonthlyBudget(createGemini({ key: KEY, model: MODEL }), { maxCalls: GEMINI_MONTHLY_LIMIT }),
   env: process.env,
 });
 
