@@ -1,13 +1,13 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
-import { won, money, dayLabel, amountOf, toKrw, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, logItemHtml, createSheet, mountSegs, resetSegs, segArrowKeys } from './ui.js';
+import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, segArrowKeys, topic } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { API_BASE } from './api.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
-const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false };
+const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, expId: null, edits: {}, allocating: null, allocSource: {} };
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
@@ -172,6 +172,87 @@ function applyReceipt(r) {
   state.readNotes = notes;
 }
 
+// ---------------------------------------------------------------- 지출 상세: 메뉴 배분과 줄 확인
+const isFlagged = (a) => Boolean(a) && a.confidence < 0.7 && !a.confirmed;
+
+async function allocateExpense(eid) {
+  state.allocating = eid;
+  state.formError = '';
+  renderSheet();
+  try {
+    const out = await api(`/api/rooms/${encodeURIComponent(roomId)}/expenses/${encodeURIComponent(eid)}/allocate`, { method: 'POST', body: {} });
+    state.allocSource[eid] = `${out.source === 'rules' ? '규칙' : out.source.replace(/^gemini-/, 'Gemini ').replace('-flash', ' Flash')} · ${(out.latencyMs / 1000).toFixed(1)}초`;
+    delete state.edits[eid];
+  } catch (e) {
+    state.formError = e.message;
+  }
+  state.allocating = null;
+  await load();
+}
+
+async function confirmLine(eid, itemId) {
+  const exp = state.data.expenses.find((e) => e.id === eid);
+  const consumers = state.edits[eid]?.[itemId] ?? exp.alloc?.[itemId]?.consumers;
+  try {
+    await api(`/api/rooms/${encodeURIComponent(roomId)}/expenses/${encodeURIComponent(eid)}/lines/${encodeURIComponent(itemId)}`, { method: 'POST', body: { consumers, confirm: true } });
+    if (state.edits[eid]) delete state.edits[eid][itemId];
+    state.formError = '';
+  } catch (e) {
+    state.formError = e.message;
+  }
+  await load();
+}
+
+function expenseChip(e) {
+  if (!e.items?.length) return chip('1/N');
+  if (!e.alloc) return chip('메뉴별로 나누기 전');
+  const n = e.items.filter((it) => isFlagged(e.alloc[it.id])).length;
+  return n ? chip(`확인 필요 ${n}`, 'warn') : chip('메뉴별로 나눔', 'ok');
+}
+
+function linesHtml(exp) {
+  const edits = state.edits[exp.id] ?? {};
+  return exp.items.map((it) => {
+    const a = exp.alloc?.[it.id];
+    const chosen = edits[it.id] ?? a?.consumers ?? [];
+    const edited = Boolean(edits[it.id]);
+    const flag = isFlagged(a);
+    const picks = exp.present.map((u) => `<button type="button" class="pick" aria-pressed="${chosen.includes(u)}" ${a ? '' : 'disabled'}
+        data-action="pick" data-exp="${esc(exp.id)}" data-line="${esc(it.id)}" data-p="${esc(u)}">${avatar(u)}${esc(nameOf(u))}</button>`).join('');
+    const confirmBtn = a && (flag || edited)
+      ? `<div><button class="btn sm ${flag ? 'secondary' : 'plain'}" data-action="confirm-line" data-exp="${esc(exp.id)}" data-line="${esc(it.id)}">${edited ? '이대로 확인' : '비서가 짐작한 대로 확인'}</button></div>`
+      : '';
+    return `<div class="line ${flag ? 'flag' : ''}">
+      <div class="line-top"><span class="line-name">${it.time ? `<small style="margin:0 6px 0 0">${esc(it.time)}</small>` : ''}${esc(it.name)}<small>×${it.qty}</small></span><span class="num">${money(it.qty * it.unit, exp.currency)}</span></div>
+      <div class="picks">${picks}</div>
+      <p class="reason">${a ? esc(a.confirmed ? `${a.reason ? `${a.reason} ` : ''}(확인함)` : a.reason) : '아직 나누지 않았어요.'}</p>
+      ${confirmBtn}</div>`;
+  }).join('');
+}
+
+function expSheetHtml(exp) {
+  const { room } = state.data;
+  const { krw, how } = toKrw(exp, room, room.policy);
+  const s = shares(exp, room, room.policy);
+  const busy = state.allocating === exp.id;
+  const lines = exp.items?.length
+    ? `<section class="group"><h3 class="group-label"><span>영수증 ${exp.items.length}줄 · 누가 먹었나</span><span>${esc(state.allocSource[exp.id] ?? (exp.alloc ? '' : '나누기 전'))}</span></h3>
+        ${busy ? '<div class="next" aria-busy="true" style="margin:0 0 12px"><h2 style="font-size:1.0625rem">비서들이 기억으로 나누는 중이에요</h2><div class="progress"><i></i></div></div>' : ''}
+        <div class="list">${linesHtml(exp)}</div>
+        <p class="group-note">${exp.alloc ? '이름을 눌러 고친 뒤 확인하면 그 줄은 더 묻지 않아요.' : '각자의 비서가 공유한 기억으로 줄마다 먹은 사람을 정해요. 근거가 없는 줄은 짐작하지 않고 물어봐요.'}</p>
+        <button class="btn ${exp.alloc ? 'secondary' : ''}" style="width:100%;margin-top:10px" data-action="allocate-exp" data-id="${esc(exp.id)}" ${busy ? 'disabled' : ''}>${exp.alloc ? '비서에게 다시 나누기' : '비서에게 나누기 맡기기'}</button></section>`
+    : `<p class="how">영수증 줄이 없어서 함께 있던 ${exp.present.length}명이 똑같이 나눠요.</p>`;
+  return `<div class="big"><div class="amt">${won(krw)}</div>
+      <p class="sub">${money(amountOf(exp), exp.currency)} · ${esc(nameOf(exp.payer))} ${exp.method === 'card' ? '카드' : '현금'} · ${dayLabel(exp.date)} ${esc(exp.time)}</p></div>
+    <p class="how">${esc(how)}</p>
+    ${state.formError ? `<p class="form-error" role="alert">${esc(state.formError)}</p>` : ''}
+    ${lines}
+    <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>${exp.split === 'items' ? '먹은 만큼' : '1/N'}</span></h3>
+      <div class="list">${room.members.filter((m) => s.krwShare[m.uid] !== undefined).map((m) => `<div class="row" style="--inset:52px">${avatar(m.uid)}
+        <span class="grow">${esc(m.name)}${m.uid === exp.payer ? ' <span class="meta">· 낸 사람, 끝전 포함</span>' : ''}</span>
+        <span class="amount num">${won(s.krwShare[m.uid])}</span></div>`).join('')}</div></section>`;
+}
+
 const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit) || 0), 0);
 
 async function act(name, d) {
@@ -193,6 +274,22 @@ async function act(name, d) {
     if (set.has(d.id)) set.delete(d.id); else set.add(d.id);
     if (set.size) state.draft.present = members().map((m) => m.uid).filter((u) => set.has(u));
     renderSheet();
+  } else if (name === 'open-exp') {
+    state.expId = d.id;
+    state.formError = '';
+    state.sheet = 'exp';
+    sheet.open(renderSheet);
+  } else if (name === 'allocate-exp') {
+    if (!state.allocating) allocateExpense(d.id);
+  } else if (name === 'pick') {
+    const exp = state.data.expenses.find((e) => e.id === d.exp);
+    const edits = (state.edits[d.exp] ??= {});
+    const set = new Set(edits[d.line] ?? exp.alloc?.[d.line]?.consumers ?? []);
+    if (set.has(d.p)) set.delete(d.p); else set.add(d.p);
+    if (set.size) edits[d.line] = exp.present.filter((u) => set.has(u));
+    renderSheet();
+  } else if (name === 'confirm-line') {
+    confirmLine(d.exp, d.line);
   } else if (name === 'add-mode') {
     state.addMode = d.id;
     state.formError = '';
@@ -246,23 +343,27 @@ function hero() {
 }
 
 function nextCard() {
-  const mine = state.events.filter((e) => e.action?.for === state.data.me.uid);
+  const mine = state.data.actions ?? [];
   if (!mine.length) {
     return `<section class="next"><p class="eyebrow">${esc(state.data.me.name)}의 할 일</p><h2>지금은 할 일이 없어요</h2>
       <p>비서가 처리하다가 확인이 필요하면 여기에 올라와요.</p></section>`;
   }
-  const last = mine.at(-1);
-  return `<section class="next warn"><p class="eyebrow">${esc(state.data.me.name)}의 할 일 ${mine.length}개</p><h2>${esc(last.text)}</h2></section>`;
+  const first = mine[0];
+  const button = first.type === 'confirm_line' ? `<div class="actions"><button class="btn" data-action="open-exp" data-id="${esc(first.expenseId)}">확인하기</button></div>` : '';
+  return `<section class="next warn"><p class="eyebrow">${esc(state.data.me.name)}의 할 일 ${mine.length}개</p><h2>${esc(first.text)}</h2>
+    <p>비서들의 기억에 근거가 없는 줄이에요. 그래서 비서가 짐작으로 청구하지 않고 먼저 물어봐요.</p>${button}</section>`;
 }
 
 function expensesSection() {
   const { room, expenses } = state.data;
-  const rows = expenses.map((e) => `<div class="row">
+  const rows = expenses.map((e) => `<button class="row" data-action="open-exp" data-id="${esc(e.id)}">
       ${tile(e.kind)}
       <span class="grow"><span class="title">${esc(e.title)}</span>
-        <span class="meta" style="display:block">${esc(nameOf(e.payer))} · ${e.method === 'card' ? '카드' : '현금'} ${money(amountOf(e), e.currency)} · ${dayLabel(e.date)} ${esc(e.time)}</span></span>
+        <span class="meta" style="display:block">${esc(nameOf(e.payer))} · ${e.method === 'card' ? '카드' : '현금'} ${money(amountOf(e), e.currency)} · ${dayLabel(e.date)} ${esc(e.time)}</span>
+        <span style="display:block;margin-top:4px">${expenseChip(e)}</span></span>
       <span class="end"><span class="amount">${won(toKrw(e, room, room.policy).krw)}</span></span>
-    </div>`).join('');
+      ${CHEVRON}
+    </button>`).join('');
   return `<section class="group"><h2 class="group-label"><span>지출 ${expenses.length}건</span><button class="text-btn" data-action="add-expense">지출 추가</button></h2>
     <div class="list">${rows || '<p class="empty">아직 지출이 없어요.</p>'}</div></section>`;
 }
@@ -344,8 +445,9 @@ function renderSheet() {
   if (!state.sheet || !state.data) return;
   const body = $('#sheet-body');
   const top = body.scrollTop;
-  $('#sheet-title').textContent = '지출 남기기';
-  body.innerHTML = addSheetHtml();
+  const exp = state.sheet === 'exp' ? state.data.expenses.find((e) => e.id === state.expId) : null;
+  $('#sheet-title').textContent = exp ? exp.title : '지출 남기기';
+  body.innerHTML = exp ? expSheetHtml(exp) : addSheetHtml();
   body.scrollTop = top;
   mountSegs(body);
 }
@@ -393,6 +495,7 @@ function render() {
   $('#nav-title').textContent = state.data.room.name;
   main.innerHTML = [hero(), whoPicker(), nextCard(), expensesSection(), transfersSection()].join('');
   mountSegs(main);
+  if (state.sheet === 'exp') renderSheet();
 }
 
 // ---------------------------------------------------------------- 이벤트

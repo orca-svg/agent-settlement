@@ -2,7 +2,9 @@
 import { randomUUID } from 'node:crypto';
 import { readJson, send, HttpError } from '../http.mjs';
 import { toKrw, won } from '../../public/core.js';
-import { subj } from '../../public/ui.js';
+import { subj, topic } from '../../public/ui.js';
+import { allocateWithGemini } from '../agents/allocate.mjs';
+import { isFlagged } from '../actions.mjs';
 import { validateExpense } from './validate.mjs';
 import { extractReceipt } from './receipt.mjs';
 
@@ -35,5 +37,64 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     const draft = await extractReceipt(gemini, { image: { mimeType: image.mimeType, data: image.data }, room });
     console.log(`[receipts/extract] ${draft.source} ok=${draft.ok} ${Date.now() - started}ms`);
     return { draft };
+  });
+
+  async function roomExpense(req, roomId, eid) {
+    const { room, me } = await member(req, roomId);
+    const exp = await store.get('expenses', eid);
+    if (!exp || exp.roomId !== room.id) throw new HttpError(404, '지출을 찾을 수 없어요');
+    return { room, me, exp };
+  }
+
+  // 비서들이 공유한 기억(#5의 agents 문서)으로 영수증 줄을 나눈다. 근거 없는 줄은 지출을 남긴 사람에게 묻는다.
+  routes.post('/api/rooms/:id/expenses/:eid/allocate', async ({ req, params }) => {
+    const { room, me, exp } = await roomExpense(req, params.id, params.eid);
+    if (!exp.items?.length) throw new HttpError(400, '영수증 줄이 있는 지출만 나눌 수 있어요');
+    if (overLimit(`uid:${me.uid}`)) throw new HttpError(429, '요청이 너무 많아요. 10분 뒤에 다시 시도해 주세요.');
+    const memory = Object.fromEntries(await Promise.all(room.members.map(async (m) => [m.uid, (await store.get('agents', m.uid))?.memory ?? []])));
+    const started = Date.now();
+    const out = await allocateWithGemini(gemini, exp, room, memory);
+    const latencyMs = Date.now() - started;
+    const alloc = Object.fromEntries(Object.entries(out.alloc).map(([id, a]) => [id, { consumers: a.consumers, confidence: a.confidence, reason: a.reason }]));
+    const saved = { ...exp, split: 'items', alloc };
+    await store.put('expenses', saved);
+    await store.put('rooms', { ...room, version: room.version + 1 });
+    const used = Object.values(memory).reduce((n, list) => n + list.length, 0);
+    const label = out.source === 'rules' ? '규칙' : out.source;
+    await store.appendEvent(room.id, {
+      from: exp.createdBy, to: 'all', kind: 'allocated',
+      text: `${exp.title} 영수증 ${exp.items.length}줄을 비서들이 공유한 기억 ${used}개로 나눴어요.`,
+      meta: `allocate · ${label} · ${(latencyMs / 1000).toFixed(1)}초`,
+    });
+    for (const it of exp.items.filter((x) => isFlagged(alloc[x.id]))) {
+      await store.appendEvent(room.id, {
+        from: exp.createdBy, to: exp.createdBy, kind: 'confirm_line',
+        text: `${topic(`‘${it.name}’`)} 누가 먹었는지 기억에 없어요. 짐작하지 않고 물어볼게요.`,
+        action: { type: 'confirm_line', ref: `${exp.id}:${it.id}`, for: exp.createdBy },
+      });
+    }
+    console.log(`[allocate] ${out.source} ${latencyMs}ms`);
+    return { expense: saved, source: out.source, latencyMs };
+  });
+
+  // 줄 하나를 사람이 확정한다. 확정한 줄은 확신도와 관계없이 더 묻지 않는다.
+  routes.post('/api/rooms/:id/expenses/:eid/lines/:itemId', async ({ req, params }) => {
+    const { room, me, exp } = await roomExpense(req, params.id, params.eid);
+    const item = exp.items?.find((it) => it.id === params.itemId);
+    if (!item) throw new HttpError(404, '영수증 줄을 찾을 수 없어요');
+    const picked = (await readJson(req)).consumers;
+    if (!Array.isArray(picked) || !picked.length) throw new HttpError(400, '적어도 한 명은 골라 주세요');
+    if (picked.some((u) => !exp.present.includes(u))) throw new HttpError(400, '함께 있지 않았던 사람은 고를 수 없어요');
+    const consumers = exp.present.filter((u) => picked.includes(u));
+    const prev = exp.alloc?.[item.id] ?? { confidence: 1, reason: '' };
+    // 비서가 짐작한 그대로 확인했으면 그 이유를 남기고, 사람이 바꿨으면 바꿨다고 남긴다
+    const same = prev.consumers && prev.consumers.length === consumers.length && prev.consumers.every((u) => consumers.includes(u));
+    const reason = same ? prev.reason : '직접 고쳤어요';
+    const saved = { ...exp, split: 'items', alloc: { ...exp.alloc, [item.id]: { ...prev, consumers, reason, confirmed: true, confirmedBy: me.uid } } };
+    await store.put('expenses', saved);
+    await store.put('rooms', { ...room, version: room.version + 1 });
+    const names = consumers.map((u) => room.members.find((m) => m.uid === u)?.name ?? u).join('·');
+    await store.appendEvent(room.id, { from: me.uid, to: 'all', kind: 'line_confirmed', text: `${topic(`‘${item.name}’`)} ${subj(names)} 먹은 걸로 확인했어요` });
+    return { expense: saved };
   });
 }

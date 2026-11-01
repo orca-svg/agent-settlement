@@ -10,6 +10,7 @@ import { router, readJson, send, allowCors, createRateLimiter, clientIp, HttpErr
 import { identify } from './identity.mjs';
 import { seedDemoRoom } from './dev/seed.mjs';
 import { registerExpenseRoutes } from './expenses/routes.mjs';
+import { pendingActions } from './actions.mjs';
 import { allocateWithGemini } from './agents/allocate.mjs';
 import { mediateWithGemini } from './agents/mediate.mjs';
 
@@ -113,6 +114,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       disputes,
       transfers: transfers.map((t) => redactTransfer(t, me.uid)),
       ledger: ledger(room, expenses, room.policy),
+      actions: pendingActions({ room, expenses }).filter((x) => x.for === me.uid),
     };
   });
 
