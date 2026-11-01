@@ -3,8 +3,12 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { DEMO_ROOM, DEMO_EXPENSES, DEMO_DISPUTE, MEMORY_LIMIT } from '../public/data.js';
+import { ledger } from '../public/core.js';
 import { router, readJson, send, allowCors, createRateLimiter, clientIp, HttpError } from './http.mjs';
+import { identify } from './identity.mjs';
+import { seedDemoRoom } from './dev/seed.mjs';
 import { allocateWithGemini } from './agents/allocate.mjs';
 import { mediateWithGemini } from './agents/mediate.mjs';
 
@@ -32,6 +36,9 @@ const demoDispute = {
     ...DEMO_DISPUTE.evidence.slice(1).map((summary) => ({ kind: 'text', summary })),
   ],
 };
+
+// 계좌·송금 링크는 송금 당사자에게만 보여 준다
+export const redactTransfer = (t, uid) => (t.from === uid || t.to === uid ? t : { ...t, link: null, fallback: null });
 
 function serveStatic(pathname, res) {
   const file = path.normalize(path.join(publicDir, pathname === '/' ? 'index.html' : pathname));
@@ -71,6 +78,46 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     const latencyMs = Date.now() - started;
     console.log(`[/api/mediate] ${out.source} ${latencyMs}ms`);
     return { summary: out.summary, lines: out.alloc, source: out.source, latencyMs };
+  });
+
+  // 방 멤버인지 확인한다. 방이 없으면 404, 누구인지 모르면 401, 멤버가 아니면 403
+  async function member(req, roomId) {
+    const room = await store.get('rooms', roomId);
+    if (!room) throw new HttpError(404, '방을 찾을 수 없어요');
+    const who = await identify(req, store);
+    if (!who) throw new HttpError(401, '누구인지 알려 주세요');
+    const me = room.members.find((m) => m.uid === who.uid);
+    if (!me) throw new HttpError(403, '이 방의 멤버가 아니에요');
+    return { room, me: { uid: me.uid, name: me.name } };
+  }
+
+  // 개발용: 데모 방 만들기. #4 방 만들기가 생기기 전까지 실제 방 화면을 열어 보는 용도
+  routes.post('/api/dev/seed', async () => {
+    if (env.DEV_SEED !== '1') throw new HttpError(404, 'not found');
+    const id = `demo-${randomUUID().slice(0, 8)}`;
+    await seedDemoRoom(store, { id });
+    return { roomId: id };
+  });
+
+  routes.get('/api/rooms/:id', async ({ req, params }) => {
+    const { room, me } = await member(req, params.id);
+    const [expenses, invoices, disputes, transfers] = await Promise.all(
+      ['expenses', 'invoices', 'disputes', 'transfers'].map((col) => store.list(col, { roomId: room.id })),
+    );
+    return {
+      room,
+      me,
+      expenses,
+      invoices,
+      disputes,
+      transfers: transfers.map((t) => redactTransfer(t, me.uid)),
+      ledger: ledger(room, expenses, room.policy),
+    };
+  });
+
+  routes.get('/api/rooms/:id/events', async ({ req, params, url }) => {
+    await member(req, params.id);
+    return { events: await store.listEvents(params.id, Number(url.searchParams.get('after') || 0)) };
   });
 
   const server = http.createServer(async (req, res) => {

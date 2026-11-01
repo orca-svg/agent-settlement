@@ -1,17 +1,16 @@
 // 화면 로직. 사람은 '확인·승인'만 하고, 돈 얘기는 비서들이 오른쪽 채널에서 주고받는다.
 import { DEMO_ROOM as ROOM, POLICIES, DEMO_EXPENSES as EXPENSES, DEMO_MEMORY as MEMORY, MEMORY_LIMIT, DEMO_RULES as RULES, DEMO_DISPUTE as DISPUTE } from './data.js';
 import { won, yen, dayLabel, amountOf, toKrw, shares, ledger, settle, ruleAllocate, presentAfter } from './core.js';
-import { Spring, VelocityTracker, project, rubberband, reduceMotion } from './motion.js';
+import { reduceMotion } from './motion.js';
+import { esc, chip, avatarHtml, topic, subj, tile, CHEVRON, CHECK, ARROW, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys } from './ui.js';
 import { API_BASE } from './api.js';
 
 const PEOPLE = ROOM.members.map((m) => m.uid);
 const TRIP = { title: ROOM.name, dates: ROOM.dates, agreedPolicy: ROOM.policy, agreedAt: ROOM.agreedAt };
 const $ = (s, el = document) => el.querySelector(s);
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const COLOR = Object.fromEntries(PEOPLE.map((p, i) => [p, `var(--p${i})`]));
-const avatar = (p, cls = '') => `<span class="avatar ${cls}" style="--c:${COLOR[p] || '#8e8e93'}" aria-hidden="true">${esc(p[0])}</span>`;
+const avatar = (p, cls = '') => avatarHtml(p[0], COLOR[p] || '#8e8e93', cls);
 const agentOf = (p) => (p === '중재' ? '중재 비서' : p === '나' ? '나의 비서' : `${p}의 비서`);
-const chip = (text, cls = '') => `<span class="chip ${cls}">${esc(text)}</span>`;
 const byId = (id) => EXPENSES.find((e) => e.id === id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, reduceMotion.matches ? 0 : ms));
 const STAGES = ['collected', 'allocating', 'review', 'ready', 'sending', 'disputed', 'mediating', 'proposal', 'settling', 'done'];
@@ -19,28 +18,6 @@ const atLeast = (s) => STAGES.indexOf(state.stage) >= STAGES.indexOf(s);
 const policyLabel = (id) => POLICIES.find((p) => p.id === id).label;
 const tKey = (t) => `${t.from}>${t.to}`;
 const PAYDAY = '25일 월급날';
-// 받침 유무로 조사를 고른다(오차즈케는 / 생맥주는 / 하이볼은). '나'가 주어면 '내가'.
-const hasBatchim = (w) => {
-  const s = w.replace(/[^가-힣]+$/, '');
-  const c = s.charCodeAt(s.length - 1) - 0xac00;
-  return c >= 0 && c <= 11171 && c % 28 !== 0;
-};
-const topic = (w) => `${w}${hasBatchim(w) ? '은' : '는'}`;
-const subj = (w) => (w === '나' ? '내가' : `${w}${hasBatchim(w) ? '이' : '가'}`);
-
-const ICONS = {
-  stay: '<path d="M3 19V6M3 15h18v4M21 15v-3a3 3 0 0 0-3-3h-7v6"/><circle cx="7" cy="11.5" r="2"/>',
-  food: '<path d="M7 3v18M4.5 3v5a2.5 2.5 0 0 0 5 0V3M17 21V3c-2 1.5-3 4-3 7s1 4 3 4"/>',
-  ticket: '<path d="M4 7h16v3a2 2 0 0 0 0 4v3H4v-3a2 2 0 0 0 0-4z"/><path d="M14 7v10" stroke-dasharray="2 2"/>',
-  drink: '<path d="M5 4h14l-7 8zM12 12v7M8 20h8"/>',
-  shop: '<path d="M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2"/>',
-  bus: '<rect x="5" y="3" width="14" height="15" rx="3"/><path d="M5 11h14M8 18v2M16 18v2"/>',
-};
-const tile = (kind) => `<span class="tile ${kind}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICONS[kind]}</svg></span>`;
-const CHEVRON = '<svg class="chev" width="8" height="14" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const CHECK = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const ARROW = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
 // ---------------------------------------------------------------- 상태
 const START = Date.UTC(2026, 10, 10, 0, 0, 0); // 11/10 09:00 KST, 정산일 아침
 const fresh = () => ({
@@ -481,13 +458,10 @@ function renderChannel() {
     ? `<button class="notif" style="display:block;width:calc(100% - 32px);text-align:left;cursor:pointer" data-action="open-payer" data-p="${waiting.from}">
         <b>${esc(waiting.from)}의 휴대폰 · ${esc(agentOf(waiting.from))}</b>오사카 여행 정산 ${won(waiting.amount)}. 확인하면 보낼게요.</button>`
     : '';
-  const items = state.log.map((l, i) => `<li class="${i >= renderedLog ? 'enter' : ''}">
-      ${avatar(l.from, 'agent')}
-      <div><div class="who"><span>${esc(agentOf(l.from))} → ${esc(l.to)}</span><time>${l.t}</time></div>
-        <p class="text">${esc(l.text)}</p>
-        ${l.meta ? `<div class="meta">${esc(l.meta)}</div>` : ''}
-        ${l.tag ? `<div class="tag">${l.tag}</div>` : ''}</div>
-    </li>`).join('');
+  const items = state.log.map((l, i) => logItemHtml({
+    avatar: avatar(l.from, 'agent'), who: `${agentOf(l.from)} → ${l.to}`, time: l.t,
+    text: l.text, meta: l.meta, tagHtml: l.tag, enter: i >= renderedLog,
+  })).join('');
   el.innerHTML = `<h2>비서끼리</h2><p class="lead">단톡방 대신 비서들이 주고받은 기록이에요. 사람에게는 확인할 일만 올라와요.</p>
     ${notif}
     ${state.log.length ? `<ol class="log">${items}</ol>` : '<p class="empty">비서에게 나누기를 맡기면 여기에 기록이 쌓여요.</p>'}`;
@@ -637,179 +611,14 @@ function sheetContent({ kind, id }) {
   return payerSheet(id);
 }
 
-// ---------------------------------------------------------------- 시트: 스프링으로 올라오고, 손잡이를 끌어 내린다
+// ---------------------------------------------------------------- 시트
 const sheetRoot = $('#sheet-root');
-const sheetEl = $('#sheet');
-const scrim = $('.scrim', sheetRoot);
-const handle = $('#sheet-handle');
-let sheetH = 0;
-let closing = false;
-let returnFocus = null;
-const sheetY = new Spring(0, (v) => {
-  sheetEl.style.transform = `translate3d(0, ${v}px, 0)`;
-  scrim.style.opacity = String(Math.max(0, Math.min(1, 1 - v / (sheetH || 1))));
-});
-
+const sheet = createSheet(sheetRoot, { onClosed: () => { state.sheet = null; } });
 function openSheet(kind, id) {
   state.sheet = { kind, id };
-  if (!sheetRoot.hidden && !closing) return render();
-  if (closing) {
-    closing = false;
-    render();
-    return sheetY.to(0, { damping: 1, response: 0.35 });
-  }
-  returnFocus = document.activeElement;
-  sheetRoot.hidden = false;
-  document.body.classList.add('sheet-open');
-  render();
-  sheetH = sheetEl.offsetHeight;
-  if (reduceMotion.matches) {
-    sheetY.set(0);
-    requestAnimationFrame(() => sheetRoot.classList.add('shown'));
-  } else {
-    sheetY.set(sheetH);
-    sheetY.to(0, { damping: 1, response: 0.35 });
-  }
-  sheetEl.focus({ preventScroll: true });
+  sheet.open(render);
 }
-
-function closeSheet(velocity = 0) {
-  if (sheetRoot.hidden || closing) return;
-  closing = true;
-  const finish = () => {
-    if (!closing) return;
-    closing = false;
-    sheetRoot.hidden = true;
-    sheetRoot.classList.remove('shown');
-    document.body.classList.remove('sheet-open');
-    state.sheet = null;
-    returnFocus?.focus?.({ preventScroll: true });
-  };
-  if (reduceMotion.matches) {
-    sheetRoot.classList.remove('shown');
-    setTimeout(finish, 200);
-    return;
-  }
-  sheetH = sheetEl.offsetHeight;
-  sheetY.to(sheetH + 24, { damping: 1, response: 0.3, velocity, onRest: finish });
-}
-
-const sheetVelocity = new VelocityTracker();
-let drag = null;
-handle.addEventListener('pointerdown', (e) => {
-  if (e.target.closest('button')) return;
-  handle.setPointerCapture(e.pointerId);
-  sheetY.stop();
-  closing = false;
-  sheetH = sheetEl.offsetHeight;
-  drag = { y0: e.clientY, from: sheetY.value, moved: false };
-  sheetVelocity.reset();
-  sheetVelocity.add(sheetY.value);
-});
-handle.addEventListener('pointermove', (e) => {
-  if (!drag) return;
-  const dy = e.clientY - drag.y0;
-  if (!drag.moved && Math.abs(dy) < 4) return;
-  drag.moved = true;
-  let y = drag.from + dy;
-  if (y < 0) y = -rubberband(-y, sheetH);
-  sheetY.set(y);
-  sheetVelocity.add(y);
-});
-const endDrag = () => {
-  if (!drag) return;
-  const { moved } = drag;
-  drag = null;
-  const v = sheetVelocity.get();
-  if (moved && sheetY.value + project(v) > sheetH * 0.5) closeSheet(v);
-  else sheetY.to(0, { damping: 0.8, response: 0.35, velocity: v });
-};
-handle.addEventListener('pointerup', endDrag);
-handle.addEventListener('pointercancel', endDrag);
-
-// ---------------------------------------------------------------- 분할 컨트롤과 밀어서 보내기
-const segPos = new Map();
-function mountSegs(scope) {
-  scope.querySelectorAll('.seg').forEach((seg) => {
-    const thumb = $('.seg-thumb', seg);
-    const on = $('[aria-checked="true"]', seg);
-    if (!on) return;
-    const key = seg.dataset.seg;
-    const x = on.offsetLeft;
-    thumb.style.width = `${on.offsetWidth}px`;
-    const spring = new Spring(0, (v) => {
-      thumb.style.transform = `translate3d(${v}px, 0, 0)`;
-      segPos.set(key, v);
-    });
-    spring.set(segPos.get(key) ?? x);
-    if (spring.value !== x) spring.to(x, { damping: 1, response: 0.3 });
-  });
-}
-
-function mountSliders(scope) {
-  scope.querySelectorAll('.slider').forEach((el) => {
-    const thumb = $('.slider-thumb', el);
-    const fill = $('.slider-fill', el);
-    const label = $('.slider-label', el);
-    const max = () => el.clientWidth - thumb.offsetWidth - 8;
-    const x = new Spring(0, (v) => {
-      thumb.style.transform = `translate3d(${v}px, 0, 0)`;
-      fill.style.width = `${Math.max(0, v) + 60}px`;
-      label.style.opacity = String(Math.max(0, 1 - Math.max(0, v) / (max() * 0.6)));
-    });
-    const tracker = new VelocityTracker();
-    let d = null;
-    let done = false;
-    const commit = (v) => {
-      done = true;
-      x.to(max(), {
-        damping: 1,
-        response: 0.25,
-        velocity: Math.max(0, v),
-        onRest: () => {
-          navigator.vibrate?.(12);
-          act(el.dataset.commit, el.dataset);
-        },
-      });
-    };
-    thumb.addEventListener('pointerdown', (e) => {
-      if (done) return;
-      e.preventDefault();
-      thumb.setPointerCapture(e.pointerId);
-      x.stop();
-      d = { x0: e.clientX, from: x.value };
-      tracker.reset();
-      tracker.add(x.value);
-      el.classList.add('pressed');
-    });
-    thumb.addEventListener('pointermove', (e) => {
-      if (!d) return;
-      const m = max();
-      let v = d.from + e.clientX - d.x0;
-      if (v > m) v = m + rubberband(v - m, m);
-      if (v < 0) v = -rubberband(-v, m);
-      x.set(v);
-      tracker.add(v);
-    });
-    const end = () => {
-      if (!d) return;
-      d = null;
-      el.classList.remove('pressed');
-      const v = tracker.get();
-      const m = max();
-      if (x.value > m * 0.5 && x.value + project(v, 0.99) >= m * 0.95) commit(v);
-      else x.to(0, { damping: 0.8, response: 0.35, velocity: v });
-    };
-    thumb.addEventListener('pointerup', end);
-    thumb.addEventListener('pointercancel', end);
-    thumb.addEventListener('keydown', (e) => {
-      if ((e.key === 'Enter' || e.key === ' ') && !done) {
-        e.preventDefault();
-        commit(0);
-      }
-    });
-  });
-}
+const closeSheet = (velocity) => sheet.close(velocity);
 
 // ---------------------------------------------------------------- 그리기와 이벤트
 function render() {
@@ -824,7 +633,7 @@ function render() {
     body.innerHTML = html;
     body.scrollTop = top;
     mountSegs(body);
-    mountSliders(body);
+    mountSliders(body, (d) => act(d.commit, d));
   }
   if (state.memEdit) $('#mem-input')?.focus();
 }
@@ -857,21 +666,13 @@ document.addEventListener('keydown', (e) => {
     } else closeSheet();
     return;
   }
-  const seg = e.target.closest?.('.seg');
-  if (seg && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
-    const buttons = [...seg.querySelectorAll('button')];
-    const i = buttons.indexOf(e.target);
-    const next = buttons[(i + (e.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length];
-    const key = seg.dataset.seg;
-    act(next.dataset.action, next.dataset);
-    document.querySelector(`.seg[data-seg="${key}"] [data-id="${next.dataset.id}"]`)?.focus();
-  }
+  segArrowKeys(e, (btn) => act(btn.dataset.action, btn.dataset));
 });
 
 const nav = $('#nav');
 addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 56), { passive: true });
 addEventListener('resize', () => {
-  segPos.clear();
+  resetSegs();
   mountSegs(document);
 });
 
