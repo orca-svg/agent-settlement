@@ -46,6 +46,8 @@
 
 ## 구조
 
+팀원이 맞춰 개발할 계약(데이터 타입, Store, 확장 지점, API)은 [ARCHITECTURE.md](ARCHITECTURE.md)에 있어요.
+
 ```
 브라우저 (GitHub Pages: public/)
    │  POST /api/allocate  영수증 줄 배분 (기억 기반)

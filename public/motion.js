@@ -1,6 +1,7 @@
 // 손으로 만지는 움직임은 CSS 전환 대신 스프링으로 한다. 언제든 붙잡아 되돌릴 수 있고, 손가락 속도를 이어받는다.
 // 스프링은 Apple식 두 값(damping ratio, response 초)으로 정한다.
-export const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+// 브라우저가 아닌 곳(테스트)에서는 움직임 줄이기가 꺼진 것으로 본다
+export const reduceMotion = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
 
 export class Spring {
   constructor(value, onUpdate) {

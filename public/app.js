@@ -1,15 +1,16 @@
 // 화면 로직. 사람은 '확인·승인'만 하고, 돈 얘기는 비서들이 오른쪽 채널에서 주고받는다.
-import { PEOPLE, TRIP, POLICIES, EXPENSES, MEMORY, MEMORY_LIMIT, RULES, DISPUTE } from './data.js';
-import { won, yen, dayLabel, jpyOf, toKrw, shares, ledger, settle, ruleAllocate, presentAfterLeaving } from './core.js';
-import { Spring, VelocityTracker, project, rubberband, reduceMotion } from './motion.js';
+import { DEMO_ROOM as ROOM, POLICIES, DEMO_EXPENSES as EXPENSES, DEMO_MEMORY as MEMORY, MEMORY_LIMIT, DEMO_RULES as RULES, DEMO_DISPUTE as DISPUTE } from './data.js';
+import { won, yen, dayLabel, amountOf, toKrw, shares, ledger, settle, ruleAllocate, presentAfter } from './core.js';
+import { reduceMotion } from './motion.js';
+import { esc, chip, avatarHtml, topic, subj, tile, CHEVRON, CHECK, ARROW, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys } from './ui.js';
 import { API_BASE } from './api.js';
 
+const PEOPLE = ROOM.members.map((m) => m.uid);
+const TRIP = { title: ROOM.name, dates: ROOM.dates, agreedPolicy: ROOM.policy, agreedAt: ROOM.agreedAt };
 const $ = (s, el = document) => el.querySelector(s);
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const COLOR = Object.fromEntries(PEOPLE.map((p, i) => [p, `var(--p${i})`]));
-const avatar = (p, cls = '') => `<span class="avatar ${cls}" style="--c:${COLOR[p] || '#8e8e93'}" aria-hidden="true">${esc(p[0])}</span>`;
+const avatar = (p, cls = '') => avatarHtml(p[0], COLOR[p] || '#8e8e93', cls);
 const agentOf = (p) => (p === '중재' ? '중재 비서' : p === '나' ? '나의 비서' : `${p}의 비서`);
-const chip = (text, cls = '') => `<span class="chip ${cls}">${esc(text)}</span>`;
 const byId = (id) => EXPENSES.find((e) => e.id === id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, reduceMotion.matches ? 0 : ms));
 const STAGES = ['collected', 'allocating', 'review', 'ready', 'sending', 'disputed', 'mediating', 'proposal', 'settling', 'done'];
@@ -17,28 +18,6 @@ const atLeast = (s) => STAGES.indexOf(state.stage) >= STAGES.indexOf(s);
 const policyLabel = (id) => POLICIES.find((p) => p.id === id).label;
 const tKey = (t) => `${t.from}>${t.to}`;
 const PAYDAY = '25일 월급날';
-// 받침 유무로 조사를 고른다(오차즈케는 / 생맥주는 / 하이볼은). '나'가 주어면 '내가'.
-const hasBatchim = (w) => {
-  const s = w.replace(/[^가-힣]+$/, '');
-  const c = s.charCodeAt(s.length - 1) - 0xac00;
-  return c >= 0 && c <= 11171 && c % 28 !== 0;
-};
-const topic = (w) => `${w}${hasBatchim(w) ? '은' : '는'}`;
-const subj = (w) => (w === '나' ? '내가' : `${w}${hasBatchim(w) ? '이' : '가'}`);
-
-const ICONS = {
-  stay: '<path d="M3 19V6M3 15h18v4M21 15v-3a3 3 0 0 0-3-3h-7v6"/><circle cx="7" cy="11.5" r="2"/>',
-  food: '<path d="M7 3v18M4.5 3v5a2.5 2.5 0 0 0 5 0V3M17 21V3c-2 1.5-3 4-3 7s1 4 3 4"/>',
-  ticket: '<path d="M4 7h16v3a2 2 0 0 0 0 4v3H4v-3a2 2 0 0 0 0-4z"/><path d="M14 7v10" stroke-dasharray="2 2"/>',
-  drink: '<path d="M5 4h14l-7 8zM12 12v7M8 20h8"/>',
-  shop: '<path d="M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2"/>',
-  bus: '<rect x="5" y="3" width="14" height="15" rx="3"/><path d="M5 11h14M8 18v2M16 18v2"/>',
-};
-const tile = (kind) => `<span class="tile ${kind}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICONS[kind]}</svg></span>`;
-const CHEVRON = '<svg class="chev" width="8" height="14" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const CHECK = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const ARROW = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
 // ---------------------------------------------------------------- 상태
 const START = Date.UTC(2026, 10, 10, 0, 0, 0); // 11/10 09:00 KST, 정산일 아침
 const fresh = () => ({
@@ -62,7 +41,9 @@ let config = { mode: 'unknown' };
 let busy = null;
 let renderedLog = 0;
 
-const agreedLedger = () => ledger({ policy: TRIP.agreedPolicy, modes: state.modes, allocs: state.allocs });
+// 중재 전후로 바뀌는 나누기 방식(split)과 배분(alloc)을 지출에 입혀서 계산에 넘긴다
+const expenseView = () => EXPENSES.map((e) => ({ ...e, split: state.modes[e.id] ?? e.split, alloc: state.allocs[e.id] }));
+const agreedLedger = () => ledger(ROOM, expenseView(), TRIP.agreedPolicy);
 const transfers = () => settle(agreedLedger());
 const flagged = () => {
   const a = state.allocs.izakaya;
@@ -119,7 +100,7 @@ async function allocate() {
       return render();
     }
     await sleep(600);
-    out = { lines: ruleAllocate(izakaya, state.memory), source: 'rules', fallback: e.message };
+    out = { lines: ruleAllocate(izakaya, state.memory, ROOM.members), source: 'rules', fallback: e.message };
   }
   busy = null;
   state.allocs.izakaya = out.lines;
@@ -188,7 +169,7 @@ async function mediate() {
     await sleep(600);
     out = {
       summary: `${DISPUTE.leftAt} 이전 주문은 넷이, 이후 주문은 ${DISPUTE.by}를 뺀 셋이 나눠요. 술을 마시지 않는 사람은 술값에서 빠져요.`,
-      lines: ruleAllocate(bar, state.memory, presentAfterLeaving(bar, DISPUTE)),
+      lines: ruleAllocate(bar, state.memory, ROOM.members, presentAfter(bar, DISPUTE.by, DISPUTE.leftAt)),
       source: 'rules',
       fallback: e.message,
     };
@@ -369,11 +350,11 @@ function expenseStatus(e) {
 
 function expensesSection() {
   const rows = EXPENSES.map((e) => {
-    const { krw } = toKrw(e, TRIP.agreedPolicy);
+    const { krw } = toKrw(e, ROOM, TRIP.agreedPolicy);
     return `<button class="row" data-action="open-exp" data-id="${e.id}">
       ${tile(e.kind)}
       <span class="grow"><span class="title">${esc(e.title)}</span>
-        <span class="meta" style="display:block">${esc(e.payer)} · ${e.method === 'card' ? '카드' : '현금'} ${yen(jpyOf(e))} · ${dayLabel(e.date)} ${e.time}</span>
+        <span class="meta" style="display:block">${esc(e.payer)} · ${e.method === 'card' ? '카드' : '현금'} ${yen(amountOf(e))} · ${dayLabel(e.date)} ${e.time}</span>
         <span style="display:block;margin-top:4px">${expenseStatus(e)}</span></span>
       <span class="end"><span class="amount">${won(krw)}</span></span>
       ${CHEVRON}
@@ -388,7 +369,7 @@ function expensesSection() {
 
 function policySection() {
   const agreed = agreedLedger();
-  const preview = ledger({ policy: state.preview, modes: state.modes, allocs: state.allocs });
+  const preview = ledger(ROOM, expenseView(), state.preview);
   const isPreview = state.preview !== TRIP.agreedPolicy;
   const netText = (n) => (n >= 0 ? `받을 돈 ${won(n)}` : `보낼 돈 ${won(-n)}`);
   const rows = PEOPLE.map((p) => {
@@ -477,13 +458,10 @@ function renderChannel() {
     ? `<button class="notif" style="display:block;width:calc(100% - 32px);text-align:left;cursor:pointer" data-action="open-payer" data-p="${waiting.from}">
         <b>${esc(waiting.from)}의 휴대폰 · ${esc(agentOf(waiting.from))}</b>오사카 여행 정산 ${won(waiting.amount)}. 확인하면 보낼게요.</button>`
     : '';
-  const items = state.log.map((l, i) => `<li class="${i >= renderedLog ? 'enter' : ''}">
-      ${avatar(l.from, 'agent')}
-      <div><div class="who"><span>${esc(agentOf(l.from))} → ${esc(l.to)}</span><time>${l.t}</time></div>
-        <p class="text">${esc(l.text)}</p>
-        ${l.meta ? `<div class="meta">${esc(l.meta)}</div>` : ''}
-        ${l.tag ? `<div class="tag">${l.tag}</div>` : ''}</div>
-    </li>`).join('');
+  const items = state.log.map((l, i) => logItemHtml({
+    avatar: avatar(l.from, 'agent'), who: `${agentOf(l.from)} → ${l.to}`, time: l.t,
+    text: l.text, meta: l.meta, tagHtml: l.tag, enter: i >= renderedLog,
+  })).join('');
   el.innerHTML = `<h2>비서끼리</h2><p class="lead">단톡방 대신 비서들이 주고받은 기록이에요. 사람에게는 확인할 일만 올라와요.</p>
     ${notif}
     ${state.log.length ? `<ol class="log">${items}</ol>` : '<p class="empty">비서에게 나누기를 맡기면 여기에 기록이 쌓여요.</p>'}`;
@@ -496,7 +474,7 @@ function linesHtml(exp, alloc, { editable, timed }) {
   return exp.items.map((it) => {
     const a = alloc?.[it.id];
     const flag = a && exp.id === 'izakaya' && a.confidence < 0.7 && !a.confirmed;
-    const present = timed ? presentAfterLeaving(exp, DISPUTE)(it) : exp.present;
+    const present = timed ? presentAfter(exp, DISPUTE.by, DISPUTE.leftAt)(it) : exp.present;
     const picks = present.map((p) => `<button type="button" class="pick" aria-pressed="${Boolean(a?.consumers.includes(p))}" ${editable && a ? '' : 'disabled'}
         data-action="toggle-pick" data-exp="${exp.id}" data-line="${it.id}" data-p="${p}">${avatar(p)}${esc(p)}</button>`).join('');
     return `<div class="line ${flag ? 'flag' : ''}">
@@ -509,7 +487,7 @@ function linesHtml(exp, alloc, { editable, timed }) {
 }
 
 function sharesHtml(exp, mode, alloc) {
-  const s = shares(exp, TRIP.agreedPolicy, mode, alloc);
+  const s = shares({ ...exp, split: mode }, ROOM, TRIP.agreedPolicy, alloc);
   return PEOPLE.filter((p) => s.krwShare[p] !== undefined).map((p) => `<div class="row" style="--inset:52px">${avatar(p)}
       <span class="grow">${esc(p)}${p === exp.payer ? ' <span class="meta">· 낸 사람, 끝전 포함</span>' : ''}</span>
       <span class="amount num">${won(s.krwShare[p])}</span></div>`).join('');
@@ -517,7 +495,7 @@ function sharesHtml(exp, mode, alloc) {
 
 function expenseSheet(id) {
   const e = byId(id);
-  const { krw, how } = toKrw(e, TRIP.agreedPolicy);
+  const { krw, how } = toKrw(e, ROOM, TRIP.agreedPolicy);
   const mode = state.modes[e.id] ?? e.split ?? 'equal';
   const alloc = state.allocs[e.id];
   let detail = '';
@@ -538,7 +516,7 @@ function expenseSheet(id) {
   return {
     title: e.title,
     html: `<div class="big"><div class="amt">${won(krw)}</div>
-        <p class="sub">${yen(jpyOf(e))} · ${esc(subj(e.payer))} ${e.method === 'card' ? '카드로' : '현금으로'} 냄 · ${dayLabel(e.date)} ${e.time} · ${esc(e.source)}에서</p></div>
+        <p class="sub">${yen(amountOf(e))} · ${esc(subj(e.payer))} ${e.method === 'card' ? '카드로' : '현금으로'} 냄 · ${dayLabel(e.date)} ${e.time} · ${esc(e.source)}에서</p></div>
       <p class="how">${esc(policyLabel(TRIP.agreedPolicy))} 정책: ${esc(how)}</p>
       ${detail}
       <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>${mode === 'items' ? '먹은 만큼' : '1/N'}</span></h3>
@@ -557,8 +535,8 @@ function disputeSheet() {
   } else if (state.stage === 'mediating') {
     action = '<div class="next" aria-busy="true" style="margin:0"><h2 style="font-size:1.0625rem">중재 비서가 근거를 맞춰 보는 중이에요</h2><div class="progress"><i></i></div><div class="actions"><button class="btn plain sm" data-action="cancel">취소</button></div></div>';
   } else if (state.proposal) {
-    const before = shares(e, TRIP.agreedPolicy, 'equal').krwShare;
-    const after = shares(e, TRIP.agreedPolicy, 'items', state.proposal.lines).krwShare;
+    const before = shares({ ...e, split: 'equal' }, ROOM, TRIP.agreedPolicy).krwShare;
+    const after = shares({ ...e, split: 'items' }, ROOM, TRIP.agreedPolicy, state.proposal.lines).krwShare;
     const changes = PEOPLE.map((p) => {
       const d = (after[p] || 0) - (before[p] || 0);
       return `<div class="row" style="--inset:52px">${avatar(p)}<span class="grow">${esc(p)}</span>
@@ -575,7 +553,7 @@ function disputeSheet() {
   }
   return {
     title: '이의 제기 · 2차 바',
-    html: `<div class="big"><div class="amt">${yen(jpyOf(e))}</div>
+    html: `<div class="big"><div class="amt">${yen(amountOf(e))}</div>
         <p class="sub">${esc(subj(e.payer))} 카드로 냄 · ${dayLabel(e.date)} ${e.time} 결제</p></div>
       <div class="split" style="margin-bottom:20px">
         <div class="claim"><h3>${avatar('민수', 'agent')}민수의 비서 주장</h3><p>${esc(DISPUTE.claim)}</p><ul>${DISPUTE.evidence.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
@@ -633,179 +611,14 @@ function sheetContent({ kind, id }) {
   return payerSheet(id);
 }
 
-// ---------------------------------------------------------------- 시트: 스프링으로 올라오고, 손잡이를 끌어 내린다
+// ---------------------------------------------------------------- 시트
 const sheetRoot = $('#sheet-root');
-const sheetEl = $('#sheet');
-const scrim = $('.scrim', sheetRoot);
-const handle = $('#sheet-handle');
-let sheetH = 0;
-let closing = false;
-let returnFocus = null;
-const sheetY = new Spring(0, (v) => {
-  sheetEl.style.transform = `translate3d(0, ${v}px, 0)`;
-  scrim.style.opacity = String(Math.max(0, Math.min(1, 1 - v / (sheetH || 1))));
-});
-
+const sheet = createSheet(sheetRoot, { onClosed: () => { state.sheet = null; } });
 function openSheet(kind, id) {
   state.sheet = { kind, id };
-  if (!sheetRoot.hidden && !closing) return render();
-  if (closing) {
-    closing = false;
-    render();
-    return sheetY.to(0, { damping: 1, response: 0.35 });
-  }
-  returnFocus = document.activeElement;
-  sheetRoot.hidden = false;
-  document.body.classList.add('sheet-open');
-  render();
-  sheetH = sheetEl.offsetHeight;
-  if (reduceMotion.matches) {
-    sheetY.set(0);
-    requestAnimationFrame(() => sheetRoot.classList.add('shown'));
-  } else {
-    sheetY.set(sheetH);
-    sheetY.to(0, { damping: 1, response: 0.35 });
-  }
-  sheetEl.focus({ preventScroll: true });
+  sheet.open(render);
 }
-
-function closeSheet(velocity = 0) {
-  if (sheetRoot.hidden || closing) return;
-  closing = true;
-  const finish = () => {
-    if (!closing) return;
-    closing = false;
-    sheetRoot.hidden = true;
-    sheetRoot.classList.remove('shown');
-    document.body.classList.remove('sheet-open');
-    state.sheet = null;
-    returnFocus?.focus?.({ preventScroll: true });
-  };
-  if (reduceMotion.matches) {
-    sheetRoot.classList.remove('shown');
-    setTimeout(finish, 200);
-    return;
-  }
-  sheetH = sheetEl.offsetHeight;
-  sheetY.to(sheetH + 24, { damping: 1, response: 0.3, velocity, onRest: finish });
-}
-
-const sheetVelocity = new VelocityTracker();
-let drag = null;
-handle.addEventListener('pointerdown', (e) => {
-  if (e.target.closest('button')) return;
-  handle.setPointerCapture(e.pointerId);
-  sheetY.stop();
-  closing = false;
-  sheetH = sheetEl.offsetHeight;
-  drag = { y0: e.clientY, from: sheetY.value, moved: false };
-  sheetVelocity.reset();
-  sheetVelocity.add(sheetY.value);
-});
-handle.addEventListener('pointermove', (e) => {
-  if (!drag) return;
-  const dy = e.clientY - drag.y0;
-  if (!drag.moved && Math.abs(dy) < 4) return;
-  drag.moved = true;
-  let y = drag.from + dy;
-  if (y < 0) y = -rubberband(-y, sheetH);
-  sheetY.set(y);
-  sheetVelocity.add(y);
-});
-const endDrag = () => {
-  if (!drag) return;
-  const { moved } = drag;
-  drag = null;
-  const v = sheetVelocity.get();
-  if (moved && sheetY.value + project(v) > sheetH * 0.5) closeSheet(v);
-  else sheetY.to(0, { damping: 0.8, response: 0.35, velocity: v });
-};
-handle.addEventListener('pointerup', endDrag);
-handle.addEventListener('pointercancel', endDrag);
-
-// ---------------------------------------------------------------- 분할 컨트롤과 밀어서 보내기
-const segPos = new Map();
-function mountSegs(scope) {
-  scope.querySelectorAll('.seg').forEach((seg) => {
-    const thumb = $('.seg-thumb', seg);
-    const on = $('[aria-checked="true"]', seg);
-    if (!on) return;
-    const key = seg.dataset.seg;
-    const x = on.offsetLeft;
-    thumb.style.width = `${on.offsetWidth}px`;
-    const spring = new Spring(0, (v) => {
-      thumb.style.transform = `translate3d(${v}px, 0, 0)`;
-      segPos.set(key, v);
-    });
-    spring.set(segPos.get(key) ?? x);
-    if (spring.value !== x) spring.to(x, { damping: 1, response: 0.3 });
-  });
-}
-
-function mountSliders(scope) {
-  scope.querySelectorAll('.slider').forEach((el) => {
-    const thumb = $('.slider-thumb', el);
-    const fill = $('.slider-fill', el);
-    const label = $('.slider-label', el);
-    const max = () => el.clientWidth - thumb.offsetWidth - 8;
-    const x = new Spring(0, (v) => {
-      thumb.style.transform = `translate3d(${v}px, 0, 0)`;
-      fill.style.width = `${Math.max(0, v) + 60}px`;
-      label.style.opacity = String(Math.max(0, 1 - Math.max(0, v) / (max() * 0.6)));
-    });
-    const tracker = new VelocityTracker();
-    let d = null;
-    let done = false;
-    const commit = (v) => {
-      done = true;
-      x.to(max(), {
-        damping: 1,
-        response: 0.25,
-        velocity: Math.max(0, v),
-        onRest: () => {
-          navigator.vibrate?.(12);
-          act(el.dataset.commit, el.dataset);
-        },
-      });
-    };
-    thumb.addEventListener('pointerdown', (e) => {
-      if (done) return;
-      e.preventDefault();
-      thumb.setPointerCapture(e.pointerId);
-      x.stop();
-      d = { x0: e.clientX, from: x.value };
-      tracker.reset();
-      tracker.add(x.value);
-      el.classList.add('pressed');
-    });
-    thumb.addEventListener('pointermove', (e) => {
-      if (!d) return;
-      const m = max();
-      let v = d.from + e.clientX - d.x0;
-      if (v > m) v = m + rubberband(v - m, m);
-      if (v < 0) v = -rubberband(-v, m);
-      x.set(v);
-      tracker.add(v);
-    });
-    const end = () => {
-      if (!d) return;
-      d = null;
-      el.classList.remove('pressed');
-      const v = tracker.get();
-      const m = max();
-      if (x.value > m * 0.5 && x.value + project(v, 0.99) >= m * 0.95) commit(v);
-      else x.to(0, { damping: 0.8, response: 0.35, velocity: v });
-    };
-    thumb.addEventListener('pointerup', end);
-    thumb.addEventListener('pointercancel', end);
-    thumb.addEventListener('keydown', (e) => {
-      if ((e.key === 'Enter' || e.key === ' ') && !done) {
-        e.preventDefault();
-        commit(0);
-      }
-    });
-  });
-}
+const closeSheet = (velocity) => sheet.close(velocity);
 
 // ---------------------------------------------------------------- 그리기와 이벤트
 function render() {
@@ -820,7 +633,7 @@ function render() {
     body.innerHTML = html;
     body.scrollTop = top;
     mountSegs(body);
-    mountSliders(body);
+    mountSliders(body, (d) => act(d.commit, d));
   }
   if (state.memEdit) $('#mem-input')?.focus();
 }
@@ -853,21 +666,13 @@ document.addEventListener('keydown', (e) => {
     } else closeSheet();
     return;
   }
-  const seg = e.target.closest?.('.seg');
-  if (seg && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
-    const buttons = [...seg.querySelectorAll('button')];
-    const i = buttons.indexOf(e.target);
-    const next = buttons[(i + (e.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length];
-    const key = seg.dataset.seg;
-    act(next.dataset.action, next.dataset);
-    document.querySelector(`.seg[data-seg="${key}"] [data-id="${next.dataset.id}"]`)?.focus();
-  }
+  segArrowKeys(e, (btn) => act(btn.dataset.action, btn.dataset));
 });
 
 const nav = $('#nav');
 addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 56), { passive: true });
 addEventListener('resize', () => {
-  segPos.clear();
+  resetSegs();
   mountSegs(document);
 });
 
