@@ -27,6 +27,16 @@ const app = createApp({
   env: process.env,
 });
 
+// 때가 된 송금 알림을 30초마다 확인한다. 배포에서는 Cloud Scheduler가 /api/cron/tick을 부른다
+setInterval(async () => {
+  try {
+    const { due, reminded } = await app.tick();
+    if (due || reminded) console.log(`[tick] 송금 알림 ${due}건, 받았나요 ${reminded}건`);
+  } catch (e) {
+    console.warn('[tick] 실패:', e.message);
+  }
+}, 30_000).unref();
+
 app.listen(PORT, () => {
   console.log(`정산은 비서끼리: http://localhost:${PORT}`);
   console.log(KEY ? `Gemini 모드 — 모델 ${MODEL}` : '규칙 모드 — GEMINI_API_KEY가 없어 규칙으로 배분·중재합니다');

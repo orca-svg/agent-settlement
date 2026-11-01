@@ -5,7 +5,8 @@ import { won } from '../public/core.js';
 
 export const isFlagged = (line) => Boolean(line) && line.confidence < 0.7 && !line.confirmed;
 
-export function pendingActions({ expenses = [], invoices = [], disputes = [] }) {
+export function pendingActions({ room, expenses = [], invoices = [], disputes = [], transfers = [] }) {
+  const name = (uid) => room?.members.find((m) => m.uid === uid)?.name ?? uid;
   const out = [];
   for (const exp of expenses) {
     for (const it of exp.items ?? []) {
@@ -27,6 +28,17 @@ export function pendingActions({ expenses = [], invoices = [], disputes = [] }) 
     if (d.status === 'proposed') {
       for (const uid of [...new Set([exp.payer, d.by])].filter((u) => !d.agreedBy.includes(u))) out.push({ ...base, for: uid, text: `‘${exp.title}’ 중재안에 동의할까요?` });
     }
+  }
+  // 송금: 때가 된 것은 보내는 사람에게, 받는 계좌가 없으면 받는 사람에게(한 번만), 보낸 뒤에는 받는 사람에게 확인을
+  const live = transfers.filter((t) => ['scheduled', 'due', 'opened'].includes(t.status));
+  for (const t of live.filter((x) => x.status !== 'scheduled')) {
+    out.push({ type: 'approve_transfer', ref: t.id, for: t.from, transferId: t.id, text: t.status === 'opened' ? `${name(t.to)}에게 ${won(t.amount)}을 보냈나요?` : `${name(t.to)}에게 ${won(t.amount)}을 보낼까요?` });
+  }
+  for (const to of new Set(live.filter((t) => !t.link && !t.fallback).map((t) => t.to))) {
+    out.push({ type: 'set_payout', ref: `payout:${to}`, for: to, text: '받을 계좌를 알려 주면 바로 보낼 수 있어요' });
+  }
+  for (const t of transfers.filter((x) => x.status === 'sent')) {
+    out.push({ type: 'confirm_receipt', ref: t.id, for: t.to, transferId: t.id, text: `${name(t.from)}가 보낸 ${won(t.amount)}을 받았나요?` });
   }
   return out;
 }

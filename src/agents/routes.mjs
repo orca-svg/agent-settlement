@@ -35,4 +35,18 @@ export function registerAgentRoutes(routes, { orchestrator, member, overLimit = 
     const { me } = await member(req, params.id);
     return orchestrator.agree(params.id, params.did, me.uid);
   });
+
+  // 받을 계좌(#8이 설정 화면을 만든다). 계좌번호는 송금 당사자에게만 내려간다(GET room의 redactTransfer)
+  routes.post('/api/rooms/:id/payout', async ({ req, params }) => {
+    const { me } = await member(req, params.id);
+    return orchestrator.setPayout(params.id, me.uid, await readJson(req));
+  });
+
+  const step = { approve: 'approveTransfer', sent: 'markSent', confirm: 'confirmReceipt' };
+  for (const [path, fn] of Object.entries(step)) {
+    routes.post(`/api/rooms/:id/transfers/:tid/${path}`, async ({ req, params }) => {
+      const { me } = await member(req, params.id);
+      return orchestrator[fn](params.id, params.tid, me.uid);
+    });
+  }
 }

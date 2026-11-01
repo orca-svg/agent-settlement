@@ -2,11 +2,12 @@
 // 상태는 Store(invoices·disputes·transfers)에 두고, 사람에게 보이는 일은 비서 기록과 pendingActions(현재 상태에서 계산)로 알린다.
 // LLM은 중재안만 낸다. 금액은 public/core.js가 계산한다.
 import { randomUUID } from 'node:crypto';
-import { ledger, won } from '../../public/core.js';
+import { ledger, settle, won, dayLabel } from '../../public/core.js';
 import { topic, subj, obj } from '../../public/ui.js';
 import { HttpError } from '../http.mjs';
 import { isFlagged } from '../actions.mjs';
-import { evaluateInvoice } from './rules.mjs';
+import { evaluateInvoice, nextSendAt } from './rules.mjs';
+import { tossSendLink, payoutFallback } from '../payments/toss.mjs';
 import { mediateWithGemini } from './mediate.mjs';
 
 const OPEN = ['open', 'proposed'];
@@ -186,10 +187,125 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return createTransfers(roomId);
   }
 
-  // Task 11에서 채운다
-  async function createTransfers() {
-    return [];
+  // ---------------------------------------------------------------- 송금
+  // 받는 계좌가 있으면 토스 링크를 지금 만들어 둔다. 브라우저는 사용자 제스처 안에서만 앱을 열어 주므로, 승인 순간에는 서버를 기다리지 않는다
+  const paymentOf = (payout, amount) => (payout ? { link: tossSendLink({ ...payout, amount }), fallback: payoutFallback(payout, amount) } : { link: null, fallback: null });
+  const whenText = (iso) => {
+    const kst = new Date(new Date(iso).getTime() + 9 * 3600_000).toISOString();
+    return `${dayLabel(kst.slice(0, 10))} 09:00`;
+  };
+
+  // 지금 version의 송금을 한 번만 만든다. 이전 version의 아직 보내지 않은 송금은 대체한다
+  async function createTransfers(roomId) {
+    const { room, expenses, name } = await load(roomId);
+    const all = await store.list('transfers', { roomId });
+    const current = all.filter((t) => t.version === room.version);
+    if (current.length) return current;
+    for (const t of all.filter((x) => x.version < room.version && ['scheduled', 'due', 'opened'].includes(x.status))) {
+      await store.put('transfers', { ...t, status: 'superseded' });
+    }
+    const now = clock();
+    const out = [];
+    for (const [i, edge] of settle(ledger(room, expenses, room.policy)).entries()) {
+      const sender = await settingsOf(edge.from);
+      const receiver = await settingsOf(edge.to);
+      const transfer = {
+        id: `${roomId}:v${room.version}:t${i + 1}`, roomId, version: room.version, from: edge.from, to: edge.to, amount: edge.amount,
+        status: 'scheduled', remindAt: nextSendAt(now, sender.rules.sendWhen), ...paymentOf(receiver.payout, edge.amount),
+      };
+      await store.put('transfers', transfer);
+      out.push(transfer);
+      const later = new Date(transfer.remindAt) > now;
+      await say(roomId, {
+        from: edge.from, to: edge.from, kind: 'transfer_scheduled',
+        text: `${name(edge.to)}에게 ${won(edge.amount)}을 보내요. ${later ? `${whenText(transfer.remindAt)}에 알려 드릴게요` : '곧 알려 드릴게요'}`,
+        meta: later ? '규칙 · 월급날에 보내기' : '규칙 · 바로 보내기',
+      });
+      if (!transfer.link) {
+        await say(roomId, {
+          from: edge.to, to: edge.to, kind: 'payout_needed', text: '받을 계좌를 알려 주면 바로 보낼 수 있어요',
+          action: { type: 'set_payout', ref: transfer.id, for: edge.to },
+        });
+      }
+    }
+    return out;
   }
 
-  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers };
+  // 받을 계좌를 정하면 나에게 오는 아직 끝나지 않은 송금에 링크를 채운다
+  async function setPayout(roomId, actorUid, { bank, accountNo, holder } = {}) {
+    if (!String(bank ?? '').trim() || !/\d{6,}/.test(String(accountNo ?? '').replace(/\D/g, ''))) throw new HttpError(400, '은행과 계좌번호를 확인해 주세요');
+    const agent = await settingsOf(actorUid);
+    const payout = { bank: String(bank).trim().slice(0, 30), accountNo: String(accountNo).replace(/[^\d-]/g, '').slice(0, 30), holder: String(holder ?? '').trim().slice(0, 30) };
+    await store.put('agents', { ...agent, id: actorUid, uid: actorUid, payout });
+    for (const t of (await store.list('transfers', { roomId })).filter((x) => x.to === actorUid && ['scheduled', 'due', 'opened'].includes(x.status))) {
+      await store.put('transfers', { ...t, ...paymentOf(payout, t.amount) });
+    }
+    await say(roomId, { from: actorUid, to: 'all', kind: 'payout_set', text: '받을 계좌를 알려 줬어요. 이제 바로 보낼 수 있어요' });
+    return { ok: true };
+  }
+
+  async function transferOf(roomId, tid, actorUid, who) {
+    const t = await store.get('transfers', tid);
+    if (!t || t.roomId !== roomId) throw new HttpError(404, '송금을 찾을 수 없어요');
+    if (t[who] !== actorUid) throw new HttpError(403, who === 'from' ? '보내는 사람만 할 수 있어요' : '받는 사람만 확인할 수 있어요');
+    const { name } = await load(roomId);
+    return { t, name };
+  }
+
+  // 보내는 사람이 밀어서 보내기를 했다. 링크는 이미 화면에 있으므로 상태만 바꾼다(월급날 전에 미리 보내도 된다)
+  async function approveTransfer(roomId, tid, actorUid) {
+    const { t, name } = await transferOf(roomId, tid, actorUid, 'from');
+    if (!['scheduled', 'due', 'opened'].includes(t.status)) throw new HttpError(409, '이미 보냈거나 바뀐 송금이에요');
+    const saved = { ...t, status: 'opened', openedAt: clock().toISOString() };
+    await store.put('transfers', saved);
+    await say(roomId, { from: t.from, to: t.to, kind: 'transfer_opened', text: `${name(t.to)}에게 보낼 ${won(t.amount)} 송금 화면을 열었어요` });
+    return saved;
+  }
+
+  async function markSent(roomId, tid, actorUid) {
+    const { t, name } = await transferOf(roomId, tid, actorUid, 'from');
+    if (!['scheduled', 'due', 'opened'].includes(t.status)) throw new HttpError(409, '이미 보냈거나 바뀐 송금이에요');
+    const saved = { ...t, status: 'sent', sentAt: clock().toISOString() };
+    await store.put('transfers', saved);
+    await say(roomId, { from: t.from, to: t.to, kind: 'transfer_sent', text: `${name(t.to)}에게 ${won(t.amount)}을 보냈어요` });
+    return saved;
+  }
+
+  async function confirmReceipt(roomId, tid, actorUid) {
+    const { t, name } = await transferOf(roomId, tid, actorUid, 'to');
+    if (t.status === 'confirmed') return t;
+    if (t.status === 'superseded') throw new HttpError(409, '지출이 바뀌어 대체된 송금이에요');
+    const saved = { ...t, status: 'confirmed', confirmedAt: clock().toISOString() };
+    await store.put('transfers', saved);
+    await say(roomId, { from: t.to, to: t.from, kind: 'transfer_confirmed', text: `${name(t.from)}에게서 ${won(t.amount)}을 받았어요` });
+    return saved;
+  }
+
+  // 주기적으로 부른다(로컬 30초, 배포는 Cloud Scheduler). 때가 된 송금을 알리고, 보냈는데 하루가 지나도 확인이 없으면 한 번 더 묻는다
+  async function tick() {
+    const now = clock();
+    let due = 0;
+    let reminded = 0;
+    for (const t of await store.list('transfers')) {
+      const { name } = await load(t.roomId);
+      if (t.status === 'scheduled' && new Date(t.remindAt) <= now) {
+        await store.put('transfers', { ...t, status: 'due', dueAt: now.toISOString() });
+        await say(t.roomId, {
+          from: t.from, to: t.from, kind: 'transfer_due', text: `${name(t.to)}에게 ${won(t.amount)}을 보낼 때예요`,
+          action: { type: 'approve_transfer', ref: t.id, for: t.from },
+        });
+        due++;
+      } else if (t.status === 'sent' && !t.remindedAt && now - new Date(t.sentAt) >= 24 * 3600_000) {
+        await store.put('transfers', { ...t, remindedAt: now.toISOString() });
+        await say(t.roomId, {
+          from: t.to, to: t.to, kind: 'receipt_reminder', text: `${name(t.from)}가 보낸 ${won(t.amount)}을 받았나요?`,
+          action: { type: 'confirm_receipt', ref: t.id, for: t.to },
+        });
+        reminded++;
+      }
+    }
+    return { due, reminded };
+  }
+
+  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers, setPayout, approveTransfer, markSent, confirmReceipt, tick };
 }

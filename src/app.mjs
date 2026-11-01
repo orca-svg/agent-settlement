@@ -129,7 +129,14 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   });
 
   registerExpenseRoutes(routes, { ...ctx, member });
-  registerAgentRoutes(routes, { orchestrator: createOrchestrator({ store, gemini, clock, evidenceFor, counterFor }), member, overLimit });
+  const orchestrator = createOrchestrator({ store, gemini, clock, evidenceFor, counterFor });
+  registerAgentRoutes(routes, { orchestrator, member, overLimit });
+
+  // 때가 된 송금 알림. 배포에서는 Cloud Scheduler가 x-cron-secret을 붙여 부른다. 비밀값이 설정되지 않았으면 열지 않는다
+  routes.post('/api/cron/tick', async ({ req }) => {
+    if (!env.CRON_SECRET || req.headers['x-cron-secret'] !== env.CRON_SECRET) throw new HttpError(401, 'unauthorized');
+    return orchestrator.tick();
+  });
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -153,5 +160,6 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       return send(res, 500, { error: e.message });
     }
   });
+  server.tick = orchestrator.tick; // 로컬 서버가 주기적으로 부른다(server.mjs)
   return server;
 }
