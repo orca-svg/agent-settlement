@@ -1,6 +1,6 @@
 // 사람이 처리해야 할 일. 이벤트 기록이 아니라 현재 상태에서 계산하므로, 처리한 일은 자연히 빠진다.
 
-import { topic } from '../public/ui.js';
+import { topic, subj } from '../public/ui.js';
 import { won } from '../public/core.js';
 
 export const isFlagged = (line) => Boolean(line) && line.confidence < 0.7 && !line.confirmed;
@@ -38,7 +38,7 @@ export function pendingActions({ room, expenses = [], invoices = [], disputes = 
     out.push({ type: 'set_payout', ref: `payout:${to}`, for: to, text: '받을 계좌를 알려 주면 바로 보낼 수 있어요' });
   }
   for (const t of transfers.filter((x) => x.status === 'sent')) {
-    out.push({ type: 'confirm_receipt', ref: t.id, for: t.to, transferId: t.id, text: `${name(t.from)}가 보낸 ${won(t.amount)}을 받았나요?` });
+    out.push({ type: 'confirm_receipt', ref: t.id, for: t.to, transferId: t.id, text: `${subj(name(t.from))} 보낸 ${won(t.amount)}을 받았나요?` });
   }
   return out;
 }

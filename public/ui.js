@@ -177,7 +177,10 @@ export function mountSegs(scope) {
 export const resetSegs = () => segPos.clear();
 
 // 밀어서 보내기: 끝까지 밀어야(또는 Enter) onCommit(el.dataset)이 불린다. 중간에 놓으면 손 속도를 이어받아 돌아간다.
-export function mountSliders(scope, onCommit) {
+// onCommit(dataset)은 끝까지 밀려 스프링이 멈춘 뒤에, onCommitGesture(dataset)는 손을 놓는(또는 Enter) 그 처리기 안에서 동기적으로 부른다.
+// 송금 앱처럼 사용자 제스처 안에서만 열리는 것은 onCommitGesture에서 연다.
+export function mountSliders(scope, handlers) {
+  const { onCommit = () => {}, onCommitGesture = () => {} } = typeof handlers === 'function' ? { onCommit: handlers } : handlers;
   scope.querySelectorAll('.slider').forEach((el) => {
     const thumb = el.querySelector('.slider-thumb');
     const fill = el.querySelector('.slider-fill');
@@ -193,6 +196,7 @@ export function mountSliders(scope, onCommit) {
     let done = false;
     const commit = (v) => {
       done = true;
+      onCommitGesture(el.dataset);
       x.to(max(), {
         damping: 1,
         response: 0.25,

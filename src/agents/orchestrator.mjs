@@ -298,7 +298,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       } else if (t.status === 'sent' && !t.remindedAt && now - new Date(t.sentAt) >= 24 * 3600_000) {
         await store.put('transfers', { ...t, remindedAt: now.toISOString() });
         await say(t.roomId, {
-          from: t.to, to: t.to, kind: 'receipt_reminder', text: `${name(t.from)}가 보낸 ${won(t.amount)}을 받았나요?`,
+          from: t.to, to: t.to, kind: 'receipt_reminder', text: `${subj(name(t.from))} 보낸 ${won(t.amount)}을 받았나요?`,
           action: { type: 'confirm_receipt', ref: t.id, for: t.to },
         });
         reminded++;
