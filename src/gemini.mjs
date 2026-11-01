@@ -58,3 +58,24 @@ export function createGemini({ key, model }) {
     },
   };
 }
+
+// 이번 달 Gemini 호출을 maxCalls회로 묶는다(#10). 넘으면 generate()가 실패해서
+// 호출하는 쪽(allocate/mediate)이 이미 하던 대로 규칙으로 대신한다.
+export function withMonthlyBudget(gemini, { maxCalls = 0, now = () => new Date() } = {}) {
+  if (!gemini || !maxCalls) return gemini;
+  let month = null;
+  let count = 0;
+  return {
+    ...gemini,
+    async generate(args) {
+      const key = now().toISOString().slice(0, 7); // YYYY-MM
+      if (key !== month) {
+        month = key;
+        count = 0;
+      }
+      if (count >= maxCalls) throw new Error(`이번 달 Gemini 호출 한도(${maxCalls}회)를 넘었어요`);
+      count++;
+      return gemini.generate(args);
+    },
+  };
+}
