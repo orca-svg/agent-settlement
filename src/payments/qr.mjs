@@ -1,30 +1,29 @@
-// 데스크톱 QR 핸드오프용 서명 토큰(#8 보안 수정).
+// 데스크톱 QR 핸드오프용 토큰(#8 보안 수정).
 // 계좌번호·금액이 든 토스 링크를 외부 QR 이미지 서비스에 그대로 넘기면 그 서비스가 민감 정보를 보게 된다.
-// 그래서 QR에는 이 토큰(= 서버로 돌아오는 짧은 수명의 서명된 포인터)만 담고, 실제 링크는 /api/qr/:token에서만 풀린다.
+// 그래서 QR에는 추측할 수 없는 무작위 토큰만 담고, 실제 링크는 서버 메모리(token → link)에만 둔다.
+// 토큰 자체에 링크를 담아 서명만 하면(이전 방식) base64만 풀어도 계좌가 보이므로 쓰지 않는다.
 import crypto from 'node:crypto';
 
-const SECRET = crypto.randomBytes(32); // 서버가 켜져 있는 동안만 유효하면 충분하다(토큰 수명 15분)
 const TTL_MS = 15 * 60_000;
+const tokens = new Map(); // token → { link, exp }
 
-const sign = (body) => crypto.createHmac('sha256', SECRET).update(body).digest('base64url');
+function sweep(now) {
+  for (const [token, entry] of tokens) if (entry.exp <= now) tokens.delete(token);
+}
 
 export function signQrToken(link, { now = Date.now } = {}) {
-  const body = Buffer.from(JSON.stringify({ link, exp: now() + TTL_MS }), 'utf8').toString('base64url');
-  return `${body}.${sign(body)}`;
+  sweep(now());
+  const token = crypto.randomBytes(16).toString('base64url');
+  tokens.set(token, { link, exp: now() + TTL_MS });
+  return token;
 }
 
 export function verifyQrToken(token, { now = Date.now } = {}) {
-  const [body, sig] = String(token ?? '').split('.');
-  if (!body || !sig) return null;
-  const expected = sign(body);
-  const a = Buffer.from(sig);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-  try {
-    const { link, exp } = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-    if (typeof link !== 'string' || !exp || now() > exp) return null;
-    return link;
-  } catch {
+  const entry = tokens.get(String(token ?? ''));
+  if (!entry) return null;
+  if (entry.exp <= now()) {
+    tokens.delete(token);
     return null;
   }
+  return entry.link;
 }
