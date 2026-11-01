@@ -1,0 +1,40 @@
+// 영수증 줄을 비서들이 공유한 기억으로 '누가 먹었나' 배분한다. 금액은 계산하지 않는다.
+import { ruleAllocate } from '../../public/core.js';
+import { memoryText, receiptTable, presentNames, lineSchema, cleanLines } from './lines.mjs';
+
+export function allocatePrompt(exp, room, memoryByUid) {
+  const system = [
+    '너는 정산을 돕는 비서들의 공동 작업자다. 영수증의 각 줄을 누가 먹고 마셨는지 추정한다.',
+    '근거는 각 사람의 비서가 공유한 기억과 영수증 줄의 정보(항목·수량·태그)뿐이다. 기억에 없는 사실을 지어내지 않는다.',
+    '',
+    '규칙:',
+    '1. 태그가 "나눠 먹는 안주"인 줄은 함께 있던 사람 모두에게 배정한다. 단, 기억상 그 음식을 먹지 않는 사람은 뺀다.',
+    '2. 잔·1인분 단위인 줄은 수량만큼의 사람에게 배정한다(수량 2면 2명).',
+    '3. 기억상 술을 마시지 않는 사람은 태그가 "술"인 줄에서 뺀다.',
+    '4. 기억에 근거가 있으면 confidence를 0.7 이상, 근거 없이 추측했으면 0.5 미만으로 둔다.',
+    '5. reason은 해요체 한 문장으로, 어떤 기억(누구의 비서 기억 “…”)을 썼는지 밝힌다. 근거가 없으면 그렇다고 쓴다.',
+    '6. 금액은 계산하지 않는다. 계산은 코드가 한다.',
+  ].join('\n');
+  const payer = room.members.find((m) => m.uid === exp.payer)?.name ?? exp.payer;
+  const user = [
+    `함께 있던 사람: ${presentNames(exp, room.members)}`,
+    `비서들이 공유한 기억:\n${memoryText(room.members, memoryByUid)}`,
+    `영수증(${exp.title}, ${payer}가 ${exp.method === 'card' ? '카드' : '현금'} 결제):\n${receiptTable(exp, false)}`,
+    '영수증의 모든 줄(id)에 대해 배정 결과를 JSON으로 내라.',
+  ].join('\n\n');
+  const schema = { type: 'OBJECT', properties: { lines: { type: 'ARRAY', items: lineSchema(exp, room.members) } }, required: ['lines'] };
+  return { system, user, schema };
+}
+
+// → { alloc: Record<itemId, LineAlloc>, source: 모델 이름 | 'rules', error? }
+export async function allocateWithGemini(gemini, exp, room, memoryByUid) {
+  const fallback = ruleAllocate(exp, memoryByUid, room.members);
+  if (!gemini) return { alloc: fallback, source: 'rules' };
+  try {
+    const raw = await gemini.generate(allocatePrompt(exp, room, memoryByUid));
+    return { alloc: cleanLines(exp, room.members, raw.lines, fallback, () => exp.present), source: gemini.model };
+  } catch (e) {
+    console.warn('[allocate] Gemini 실패, 규칙으로 대신:', e.message);
+    return { alloc: fallback, source: 'rules', error: e.message };
+  }
+}
