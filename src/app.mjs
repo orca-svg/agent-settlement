@@ -13,6 +13,7 @@ import { registerExpenseRoutes } from './expenses/routes.mjs';
 import { pendingActions } from './actions.mjs';
 import { allocateWithGemini } from './agents/allocate.mjs';
 import { createCache } from './agents/cache.mjs';
+import { evidenceFor as demoEvidence } from './agents/evidence.mjs';
 import { mediateWithGemini } from './agents/mediate.mjs';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -50,7 +51,7 @@ function serveStatic(pathname, res) {
   fs.createReadStream(file).pipe(res);
 }
 
-export function createApp({ store, gemini = null, clock = () => new Date(), evidenceFor = async () => [], env = {} }) {
+export function createApp({ store, gemini = null, clock = () => new Date(), evidenceFor = demoEvidence, env = {} }) {
   const origins = (env.ALLOWED_ORIGINS || 'https://orca-svg.github.io').split(',');
   const overLimit = createRateLimiter({ max: 30, windowMs: 600_000 });
   const allocCache = createCache(); // 같은 입력의 메뉴 배분은 Gemini에게 다시 묻지 않는다
