@@ -4,6 +4,7 @@ import { won, yen, dayLabel, amountOf, toKrw, shares, ledger, settle, ruleAlloca
 import { reduceMotion } from './motion.js';
 import { esc, chip, avatarHtml, topic, subj, tile, CHEVRON, CHECK, ARROW, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, whose, restNote, allocLabel } from './ui.js';
 import { API_BASE } from './api.js';
+import { createLogPop } from './log-pop.js';
 
 const PEOPLE = ROOM.members.map((m) => m.uid);
 const TRIP = { title: ROOM.name, dates: ROOM.dates, agreedPolicy: ROOM.policy, agreedAt: ROOM.agreedAt };
@@ -40,6 +41,39 @@ let state = fresh();
 let config = { mode: 'unknown' };
 let busy = null;
 let renderedLog = 0;
+let logSeen = 0; // 좁은 화면의 기록 패널에서 마지막으로 본 기록 번호. 처음부터 다시 보면 0으로 돌아간다
+
+// 좁은 화면의 기록 패널 맨 위에 올리는 할 일. 본문의 다음 할 일 카드와 같은 동작을 부른다
+function logTodos() {
+  const todo = (eyebrow, title, actions) => `<div class="pop-todo"><b>${eyebrow}</b><p>${title}</p>
+    <div class="actions">${actions}<button class="btn sm plain" data-action="close-log">나중에</button></div></div>`;
+  switch (state.stage) {
+    case 'collected':
+      return todo('나의 할 일', `비서가 여행 지출 ${EXPENSES.length}건을 모았어요`, '<button class="btn sm" data-action="allocate">나누기 맡기기</button>');
+    case 'review':
+      return todo('나의 할 일', `${topic(flagged().map((it) => `‘${esc(it.name)}’`).join(', '))} 어떻게 나눌까요?`, '<button class="btn sm" data-action="open-exp" data-id="izakaya">확인하기</button>');
+    case 'ready':
+      return todo('나의 할 일', '이대로 청구서를 보낼까요?', '<button class="btn sm" data-action="send">청구서 보내기</button>');
+    case 'disputed':
+      return todo('나의 할 일', '민수의 비서가 ‘2차 바’에 이의를 제기했어요', '<button class="btn sm" data-action="open-dispute">이의 내용 보기</button>');
+    case 'proposal':
+      return todo('나의 할 일', '중재 비서가 나누는 방법을 제안했어요', '<button class="btn sm" data-action="open-dispute">중재안 보기</button>');
+    case 'settling': {
+      const t = transfers().filter(needsHuman)[0];
+      return t ? todo(`${esc(t.from)}의 휴대폰 · ${esc(agentOf(t.from))}`, `오사카 여행 정산 ${won(t.amount)}. 확인하면 보낼게요.`, `<button class="btn sm" data-action="open-payer" data-p="${t.from}">${esc(t.from)}의 화면 보기</button>`) : '';
+    }
+    default:
+      return '';
+  }
+}
+
+const logPop = createLogPop({
+  itemHtml: (l, opts) => logItemHtml({ avatar: avatar(l.from, 'agent'), who: `${agentOf(l.from)} → ${l.to}`, time: l.t, text: l.text, meta: l.meta, tagHtml: l.tag, ...opts }),
+  timeOf: (l) => l.t,
+  todosHtml: logTodos,
+  seen: { get: () => logSeen, set: (n) => { logSeen = n; } },
+  emptyText: '비서에게 나누기를 맡기면 여기에 기록이 쌓여요.',
+});
 
 // 중재 전후로 바뀌는 나누기 방식(split)과 배분(alloc)을 지출에 입혀서 계산에 넘긴다
 const expenseView = () => EXPENSES.map((e) => ({ ...e, split: state.modes[e.id] ?? e.split, alloc: state.allocs[e.id] }));
@@ -462,6 +496,8 @@ function renderChannel() {
     ${state.log.length ? `<ol class="log">${items}</ol>` : '<p class="empty">비서에게 나누기를 맡기면 여기에 기록이 쌓여요.</p>'}`;
   renderedLog = state.log.length;
   el.scrollTop = el.scrollHeight;
+  if (logSeen > state.log.length) logSeen = 0;
+  logPop.update(state.log.map((l, i) => ({ ...l, seq: i + 1 })));
 }
 
 // ---------------------------------------------------------------- 시트 내용
@@ -636,6 +672,9 @@ function render() {
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
   if (!el || el.disabled) return;
+  if (el.dataset.action === 'toggle-log') return logPop.toggle();
+  if (el.dataset.action === 'close-log') return logPop.close();
+  if (logPop.isOpen) logPop.close(false); // 기록 패널 안의 버튼은 패널을 닫고 진행한다
   act(el.dataset.action, el.dataset);
 });
 
@@ -655,7 +694,9 @@ document.addEventListener('submit', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (state.memEdit) {
+    if (logPop.isOpen) {
+      logPop.close();
+    } else if (state.memEdit) {
       state.memEdit = null;
       render();
     } else closeSheet();
@@ -691,5 +732,6 @@ async function loadConfig() {
 
 // 실제 방 화면은 아직 로컬 서버에서만 동작한다(배포된 화면에는 API 서버가 없다)
 $('#to-room').hidden = API_BASE !== '';
+logPop.show(true);
 render();
 loadConfig();

@@ -3,6 +3,7 @@
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
 import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, segArrowKeys, topic, restNote, allocLabel } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
+import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -19,6 +20,37 @@ const colorOf = (uid) => {
 };
 const avatar = (uid, cls = '') => avatarHtml(nameOf(uid)[0], colorOf(uid), cls);
 const timeOf = (iso) => new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Seoul' });
+
+// 좁은 화면에서 상단바 종으로 여는 비서끼리 기록. 마지막으로 본 기록은 방·사람마다 기억한다
+const seenKey = () => `agent-settlement.seen.${roomId}.${currentUid()}`;
+const logPop = createLogPop({
+  itemHtml: (e, opts) => logItemHtml({
+    avatar: avatar(e.from, 'agent'),
+    who: `${agentName(e.from)} → ${nameOf(e.to)}`,
+    time: timeOf(e.at),
+    text: e.text,
+    meta: e.meta,
+    tagHtml: e.action ? chip(`${nameOf(e.action.for)}의 확인 필요`, 'warn') : '',
+    ...opts,
+  }),
+  timeOf: (e) => timeOf(e.at),
+  todosHtml: () => (state.data?.actions ?? []).map((a) => `<div class="pop-todo"><b>${esc(state.data.me.name)}의 할 일</b><p>${esc(a.text)}</p>
+    <div class="actions">${a.type === 'confirm_line' ? `<button class="btn sm" data-action="open-exp" data-id="${esc(a.expenseId)}">확인하기</button>` : ''}<button class="btn sm plain" data-action="close-log">나중에</button></div></div>`).join(''),
+  seen: {
+    get: () => {
+      try {
+        return Number(localStorage.getItem(seenKey())) || 0;
+      } catch {
+        return 0;
+      }
+    },
+    set: (seq) => {
+      try {
+        localStorage.setItem(seenKey(), String(seq));
+      } catch {}
+    },
+  },
+});
 
 // ---------------------------------------------------------------- 데이터
 async function load() {
@@ -542,7 +574,9 @@ function renderChannel() {
     ${state.events.length ? `<ol class="log">${items}</ol>` : `<p class="empty">${state.data ? '아직 기록이 없어요.' : '방을 열면 비서들의 기록이 여기에 보여요.'}</p>`}`;
   state.renderedLog = state.events.length;
   el.scrollTop = el.scrollHeight;
+  logPop.update(state.events);
 }
+
 
 function render() {
   const main = $('#main');
@@ -569,6 +603,8 @@ function render() {
   }
   $('#nav-title').textContent = state.data.room.name;
   $('#nav-add').hidden = false;
+  logPop.show(true);
+  logPop.update(state.events); // 할 일이 바뀌었을 수 있다
   main.innerHTML = [hero(), whoPicker(), nextCard(), expensesSection(), transfersSection()].join('');
   mountSegs(main);
   if (state.sheet === 'exp') renderSheet();
@@ -578,11 +614,15 @@ function render() {
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
   if (!el || el.disabled) return;
+  if (el.dataset.action === 'toggle-log') return logPop.toggle();
+  if (el.dataset.action === 'close-log') return logPop.close();
+  if (logPop.isOpen) logPop.close(false); // 기록 패널 안의 버튼(확인하기)은 패널을 닫고 진행한다
   act(el.dataset.action, el.dataset);
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (!$('#photo-modal').hidden) closePhoto();
+    if (logPop.isOpen) logPop.close();
+    else if (!$('#photo-modal').hidden) closePhoto();
     else sheet.close();
   }
   else segArrowKeys(e, (btn) => act(btn.dataset.action, btn.dataset));

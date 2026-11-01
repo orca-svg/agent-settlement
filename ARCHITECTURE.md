@@ -7,8 +7,10 @@
 ```
 브라우저
   ├─ public/index.html + app.js   데모 화면(로그인 없이 보는 오사카 시나리오). 동작을 바꾸지 않아요
-  └─ public/room.html + room.js   실제 방 화면
-        │  room-api.js: api(), subscribeRoom(), currentUid()
+  ├─ public/room.html + room.js   실제 방 화면
+  │     │  room-api.js: api(), subscribeRoom(), currentUid()
+  └─ public/log-pop.js            좁은 화면(920px 이하)에서 비서끼리 기록을 상단바 종으로 여는 패널. 두 화면이 함께 씀
+        │
         ▼
 API 서버 (server.mjs → src/app.mjs)
   ├─ src/identity.mjs     누가 요청했나 (#2가 교체)
