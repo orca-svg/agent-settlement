@@ -78,6 +78,15 @@ test('Gemini가 없으면 config는 rules, 배분은 규칙으로', async () => 
   s.close();
 });
 
+test('GET /api/qr/:token → 302로 원래 링크를 풀어준다. 틀린 토큰은 404', async () => {
+  const { signQrToken } = await import('../src/payments/qr.mjs');
+  const token = signQrToken('supertoss://send?x=1');
+  const res = await fetch(base + `/api/qr/${token}`, { redirect: 'manual' });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), 'supertoss://send?x=1');
+  assert.equal((await fetch(base + '/api/qr/not-a-token', { redirect: 'manual' })).status, 404);
+});
+
 test('정적 파일: / 는 데모 화면, 경로 탈출은 404', async () => {
   const res = await fetch(base + '/');
   assert.equal(res.status, 200);

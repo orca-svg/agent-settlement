@@ -43,6 +43,15 @@ export const CHEVRON = '<svg class="chev" width="8" height="14" viewBox="0 0 8 1
 export const CHECK = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 export const ARROW = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+// 데스크톱에서 휴대폰으로 넘길 때 보여줄 QR 이미지 주소(#8).
+// 외부 서비스(api.qrserver.com)를 쓴다. 오프라인 데모가 필요해지면 이 함수만 바꾸면 된다.
+// 주의: 여기 넘기는 data는 이 외부 서비스가 그대로 보게 된다. 계좌·금액 같은 민감 정보를
+// 직접 담지 말고, 우리 서버로 돌아오는 짧은 수명 토큰(src/payments/qr.mjs)처럼 민감하지 않은 값만 넘긴다.
+export function qrImageUrl(data, size = 220) {
+  if (!data) return null;
+  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(data)}`;
+}
+
 // 비서끼리 기록 한 줄
 export const logItemHtml = ({ avatar, who, time, text, meta = '', tagHtml = '', enter = false, unread = false, extraHtml = '' }) => `<li class="${enter ? 'enter' : ''}${unread ? ' unread' : ''}">
     ${avatar}

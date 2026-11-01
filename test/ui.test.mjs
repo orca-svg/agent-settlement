@@ -1,7 +1,7 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, topic, subj, whose, restNote, allocLabel, groupRuns, logItemHtml } from '../public/ui.js';
+import { esc, topic, subj, whose, restNote, allocLabel, groupRuns, logItemHtml, qrImageUrl } from '../public/ui.js';
 
 test('조사: 받침에 따라 은/는, 이/가, 나는 내가', () => {
   assert.equal(topic('오차즈케'), '오차즈케는');
@@ -45,4 +45,16 @@ test('logItemHtml: 안 읽은 기록 표시와 덧붙일 내용', () => {
   assert.match(html, /<li class=" ?unread">/);
   assert.match(html, /&lt;b&gt;/);
   assert.match(html, /<details><\/details>/);
+});
+
+test('qrImageUrl: 데이터를 인코딩해 QR 이미지 주소를 만든다', () => {
+  assert.equal(
+    qrImageUrl('supertoss://send?bank=토스뱅크&accountNo=1&amount=1'),
+    'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=supertoss%3A%2F%2Fsend%3Fbank%3D%ED%86%A0%EC%8A%A4%EB%B1%85%ED%81%AC%26accountNo%3D1%26amount%3D1',
+  );
+});
+
+test('qrImageUrl: 빈 값이면 null', () => {
+  assert.equal(qrImageUrl(''), null);
+  assert.equal(qrImageUrl(null), null);
 });

@@ -8,6 +8,7 @@ import { HttpError } from '../http.mjs';
 import { isFlagged } from '../actions.mjs';
 import { evaluateInvoice, nextSendAt } from './rules.mjs';
 import { tossSendLink, payoutFallback } from '../payments/toss.mjs';
+import { signQrToken } from '../payments/qr.mjs';
 import { mediateWithGemini } from './mediate.mjs';
 
 const OPEN = ['open', 'proposed'];
@@ -191,7 +192,11 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
 
   // ---------------------------------------------------------------- 송금
   // 받는 계좌가 있으면 토스 링크를 지금 만들어 둔다. 브라우저는 사용자 제스처 안에서만 앱을 열어 주므로, 승인 순간에는 서버를 기다리지 않는다
-  const paymentOf = (payout, amount) => (payout ? { link: tossSendLink({ ...payout, amount }), fallback: payoutFallback(payout, amount) } : { link: null, fallback: null });
+  const paymentOf = (payout, amount) => {
+    if (!payout) return { link: null, fallback: null, qrToken: null };
+    const link = tossSendLink({ ...payout, amount });
+    return { link, fallback: payoutFallback(payout, amount), qrToken: signQrToken(link, { now: () => clock().getTime() }) };
+  };
   const whenText = (iso) => {
     const kst = new Date(new Date(iso).getTime() + 9 * 3600_000).toISOString();
     return `${dayLabel(kst.slice(0, 10))} 09:00`;

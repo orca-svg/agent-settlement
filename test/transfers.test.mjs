@@ -6,6 +6,7 @@ import { seedDemoRoom } from '../src/dev/seed.mjs';
 import { createOrchestrator } from '../src/agents/orchestrator.mjs';
 import { pendingActions } from '../src/actions.mjs';
 import { createApp } from '../src/app.mjs';
+import { verifyQrToken } from '../src/payments/qr.mjs';
 
 // 이의 없이 모두 수락하는 방: 민수의 근거 규칙을 끄고 한도를 넉넉히
 async function setup({ withoutPayout } = {}) {
@@ -36,6 +37,13 @@ test('받는 정보가 있으면 link와 fallback이 미리 채워진다', async
   const t = pair(await transfers(), 'cs', 'yh');
   assert.equal(t.link, 'supertoss://send?bank=%ED%86%A0%EC%8A%A4%EB%B1%85%ED%81%AC&accountNo=100000000003&amount=41155&origin=linkgen');
   assert.deepEqual(t.fallback, { bank: '토스뱅크', accountNo: '100000000003', amount: 41155 });
+});
+
+test('link가 있으면 qrToken도 있고, 그 토큰을 풀면 link가 나온다(계좌가 외부로 그대로 안 나가게)', async () => {
+  const { transfers } = await setup();
+  const t = pair(await transfers(), 'cs', 'yh');
+  assert.ok(t.qrToken);
+  assert.equal(verifyQrToken(t.qrToken), t.link);
 });
 
 test('받는 정보가 없으면 link=null, fallback도 null이고 받는 사람에게 set_payout', async () => {
