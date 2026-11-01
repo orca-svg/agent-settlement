@@ -24,7 +24,7 @@ export function receiptTable(exp, withTime) {
   return [
     `| id | ${withTime ? '주문 시각 | ' : ''}항목 | 수량 | 단가 | 태그 |`,
     `| --- |${withTime ? ' --- |' : ''} --- | --- | --- | --- |`,
-    ...exp.items.map((it) => `| ${it.id} | ${withTime ? `${it.time} | ` : ''}${inline(it.name, 60)} | ${it.qty} | ${it.unit} | ${it.tags.join(', ')} |`),
+    ...exp.items.map((it) => `| ${inline(it.id, 40)} | ${withTime ? `${it.time} | ` : ''}${inline(it.name, 60)} | ${it.qty} | ${it.unit} | ${it.tags.join(', ')} |`),
   ].join('\n');
 }
 
