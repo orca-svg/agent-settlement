@@ -40,7 +40,7 @@ API 서버 (server.mjs → src/app.mjs)
 | #4 방 | `rooms` 문서와 방 API | 개발용 시드 `POST /api/dev/seed` | 방 만들기·참가하기(환율 표 입력 포함) |
 | #5 비서 설정 | `agents` 문서의 `memory`·`rules` | 시드 기본값 | 설정 화면과 저장 |
 | #7 위치 | `src/agents/evidence.mjs`의 `evidenceFor()`·`counterFor()` | 빈 배열(개발용 데모 방의 '2차 바'만 고정 근거) | 위치 요약 → `Evidence` |
-| #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs` | 시드 값과 최소 입력 폼, `supertoss://send?…` 링크(경로·파라미터는 실기기 검증 전) | 받는 계좌 설정 화면, 실기기 검증 반영 |
+| #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs` | 받는 계좌 설정 화면, `supertoss://send?…` 링크(실기기 검증 완료), 데스크톱 QR 핸드오프(`src/payments/qr.mjs`) | 토스아이디(toss.me) 활용 조사 |
 | #10 보안 | `src/http.mjs`, Firestore 보안 규칙 | 신원당 호출 제한 | 토큰 필수, 보안 규칙 테스트, 계좌 암호화 |
 
 ## Store 인터페이스
