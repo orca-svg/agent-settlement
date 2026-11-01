@@ -130,15 +130,8 @@ async function readReceipt(file) {
   renderSheet();
   try {
     const image = await downscale(file);
-    const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(roomId)}/receipts/extract`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-demo-user': currentUid() },
-      body: JSON.stringify({ image }),
-      signal: controller.signal,
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
-    applyReceipt(json.draft);
+    const { draft } = await api(`/api/rooms/${encodeURIComponent(roomId)}/receipts/extract`, { method: 'POST', body: { image }, signal: controller.signal });
+    applyReceipt(draft);
   } catch (e) {
     if (e.name !== 'AbortError') state.formError = `영수증을 읽지 못했어요(${e.message}). 직접 입력해 주세요.`;
     if (e.name !== 'AbortError') state.addMode = 'manual';
