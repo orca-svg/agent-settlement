@@ -20,13 +20,14 @@ export function setCurrentUid(uid) {
 }
 
 // 신원 헤더는 여기서만 붙인다. 다른 곳에서 fetch로 서버를 직접 부르지 않는다.
-export async function api(path, { method = 'GET', body, signal } = {}) {
+export async function api(path, { method = 'GET', body, signal, keepalive = false } = {}) {
   const uid = currentUid();
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(uid ? { 'x-demo-user': uid } : {}) },
     body: body ? JSON.stringify(body) : undefined,
     signal,
+    keepalive, // 송금 앱으로 넘어가 페이지가 숨어도 요청이 끝나게
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(json.error || `HTTP ${res.status}`), { status: res.status });

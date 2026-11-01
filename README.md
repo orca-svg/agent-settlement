@@ -91,6 +91,16 @@ npm test           # 계산 sanity check
 - 키가 없거나 서버에 닿지 않으면 **규칙 모드**로 동작합니다. 이때 화면 상단에도 그렇게 표시합니다.
 - 모델은 `GEMINI_MODEL`로 고를 수 있습니다. 생략하면 이 키로 쓸 수 있는 최신 Flash 모델을 자동으로 고릅니다.
 
+### 실제 방 화면
+
+```bash
+DEV_SEED=1 npm start   # http://localhost:4500/room.html → '데모 방 만들기' → 보는 사람 고르기
+```
+
+- 지출 남기기 → 줄마다 나누기 → 청구서 보내기 → 이의·중재 → 송금 → 보냈어요·받았어요까지 한 방에서 이어집니다. 사람을 바꿔 가며(나·철수·영희·민수) 각자의 할 일을 확인합니다.
+- 보낼 때가 된 송금은 서버가 30초마다 확인해 알립니다. 배포에서는 Cloud Scheduler가 `x-cron-secret: $CRON_SECRET`을 붙여 `POST /api/cron/tick`을 부릅니다.
+- 밀어서 보내기를 놓는 순간 토스 송금 화면(`supertoss://send?…`)을 엽니다. 앱이 없거나 데스크톱이면 1.5초 뒤 계좌번호를 복사했다고 안내합니다. 링크의 경로·파라미터는 아직 실기기에서 확인하지 않았습니다(#8).
+
 ## 배포와 키 관리
 
 - **화면:** `main`에 push하면 `.github/workflows/pages.yml`이 `public/`을 GitHub Pages에 올립니다.

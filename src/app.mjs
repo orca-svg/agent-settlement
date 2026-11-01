@@ -11,8 +11,11 @@ import { identify } from './identity.mjs';
 import { seedDemoRoom } from './dev/seed.mjs';
 import { registerExpenseRoutes } from './expenses/routes.mjs';
 import { pendingActions } from './actions.mjs';
+import { createOrchestrator } from './agents/orchestrator.mjs';
+import { registerAgentRoutes } from './agents/routes.mjs';
 import { allocateWithGemini } from './agents/allocate.mjs';
 import { createCache } from './agents/cache.mjs';
+import { evidenceFor as demoEvidence, counterFor } from './agents/evidence.mjs';
 import { mediateWithGemini } from './agents/mediate.mjs';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -50,7 +53,7 @@ function serveStatic(pathname, res) {
   fs.createReadStream(file).pipe(res);
 }
 
-export function createApp({ store, gemini = null, clock = () => new Date(), evidenceFor = async () => [], env = {} }) {
+export function createApp({ store, gemini = null, clock = () => new Date(), evidenceFor = demoEvidence, env = {} }) {
   const origins = (env.ALLOWED_ORIGINS || 'https://orca-svg.github.io').split(',');
   const overLimit = createRateLimiter({ max: 30, windowMs: 600_000 });
   const allocCache = createCache(); // 같은 입력의 메뉴 배분은 Gemini에게 다시 묻지 않는다
@@ -116,7 +119,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       disputes,
       transfers: transfers.map((t) => redactTransfer(t, me.uid)),
       ledger: ledger(room, expenses, room.policy),
-      actions: pendingActions({ room, expenses }).filter((x) => x.for === me.uid),
+      actions: pendingActions({ room, expenses, invoices, disputes, transfers }).filter((x) => x.for === me.uid),
     };
   });
 
@@ -126,6 +129,14 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   });
 
   registerExpenseRoutes(routes, { ...ctx, member });
+  const orchestrator = createOrchestrator({ store, gemini, clock, evidenceFor, counterFor });
+  registerAgentRoutes(routes, { orchestrator, member, overLimit });
+
+  // 때가 된 송금 알림. 배포에서는 Cloud Scheduler가 x-cron-secret을 붙여 부른다. 비밀값이 설정되지 않았으면 열지 않는다
+  routes.post('/api/cron/tick', async ({ req }) => {
+    if (!env.CRON_SECRET || req.headers['x-cron-secret'] !== env.CRON_SECRET) throw new HttpError(401, 'unauthorized');
+    return orchestrator.tick();
+  });
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -149,5 +160,6 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       return send(res, 500, { error: e.message });
     }
   });
+  server.tick = orchestrator.tick; // 로컬 서버가 주기적으로 부른다(server.mjs)
   return server;
 }

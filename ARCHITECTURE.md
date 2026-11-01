@@ -39,8 +39,8 @@ API 서버 (server.mjs → src/app.mjs)
 | #3 Firestore | `public/room-api.js`의 `subscribeRoom()` | 2초 폴링 | `onSnapshot` |
 | #4 방 | `rooms` 문서와 방 API | 개발용 시드 `POST /api/dev/seed` | 방 만들기·참가하기(환율 표 입력 포함) |
 | #5 비서 설정 | `agents` 문서의 `memory`·`rules` | 시드 기본값 | 설정 화면과 저장 |
-| #7 위치 | `src/agents/evidence.mjs`의 `evidenceFor()` | 빈 배열 | 위치 요약 → `Evidence` |
-| #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs` | 시드 값, 딥링크 생성기(#9) | 받는 계좌 설정 화면, 실기기 검증 반영 |
+| #7 위치 | `src/agents/evidence.mjs`의 `evidenceFor()`·`counterFor()` | 빈 배열(개발용 데모 방의 '2차 바'만 고정 근거) | 위치 요약 → `Evidence` |
+| #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs` | 시드 값과 최소 입력 폼, `supertoss://send?…` 링크(경로·파라미터는 실기기 검증 전) | 받는 계좌 설정 화면, 실기기 검증 반영 |
 | #10 보안 | `src/http.mjs`, Firestore 보안 규칙 | 신원당 호출 제한 | 토큰 필수, 보안 규칙 테스트, 계좌 암호화 |
 
 ## Store 인터페이스
@@ -104,9 +104,18 @@ API 서버 (server.mjs → src/app.mjs)
 | POST | `/api/rooms/:id/expenses/:eid/allocate` | 비서들이 공유한 기억으로 영수증 줄 배분. 근거 없는 줄은 지출을 남긴 사람에게 물어요. 응답 `{ expense, source, how, latencyMs }` |
 | POST | `/api/rooms/:id/expenses/:eid/lines/:itemId` | 줄 하나를 사람이 확정(`{ consumers }`) |
 
-`actions`는 이벤트 기록에서 세지 않고 서버가 현재 상태에서 계산해요(`src/actions.mjs`). 그래서 처리한 일은 자동으로 빠져요. 지금은 `confirm_line`만 있고, 다음 작업(#9)에서 청구서 답하기·이의 동의·송금 승인·받았어요 확인이 더해져요.
+| POST | `/api/rooms/:id/invoices/send` | 지금 방 `version`으로 청구서 보내기. 같은 version이면 다시 만들지 않아요(멱등). 각자의 비서가 규칙대로 수락·질문·이의를 정해요 |
+| POST | `/api/rooms/:id/invoices/:iid/answer` | 주인에게 물은 청구서에 답하기 `{ decision: 'accept'|'dispute', expenseId?, claim? }` |
+| POST | `/api/rooms/:id/disputes` | 이의 제기 `{ expenseId, claim }` |
+| POST | `/api/rooms/:id/disputes/:did/mediate` | 중재 비서에게 맡기기(당사자만) |
+| POST | `/api/rooms/:id/disputes/:did/agree` | 중재안에 동의. 양쪽이 동의하면 지출을 다시 나누고 version을 올려 청구서를 다시 보내요 |
+| POST | `/api/rooms/:id/payout` | 받을 계좌 `{ bank, accountNo, holder }`. 나에게 오는 송금에 토스 링크를 채워요 |
+| POST | `/api/rooms/:id/transfers/:tid/approve` · `sent` · `confirm` | 송금 화면 열기·보냈어요(보내는 사람), 받았어요(받는 사람) |
+| POST | `/api/cron/tick` | 때가 된 송금 알림, 보낸 뒤 24시간 미확인 알림. `x-cron-secret`이 `CRON_SECRET`과 같을 때만(로컬 서버는 30초마다 스스로 불러요) |
 
-다음 작업(#9)에서 더해질 것: 청구서 보내기·답하기, 이의 제기·중재·동의, 송금 승인·보냈어요·받았어요, 일정 처리(`/api/cron/tick`).
+`actions`는 이벤트 기록에서 세지 않고 서버가 현재 상태에서 계산해요(`src/actions.mjs`). 그래서 처리한 일은 자동으로 빠져요. 종류는 `confirm_line`(줄 확인), `answer_invoice`(한도를 넘은 청구서), `agree_dispute`(중재 맡기기·중재안 동의), `approve_transfer`(보낼 때가 된 송금), `set_payout`(받을 계좌 없음), `confirm_receipt`(받았는지 확인)예요.
+
+**송금 링크는 미리 만들어요.** 브라우저는 사용자 제스처 안에서만 앱을 열어 줘요. 그래서 송금을 만들 때 서버가 `link`(토스 송금 화면)와 `fallback`(계좌·금액 복사용)을 채워 두고, 화면은 밀어서 보내기를 놓는 그 순간 링크를 열어요.
 
 ## 로컬에서 실행
 
