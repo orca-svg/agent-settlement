@@ -6,8 +6,10 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PEOPLE, EXPENSES, MEMORY_LIMIT, DISPUTE } from './public/data.js';
-import { ruleAllocate, presentAfterLeaving } from './public/core.js';
+import { DEMO_ROOM, DEMO_EXPENSES as EXPENSES, MEMORY_LIMIT, DEMO_DISPUTE as DISPUTE } from './public/data.js';
+import { ruleAllocate, presentAfter } from './public/core.js';
+
+const PEOPLE = DEMO_ROOM.members.map((m) => m.uid);
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(root, 'public');
@@ -187,15 +189,15 @@ function cleanLines(exp, raw, fallback, presentAt) {
 }
 
 async function allocate(memory) {
-  const fallback = ruleAllocate(izakaya, memory);
+  const fallback = ruleAllocate(izakaya, memory, DEMO_ROOM.members);
   if (!KEY) return { lines: fallback, source: 'rules' };
   const raw = await callGemini(allocatePrompt(memory));
   return { lines: cleanLines(izakaya, raw.lines, fallback, () => izakaya.present), source: MODEL };
 }
 
 async function mediate(memory) {
-  const presentAt = presentAfterLeaving(bar, DISPUTE);
-  const fallback = ruleAllocate(bar, memory, presentAt);
+  const presentAt = presentAfter(bar, DISPUTE.by, DISPUTE.leftAt);
+  const fallback = ruleAllocate(bar, memory, DEMO_ROOM.members, presentAt);
   const ruleSummary = `${DISPUTE.leftAt} 이전 주문은 넷이, 이후 주문은 ${DISPUTE.by}를 뺀 셋이 나눠요. 술을 마시지 않는 사람은 술값에서 빠져요.`;
   if (!KEY) return { summary: ruleSummary, lines: fallback, source: 'rules' };
   const raw = await callGemini(mediatePrompt(memory));

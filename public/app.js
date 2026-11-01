@@ -1,9 +1,11 @@
 // 화면 로직. 사람은 '확인·승인'만 하고, 돈 얘기는 비서들이 오른쪽 채널에서 주고받는다.
-import { PEOPLE, TRIP, POLICIES, EXPENSES, MEMORY, MEMORY_LIMIT, RULES, DISPUTE } from './data.js';
-import { won, yen, dayLabel, jpyOf, toKrw, shares, ledger, settle, ruleAllocate, presentAfterLeaving } from './core.js';
+import { DEMO_ROOM as ROOM, POLICIES, DEMO_EXPENSES as EXPENSES, DEMO_MEMORY as MEMORY, MEMORY_LIMIT, DEMO_RULES as RULES, DEMO_DISPUTE as DISPUTE } from './data.js';
+import { won, yen, dayLabel, amountOf, toKrw, shares, ledger, settle, ruleAllocate, presentAfter } from './core.js';
 import { Spring, VelocityTracker, project, rubberband, reduceMotion } from './motion.js';
 import { API_BASE } from './api.js';
 
+const PEOPLE = ROOM.members.map((m) => m.uid);
+const TRIP = { title: ROOM.name, dates: ROOM.dates, agreedPolicy: ROOM.policy, agreedAt: ROOM.agreedAt };
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const COLOR = Object.fromEntries(PEOPLE.map((p, i) => [p, `var(--p${i})`]));
@@ -62,7 +64,9 @@ let config = { mode: 'unknown' };
 let busy = null;
 let renderedLog = 0;
 
-const agreedLedger = () => ledger({ policy: TRIP.agreedPolicy, modes: state.modes, allocs: state.allocs });
+// 중재 전후로 바뀌는 나누기 방식(split)과 배분(alloc)을 지출에 입혀서 계산에 넘긴다
+const expenseView = () => EXPENSES.map((e) => ({ ...e, split: state.modes[e.id] ?? e.split, alloc: state.allocs[e.id] }));
+const agreedLedger = () => ledger(ROOM, expenseView(), TRIP.agreedPolicy);
 const transfers = () => settle(agreedLedger());
 const flagged = () => {
   const a = state.allocs.izakaya;
@@ -119,7 +123,7 @@ async function allocate() {
       return render();
     }
     await sleep(600);
-    out = { lines: ruleAllocate(izakaya, state.memory), source: 'rules', fallback: e.message };
+    out = { lines: ruleAllocate(izakaya, state.memory, ROOM.members), source: 'rules', fallback: e.message };
   }
   busy = null;
   state.allocs.izakaya = out.lines;
@@ -188,7 +192,7 @@ async function mediate() {
     await sleep(600);
     out = {
       summary: `${DISPUTE.leftAt} 이전 주문은 넷이, 이후 주문은 ${DISPUTE.by}를 뺀 셋이 나눠요. 술을 마시지 않는 사람은 술값에서 빠져요.`,
-      lines: ruleAllocate(bar, state.memory, presentAfterLeaving(bar, DISPUTE)),
+      lines: ruleAllocate(bar, state.memory, ROOM.members, presentAfter(bar, DISPUTE.by, DISPUTE.leftAt)),
       source: 'rules',
       fallback: e.message,
     };
@@ -369,11 +373,11 @@ function expenseStatus(e) {
 
 function expensesSection() {
   const rows = EXPENSES.map((e) => {
-    const { krw } = toKrw(e, TRIP.agreedPolicy);
+    const { krw } = toKrw(e, ROOM, TRIP.agreedPolicy);
     return `<button class="row" data-action="open-exp" data-id="${e.id}">
       ${tile(e.kind)}
       <span class="grow"><span class="title">${esc(e.title)}</span>
-        <span class="meta" style="display:block">${esc(e.payer)} · ${e.method === 'card' ? '카드' : '현금'} ${yen(jpyOf(e))} · ${dayLabel(e.date)} ${e.time}</span>
+        <span class="meta" style="display:block">${esc(e.payer)} · ${e.method === 'card' ? '카드' : '현금'} ${yen(amountOf(e))} · ${dayLabel(e.date)} ${e.time}</span>
         <span style="display:block;margin-top:4px">${expenseStatus(e)}</span></span>
       <span class="end"><span class="amount">${won(krw)}</span></span>
       ${CHEVRON}
@@ -388,7 +392,7 @@ function expensesSection() {
 
 function policySection() {
   const agreed = agreedLedger();
-  const preview = ledger({ policy: state.preview, modes: state.modes, allocs: state.allocs });
+  const preview = ledger(ROOM, expenseView(), state.preview);
   const isPreview = state.preview !== TRIP.agreedPolicy;
   const netText = (n) => (n >= 0 ? `받을 돈 ${won(n)}` : `보낼 돈 ${won(-n)}`);
   const rows = PEOPLE.map((p) => {
@@ -496,7 +500,7 @@ function linesHtml(exp, alloc, { editable, timed }) {
   return exp.items.map((it) => {
     const a = alloc?.[it.id];
     const flag = a && exp.id === 'izakaya' && a.confidence < 0.7 && !a.confirmed;
-    const present = timed ? presentAfterLeaving(exp, DISPUTE)(it) : exp.present;
+    const present = timed ? presentAfter(exp, DISPUTE.by, DISPUTE.leftAt)(it) : exp.present;
     const picks = present.map((p) => `<button type="button" class="pick" aria-pressed="${Boolean(a?.consumers.includes(p))}" ${editable && a ? '' : 'disabled'}
         data-action="toggle-pick" data-exp="${exp.id}" data-line="${it.id}" data-p="${p}">${avatar(p)}${esc(p)}</button>`).join('');
     return `<div class="line ${flag ? 'flag' : ''}">
@@ -509,7 +513,7 @@ function linesHtml(exp, alloc, { editable, timed }) {
 }
 
 function sharesHtml(exp, mode, alloc) {
-  const s = shares(exp, TRIP.agreedPolicy, mode, alloc);
+  const s = shares({ ...exp, split: mode }, ROOM, TRIP.agreedPolicy, alloc);
   return PEOPLE.filter((p) => s.krwShare[p] !== undefined).map((p) => `<div class="row" style="--inset:52px">${avatar(p)}
       <span class="grow">${esc(p)}${p === exp.payer ? ' <span class="meta">· 낸 사람, 끝전 포함</span>' : ''}</span>
       <span class="amount num">${won(s.krwShare[p])}</span></div>`).join('');
@@ -517,7 +521,7 @@ function sharesHtml(exp, mode, alloc) {
 
 function expenseSheet(id) {
   const e = byId(id);
-  const { krw, how } = toKrw(e, TRIP.agreedPolicy);
+  const { krw, how } = toKrw(e, ROOM, TRIP.agreedPolicy);
   const mode = state.modes[e.id] ?? e.split ?? 'equal';
   const alloc = state.allocs[e.id];
   let detail = '';
@@ -538,7 +542,7 @@ function expenseSheet(id) {
   return {
     title: e.title,
     html: `<div class="big"><div class="amt">${won(krw)}</div>
-        <p class="sub">${yen(jpyOf(e))} · ${esc(subj(e.payer))} ${e.method === 'card' ? '카드로' : '현금으로'} 냄 · ${dayLabel(e.date)} ${e.time} · ${esc(e.source)}에서</p></div>
+        <p class="sub">${yen(amountOf(e))} · ${esc(subj(e.payer))} ${e.method === 'card' ? '카드로' : '현금으로'} 냄 · ${dayLabel(e.date)} ${e.time} · ${esc(e.source)}에서</p></div>
       <p class="how">${esc(policyLabel(TRIP.agreedPolicy))} 정책: ${esc(how)}</p>
       ${detail}
       <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>${mode === 'items' ? '먹은 만큼' : '1/N'}</span></h3>
@@ -557,8 +561,8 @@ function disputeSheet() {
   } else if (state.stage === 'mediating') {
     action = '<div class="next" aria-busy="true" style="margin:0"><h2 style="font-size:1.0625rem">중재 비서가 근거를 맞춰 보는 중이에요</h2><div class="progress"><i></i></div><div class="actions"><button class="btn plain sm" data-action="cancel">취소</button></div></div>';
   } else if (state.proposal) {
-    const before = shares(e, TRIP.agreedPolicy, 'equal').krwShare;
-    const after = shares(e, TRIP.agreedPolicy, 'items', state.proposal.lines).krwShare;
+    const before = shares({ ...e, split: 'equal' }, ROOM, TRIP.agreedPolicy).krwShare;
+    const after = shares({ ...e, split: 'items' }, ROOM, TRIP.agreedPolicy, state.proposal.lines).krwShare;
     const changes = PEOPLE.map((p) => {
       const d = (after[p] || 0) - (before[p] || 0);
       return `<div class="row" style="--inset:52px">${avatar(p)}<span class="grow">${esc(p)}</span>
@@ -575,7 +579,7 @@ function disputeSheet() {
   }
   return {
     title: '이의 제기 · 2차 바',
-    html: `<div class="big"><div class="amt">${yen(jpyOf(e))}</div>
+    html: `<div class="big"><div class="amt">${yen(amountOf(e))}</div>
         <p class="sub">${esc(subj(e.payer))} 카드로 냄 · ${dayLabel(e.date)} ${e.time} 결제</p></div>
       <div class="split" style="margin-bottom:20px">
         <div class="claim"><h3>${avatar('민수', 'agent')}민수의 비서 주장</h3><p>${esc(DISPUTE.claim)}</p><ul>${DISPUTE.evidence.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
