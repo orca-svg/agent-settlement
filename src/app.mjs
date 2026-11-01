@@ -11,6 +11,8 @@ import { identify } from './identity.mjs';
 import { seedDemoRoom } from './dev/seed.mjs';
 import { registerExpenseRoutes } from './expenses/routes.mjs';
 import { pendingActions } from './actions.mjs';
+import { createOrchestrator } from './agents/orchestrator.mjs';
+import { registerAgentRoutes } from './agents/routes.mjs';
 import { allocateWithGemini } from './agents/allocate.mjs';
 import { createCache } from './agents/cache.mjs';
 import { evidenceFor as demoEvidence } from './agents/evidence.mjs';
@@ -117,7 +119,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       disputes,
       transfers: transfers.map((t) => redactTransfer(t, me.uid)),
       ledger: ledger(room, expenses, room.policy),
-      actions: pendingActions({ room, expenses }).filter((x) => x.for === me.uid),
+      actions: pendingActions({ room, expenses, invoices, disputes, transfers }).filter((x) => x.for === me.uid),
     };
   });
 
@@ -127,6 +129,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   });
 
   registerExpenseRoutes(routes, { ...ctx, member });
+  registerAgentRoutes(routes, { orchestrator: createOrchestrator({ store, gemini, clock, evidenceFor }), member });
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
