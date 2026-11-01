@@ -17,8 +17,8 @@ const ok = {
   ],
 };
 
-test('줄이 없으면 ok=false', async () => {
-  const d = await extractReceipt(fake({ ...ok, items: [] }), { image, room: DEMO_ROOM });
+test('줄도 합계도 없으면 ok=false', async () => {
+  const d = await extractReceipt(fake({ ...ok, items: [], total: 0 }), { image, room: DEMO_ROOM });
   assert.equal(d.ok, false);
   assert.equal(d.reason, '영수증을 읽지 못했어요');
 });
@@ -37,6 +37,33 @@ test("모르는 태그는 '기타'로", async () => {
   assert.equal(d.items.length, 3);
   assert.equal(d.warnings.length, 0);
   assert.equal(d.source, 'fake');
+});
+
+test('합계만 읽히고 줄이 없으면 합계 한 줄로 초안을 만들고 확인을 요청한다', async () => {
+  const d = await extractReceipt(fake({ ...ok, merchant: '편의점', total: 1500, items: [] }), { image, room: DEMO_ROOM });
+  assert.equal(d.ok, true);
+  assert.deepEqual(d.items.map((i) => [i.name, i.qty, i.unit]), [['편의점', 1, 1500]]);
+  assert.ok(d.warnings.some((w) => w.includes('메뉴 줄을 읽지 못해')));
+});
+
+test('영수증에 합계가 없으면 줄의 합을 합계로 쓰고 경고한다', async () => {
+  const d = await extractReceipt(fake({ ...ok, total: 0 }), { image, room: DEMO_ROOM });
+  assert.equal(d.ok, true);
+  assert.equal(d.total, 7860);
+  assert.ok(d.warnings.some((w) => w.includes('합계가 적혀 있지 않아')));
+});
+
+test('모델이 알린 애매한 점(notes)은 경고로 보여 준다', async () => {
+  const d = await extractReceipt(fake({ ...ok, notes: ['맨 아래 줄은 줄로 지워져 있어요', '  '] }), { image, room: DEMO_ROOM });
+  assert.deepEqual(d.warnings, ['맨 아래 줄은 줄로 지워져 있어요']);
+});
+
+test('처음에 못 읽으면 한 번 더 읽는다', async () => {
+  let calls = 0;
+  const flaky = { model: 'fake', generate: async () => (++calls === 1 ? { ...ok, items: [], total: 0 } : ok) };
+  const d = await extractReceipt(flaky, { image, room: DEMO_ROOM });
+  assert.equal(calls, 2);
+  assert.equal(d.ok, true);
 });
 
 test('gemini가 null이면 ok=false', async () => {
