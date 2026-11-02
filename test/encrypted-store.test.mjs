@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import { MemoryStore } from '../src/store/memory.mjs';
 import { encryptedStore } from '../src/store/encrypted.mjs';
 import { isSealed } from '../src/security/seal.mjs';
+import { seedDemoRoom } from '../src/dev/seed.mjs';
+import { createOrchestrator } from '../src/agents/orchestrator.mjs';
+import { createApp } from '../src/app.mjs';
 
 const KEY = Buffer.alloc(32, 3);
 const PAYOUT = { bank: '토스뱅크', accountNo: '100000000002', holder: '철수' };
@@ -145,4 +148,54 @@ test('32바이트가 아닌 열쇠, id가 없는 문서는 바로 거부한다',
   assert.throws(() => encryptedStore(new MemoryStore(), Buffer.alloc(16)), /32바이트/);
   const { store } = make();
   await assert.rejects(store.put('agents', { uid: 'cs', payout: PAYOUT }), /id가 없는 문서/);
+});
+
+// ---------------------------------------------------------------- 통합: 데모 방 전체 흐름
+const DEMO_ACCOUNTS = ['100000000001', '100000000002', '100000000003', '100000000004'];
+const rawDump = async (inner) => JSON.stringify([...(await inner.list('agents')), ...(await inner.list('transfers'))]);
+
+// 이의 없이 모두 수락하는 데모 방(test/transfers.test.mjs의 setup과 같은 조건)을 래퍼 위에 만든다
+async function demoRoom() {
+  const { inner, store } = make();
+  await seedDemoRoom(store, { id: 'demo-e' });
+  for (const uid of ['me', 'cs', 'yh', 'ms']) {
+    const a = await store.get('agents', uid);
+    await store.put('agents', { ...a, rules: { ...a.rules, autoAccept: 1_000_000, onDispute: 'ask' } });
+  }
+  const orch = createOrchestrator({ store, clock: () => new Date('2026-11-10T03:00:00Z') });
+  await orch.sendInvoices('demo-e', 'me');
+  return { inner, store, orch };
+}
+
+test('통합: 청구→송금까지 돌려도 저장소에는 계좌번호가 없고, 당사자 화면에는 평문', async () => {
+  const { inner, store } = await demoRoom();
+  const ts = await store.list('transfers', { roomId: 'demo-e' });
+  assert.equal(ts.length, 3);
+  assert.ok(ts.every((t) => t.link.startsWith('supertoss://send?')));
+
+  const dump = await rawDump(inner);
+  for (const n of DEMO_ACCOUNTS) assert.ok(!dump.includes(n), `저장소에 ${n}이 평문으로 남음`);
+  assert.ok(!dump.includes('토스뱅크') && !dump.includes(encodeURIComponent('토스뱅크')));
+
+  const server = createApp({ store, gemini: null, env: {} });
+  await new Promise((r) => server.listen(0, r));
+  try {
+    const res = await fetch(`http://localhost:${server.address().port}/api/rooms/demo-e`, { headers: { 'x-demo-user': 'cs' } });
+    assert.equal(res.status, 200);
+    const t = (await res.json()).transfers.find((x) => x.from === 'cs' && x.to === 'yh');
+    assert.deepEqual(t.fallback, { bank: '토스뱅크', accountNo: '100000000003', amount: 41155 });
+    assert.match(t.link, /accountNo=100000000003/);
+  } finally {
+    server.close();
+  }
+});
+
+test('통합: 받을 계좌를 새로 정해도 저장소에는 잠긴 글자만', async () => {
+  const { inner, store, orch } = await demoRoom();
+  await orch.setPayout('demo-e', 'yh', { bank: '국민은행', accountNo: '123-456-789012', holder: '영희' });
+  const dump = await rawDump(inner);
+  assert.ok(!dump.includes('123456789012') && !dump.includes('123-456-789012'));
+  assert.equal((await store.get('agents', 'yh')).payout.accountNo, '123-456-789012');
+  const t = (await store.list('transfers', { roomId: 'demo-e' })).find((x) => x.to === 'yh');
+  assert.equal(t.fallback.accountNo, '123456789012');
 });
