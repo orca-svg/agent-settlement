@@ -643,11 +643,12 @@ button.row:active { background: var(--fill); }
 .slider.pressed .slider-thumb { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24); }
 .slider-hint { font-size: 0.75rem; color: var(--label-3); text-align: center; margin-top: 6px; }
 
-/* 컴퓨터(넓은 화면)에서만 보이는 QR. 휴대폰은 토스가 바로 열리니 필요 없다 */
+/* 컴퓨터(마우스로 가리키는 기기)에서만 보이는 QR. 휴대폰은 가로로 돌려 넓어도 토스가 바로 열리니 필요 없다.
+   미디어 쿼리는 ui.js의 COMPUTER_QUERY와 같아야 한다 */
 .qr-desktop { display: none; margin-top: 16px; text-align: center; }
 .qr-desktop img { border-radius: 12px; width: 220px; height: 220px; }
 .qr-wait { width: 220px; height: 220px; margin: 0 auto; display: grid; place-items: center; border-radius: 12px; background: var(--fill); color: var(--label-2); font-size: 0.8125rem; line-height: 1.5; padding: 16px; box-sizing: border-box; }
-@media (min-width: 640px) {
+@media (hover: hover) and (pointer: fine) {
   .qr-desktop { display: block; }
 }
 
@@ -766,7 +767,7 @@ body.pop-open { overflow: hidden; }
 .pop-todo { margin: 0 12px 10px; background: var(--orange-soft); border-radius: 12px; padding: 10px 12px; }
 .pop-todo b { display: block; font-size: 0.75rem; color: var(--orange); font-weight: 600; letter-spacing: 0; }
 .pop-todo p { margin: 2px 0 8px; font-size: 0.9375rem; font-weight: 600; }
-.pop-todo .actions { display: flex; gap: 8px; }
+.pop-todo .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .log details.more { margin-top: 4px; }
 .log details.more > summary { list-style: none; cursor: pointer; font-size: 0.8125rem; color: var(--tint); font-weight: 600; letter-spacing: 0; }
 .log details.more > summary::-webkit-details-marker { display: none; }

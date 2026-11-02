@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { ledger, settle, won, dayLabel } from '../../public/core.js';
 import { topic, subj, obj } from '../../public/ui.js';
 import { HttpError } from '../http.mjs';
-import { isFlagged } from '../actions.mjs';
+import { isFlagged, awaitsSender } from '../actions.mjs';
 import { evaluateInvoice, nextSendAt } from './rules.mjs';
 import { tossSendLink, payoutFallback } from '../payments/toss.mjs';
 import { signQrToken, QR_TTL_MS } from '../payments/qr.mjs';
@@ -15,6 +15,9 @@ import { findBank } from '../../public/banks.js';
 const OPEN = ['open', 'proposed'];
 const STALE = '지출이 바뀌었어요. 청구서를 다시 보낸 뒤 새 금액으로 보내 주세요';
 const DEFAULT_RULES = { autoAccept: 0, sendWhen: 'now', onDispute: 'ask' };
+// 보냈어요 뒤 받는 사람이 답이 없으면 다시 묻는 때(sentAt 기준). 1일 뒤, 3일 뒤 두 번. 그 뒤로는 할 일 카드만 남는다
+const DAY_MS = 24 * 3600_000;
+const RECEIPT_REMINDERS = [1 * DAY_MS, 3 * DAY_MS];
 
 export function createOrchestrator({ store, gemini = null, clock = () => new Date(), evidenceFor = async () => [], counterFor = async () => [] }) {
   const say = (roomId, ev) => store.appendEvent(roomId, ev);
@@ -257,8 +260,9 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     if (!t || t.roomId !== roomId) throw new HttpError(404, '송금을 찾을 수 없어요');
     if (t[who] !== actorUid) throw new HttpError(403, who === 'from' ? '보내는 사람만 할 수 있어요' : '받는 사람만 확인할 수 있어요');
     const { room, name } = await load(roomId);
-    // 보내기 전 단계에서 지출이 바뀌었으면 옛 금액으로 보내지 않게 막는다(받았어요 확인은 그대로 받는다)
-    if (who === 'from' && t.version !== room.version) throw new HttpError(409, STALE);
+    // 보내기 전 단계에서 지출이 바뀌었으면 옛 금액으로 보내지 않게 막는다(받았어요 확인은 그대로 받는다).
+    // 이미 보냈다고 한 송금(sent)은 돈이 오갔을 수 있으니, 지출이 바뀌어도 그 기록을 마무리할 수 있게 둔다(#8 송금 확인)
+    if (who === 'from' && t.status !== 'sent' && t.version !== room.version) throw new HttpError(409, STALE);
     return { t, name };
   }
 
@@ -276,18 +280,38 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
   // 그래서 보내는 사람이 송금 화면을 열 때마다 새로 만든다. 화면은 expiresAt 전에 다시 부른다
   async function qrFor(roomId, tid, actorUid) {
     const { t } = await transferOf(roomId, tid, actorUid, 'from');
-    if (!['scheduled', 'due', 'opened'].includes(t.status)) throw new HttpError(409, '이미 보냈거나 바뀐 송금이에요');
+    if (!awaitsSender(t)) throw new HttpError(409, '이미 보냈거나 바뀐 송금이에요');
     if (!t.link) throw new HttpError(409, '받을 계좌가 아직 없어요');
     const now = clock().getTime();
     return { qrToken: signQrToken(t.link, { now: () => now }), expiresAt: new Date(now + QR_TTL_MS).toISOString() };
   }
 
+  // 받는 사람이 "아직 안 들어왔어요"를 눌렀다(#8 송금 확인). 상태는 sent로 두고 표시(notReceivedAt)만 붙여 보내는 사람에게 다시 묻는다.
+  // 은행 지연·계좌 착오처럼 보냈는데 안 들어온 돈도 있어서, 안 보낸 돈(opened)처럼 대체하거나 링크를 새 계좌로 바꾸지 않는다
+  async function reportNotReceived(roomId, tid, actorUid) {
+    const { t } = await transferOf(roomId, tid, actorUid, 'to');
+    if (t.status !== 'sent') throw new HttpError(409, '보냈다고 한 송금에만 할 수 있어요');
+    if (t.notReceivedAt) return t; // 두 번 눌러도 같은 결과(받았어요 확인과 같다)
+    const saved = { ...t, notReceivedAt: clock().toISOString() };
+    await store.put('transfers', saved);
+    await say(roomId, {
+      from: t.to, to: t.from, kind: 'transfer_not_received', text: `아직 ${won(t.amount)}을 못 받았어요. 송금 내역을 한 번 확인해 주세요`,
+      action: { type: 'approve_transfer', ref: t.id, for: t.from },
+    });
+    return saved;
+  }
+
   async function markSent(roomId, tid, actorUid) {
     const { t, name } = await transferOf(roomId, tid, actorUid, 'from');
-    if (!['scheduled', 'due', 'opened'].includes(t.status)) throw new HttpError(409, '이미 보냈거나 바뀐 송금이에요');
-    const saved = { ...t, status: 'sent', sentAt: clock().toISOString() };
+    if (!awaitsSender(t)) throw new HttpError(409, '이미 보냈거나 바뀐 송금이에요');
+    // 받는 사람이 안 들어왔다고 한 뒤 송금 내역을 보고(또는 다시 보내고) 보냈어요를 누를 수도 있다.
+    // 그때는 표시를 내리고 확인한 시각을 남긴다(받는 사람 문구 "송금 내역을 확인했대요"). 다시 알림은 처음부터 센다
+    const now = clock().toISOString();
+    const { notReceivedAt, ...rest } = t;
+    const saved = { ...rest, status: 'sent', sentAt: now, reminders: 0, ...(notReceivedAt ? { recheckedAt: now } : {}) };
     await store.put('transfers', saved);
-    await say(roomId, { from: t.from, to: t.to, kind: 'transfer_sent', text: `${name(t.to)}에게 ${won(t.amount)}을 보냈어요` });
+    const text = `${name(t.to)}에게 ${won(t.amount)}을 보냈어요`;
+    await say(roomId, { from: t.from, to: t.to, kind: 'transfer_sent', text: t.notReceivedAt ? `송금 내역을 확인했어요. ${text}` : text });
     return saved;
   }
 
@@ -301,7 +325,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return saved;
   }
 
-  // 주기적으로 부른다(로컬 30초, 배포는 Cloud Scheduler). 때가 된 송금을 알리고, 보냈는데 하루가 지나도 확인이 없으면 한 번 더 묻는다
+  // 주기적으로 부른다(로컬 30초, 배포는 Cloud Scheduler). 때가 된 송금을 알리고, 보냈는데 확인이 없으면 1일·3일 뒤에 다시 묻는다
   async function tick() {
     const now = clock();
     let due = 0;
@@ -317,17 +341,21 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
           action: { type: 'approve_transfer', ref: t.id, for: t.from },
         });
         due++;
-      } else if (t.status === 'sent' && !t.remindedAt && now - new Date(t.sentAt) >= 24 * 3600_000) {
-        await store.put('transfers', { ...t, remindedAt: now.toISOString() });
-        await say(t.roomId, {
-          from: t.to, to: t.to, kind: 'receipt_reminder', text: `${subj(name(t.from))} 보낸 ${won(t.amount)}을 받았나요?`,
-          action: { type: 'confirm_receipt', ref: t.id, for: t.to },
-        });
-        reminded++;
+      } else if (t.status === 'sent') {
+        // 지나간 단계 수(stage)가 물은 횟수보다 많을 때만, 마지막 단계 문구 하나만 보낸다(주기 작업이 며칠 멈췄다 돌아도 연달아 묻지 않게)
+        const asked = t.reminders ?? (t.remindedAt ? 1 : 0); // reminders가 없는 예전 송금은 remindedAt으로 센다
+        const stage = RECEIPT_REMINDERS.filter((ms) => now - new Date(t.sentAt) >= ms).length;
+        if (stage > asked) {
+          await store.put('transfers', { ...t, reminders: stage, remindedAt: now.toISOString() });
+          // 일수는 일정(RECEIPT_REMINDERS)에서 계산해, 일정을 바꾸면 문구도 함께 바뀌게 한다
+          const text = stage === 1 ? `${subj(name(t.from))} 보낸 ${won(t.amount)}을 받았나요?` : `${subj(name(t.from))} 보낸 지 ${RECEIPT_REMINDERS[stage - 1] / DAY_MS}일이 넘었어요. ${won(t.amount)}을 받았나요?`;
+          await say(t.roomId, { from: t.to, to: t.to, kind: 'receipt_reminder', text, action: { type: 'confirm_receipt', ref: t.id, for: t.to } });
+          reminded++;
+        }
       }
     }
     return { due, reminded };
   }
 
-  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers, setPayout, approveTransfer, qrFor, markSent, confirmReceipt, tick };
+  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers, setPayout, approveTransfer, qrFor, markSent, reportNotReceived, confirmReceipt, tick };
 }
