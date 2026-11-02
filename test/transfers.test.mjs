@@ -286,8 +286,8 @@ test('아직 안 들어왔어요: opened로 돌아가고 표시를 붙이며, �
   assert.equal(saved.notReceivedAt, '2026-11-10T05:00:00.000Z');
   assert.equal((await ctx.store.get('transfers', id)).status, 'opened');
   const ev = (await ctx.store.listEvents('demo-t')).filter((e) => e.kind === 'transfer_not_received');
-  assert.deepEqual(ev.map((e) => [e.from, e.to, e.text, e.action?.type, e.action?.for]), [
-    ['yh', 'cs', '아직 ₩41,155을 못 받았어요. 송금 내역을 한 번 확인해 주세요', 'approve_transfer', 'cs'],
+  assert.deepEqual(ev.map((e) => [e.from, e.to, e.text, e.action?.type, e.action?.for, e.action?.ref]), [
+    ['yh', 'cs', '아직 ₩41,155을 못 받았어요. 송금 내역을 한 번 확인해 주세요', 'approve_transfer', 'cs', id],
   ]);
 });
 
@@ -334,4 +334,20 @@ test('할 일 문구: 안 들어왔다고 하면 보내는 사람에게 "아직 
   await ctx.orch.markSent('demo-t', id, 'cs');
   assert.deepEqual(await of('approve_transfer', 'cs'), []);
   assert.deepEqual(await of('confirm_receipt', 'yh'), ['철수가 송금 내역을 확인했대요. ₩41,155을 받았나요?']);
+});
+
+test('안 들어왔다고 한 뒤에 돈이 들어왔으면 받는 사람이 받았어요로 끝낼 수 있다', async () => {
+  const ctx = await setup();
+  const id = await sentCsYh(ctx);
+  await ctx.orch.reportNotReceived('demo-t', id, 'yh');
+  assert.equal((await ctx.orch.confirmReceipt('demo-t', id, 'yh')).status, 'confirmed');
+});
+
+test('안 들어왔다고 한 송금은 지출이 바뀌면 tick이 대체한다(못 받은 돈 = 안 보낸 돈)', async () => {
+  const ctx = await setup();
+  const id = await sentCsYh(ctx);
+  await ctx.orch.reportNotReceived('demo-t', id, 'yh');
+  await ctx.store.put('rooms', { ...(await ctx.store.get('rooms', 'demo-t')), version: 2 });
+  await ctx.orch.tick();
+  assert.equal((await ctx.store.get('transfers', id)).status, 'superseded');
 });
