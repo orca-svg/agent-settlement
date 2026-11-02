@@ -482,8 +482,8 @@ function transfersSection() {
   const { transfers, ledger } = state.data;
   const live = transfers.filter((t) => t.status !== 'superseded');
   const list = live.length ? live : settle(ledger).map((t) => ({ ...t, status: 'preview' }));
-  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: t.notReceivedAt ? '아직 못 받았대요' : '송금 앱 열림', sent: '보냈어요', confirmed: '받았어요' })[t.status] ?? t.status;
   const me = currentUid();
+  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: !t.notReceivedAt ? '송금 앱 열림' : t.to === me ? '확인을 부탁했어요' : '아직 못 받았대요', sent: '보냈어요', confirmed: '받았어요' })[t.status] ?? t.status;
   const rows = list.map((t) => {
     const mine = t.id && (t.from === me || t.to === me);
     const tag = mine ? `button type="button" class="row" data-action="open-transfer" data-id="${esc(t.id)}"` : 'div class="row"';
@@ -623,6 +623,7 @@ function actionButtons(a, size = '') {
   }
 }
 
+// 일반 글자를 돌려준다(이름이 들어간다). HTML에 넣을 때는 쓰는 쪽에서 esc()로 감싼다(지금은 :464 한 곳)
 function actionNote(a) {
   const t = byId('transfers', a.ref);
   const opened = t?.status === 'opened';
@@ -800,7 +801,7 @@ function transferSheet() {
   } else if (t.from === me && t.status === 'opened') {
     // 받는 사람이 "아직 안 들어왔어요"라고 했으면 제목만 바꾸고 송금 내역부터 보게 한다(버튼은 그대로)
     const head = t.notReceivedAt
-      ? `<h3 style="margin:0 0 6px">${esc(subj(toName))} 아직 못 받았대요</h3><p class="group-note" style="margin:0 0 10px">토스 송금 내역을 먼저 확인해 주세요. 두 번 보내지 않게요.</p>`
+      ? `<h3 style="margin:0 0 8px">${esc(subj(toName))} 아직 못 받았대요</h3><p class="group-note" style="padding:0;margin:0 0 10px">토스 송금 내역을 먼저 확인해 주세요. 두 번 보내지 않게요.</p>`
       : '<h3 style="margin:0 0 10px">보냈나요?</h3>';
     actions = `${head}<div style="display:grid;gap:8px">
       <button class="btn" data-action="mark-sent" data-id="${esc(t.id)}">보냈어요</button>
@@ -812,7 +813,7 @@ function transferSheet() {
   } else if (t.to === me && t.status === 'opened' && t.notReceivedAt) {
     // 다시 확인해 달라고 한 사이 돈이 늦게 들어왔으면 바로 끝낼 수 있게(서버 confirmReceipt는 opened도 받는다)
     actions = `<p class="group-note">${esc(nameOf(t.from))}에게 다시 확인해 달라고 했어요. 그 사이 들어왔다면 알려 주세요.</p>
-      <button class="btn" style="width:100%" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>`;
+      <button class="btn" style="width:100%;margin-top:10px" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>`;
   } else {
     actions = `<p class="group-note">${{ scheduled: `${whenText(t.remindAt)}에 ${esc(nameOf(t.from))}에게 알려요.`, due: `${esc(subj(nameOf(t.from)))} 보낼 차례예요.`, opened: t.notReceivedAt ? `${esc(subj(toName))} 아직 못 받았대요. ${esc(subj(nameOf(t.from)))} 확인하고 있어요.` : `${esc(subj(nameOf(t.from)))} 송금 앱을 열었어요.`, sent: `${esc(subj(nameOf(t.from)))} 보냈어요. 받는 사람의 확인을 기다려요.`, confirmed: '받았다고 확인했어요. 이 송금은 끝났어요.', superseded: '지출이 바뀌어 대체된 송금이에요.' }[t.status] ?? ''}</p>`;
   }
