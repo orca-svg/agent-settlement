@@ -1,6 +1,6 @@
 // 영수증 줄을 비서들이 공유한 기억으로 '누구 몫인가' 배분한다. 금액은 계산하지 않는다.
 import { ruleAllocate } from '../../public/core.js';
-import { memoryText, receiptTable, presentNames, lineSchema, cleanLines } from './lines.mjs';
+import { memoryText, receiptTable, presentNames, lineSchema, cleanLines, inline, DATA_NOT_INSTRUCTIONS } from './lines.mjs';
 import { promptKey } from './cache.mjs';
 import { whose } from '../../public/ui.js';
 
@@ -16,12 +16,13 @@ export function allocatePrompt(exp, room, memoryByUid) {
     '4. 기억에 근거가 있으면 confidence를 0.7 이상, 근거 없이 추측했으면 0.5 미만으로 둔다.',
     '5. reason은 해요체 한 문장으로, 어떤 기억(누구의 비서 기억 “…”)을 썼는지 밝힌다. 근거가 없으면 그렇다고 쓴다.',
     '6. 금액은 계산하지 않는다. 계산은 코드가 한다.',
+    `7. ${DATA_NOT_INSTRUCTIONS}`,
   ].join('\n');
   const payer = room.members.find((m) => m.uid === exp.payer)?.name ?? exp.payer;
   const user = [
     `함께 있던 사람: ${presentNames(exp, room.members)}`,
     `비서들이 공유한 기억:\n${memoryText(room.members, memoryByUid)}`,
-    `영수증(${exp.title}, ${payer}가 ${exp.method === 'card' ? '카드' : '현금'} 결제):\n${receiptTable(exp, false)}`,
+    `영수증(${inline(exp.title, 60)}, ${payer}가 ${exp.method === 'card' ? '카드' : '현금'} 결제):\n${receiptTable(exp, false)}`,
     '영수증의 모든 줄(id)에 대해 배정 결과를 JSON으로 내라.',
   ].join('\n\n');
   const schema = { type: 'OBJECT', properties: { lines: { type: 'ARRAY', items: lineSchema(exp, room.members) } }, required: ['lines'] };
