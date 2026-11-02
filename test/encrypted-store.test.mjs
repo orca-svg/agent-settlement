@@ -130,8 +130,9 @@ test('진짜 저장소에 eraseUser가 있으면 전달하고, 지운 링크는 
 });
 
 test('진짜 저장소에 eraseUser가 없으면 래퍼에도 없다(탈퇴 API가 503으로 알림)', () => {
-  const { store } = make();
-  assert.equal(typeof store.eraseUser, 'undefined');
+  const inner = new MemoryStore();
+  inner.eraseUser = undefined; // #2가 머지되면 MemoryStore에 생기므로, 없는 저장소를 직접 만든다
+  assert.equal(typeof encryptedStore(inner, KEY).eraseUser, 'undefined');
 });
 
 test('탈퇴는 그 사람의 송금만 풀어 보고, 풀리지 않는 값이 있어도 막히지 않는다', async () => {
@@ -189,7 +190,7 @@ test('통합: 청구→송금까지 돌려도 저장소에는 계좌번호가 �
   for (const n of DEMO_ACCOUNTS) assert.ok(!dump.includes(n), `저장소에 ${n}이 평문으로 남음`);
   assert.ok(!dump.includes('토스뱅크') && !dump.includes(encodeURIComponent('토스뱅크')));
 
-  const server = createApp({ store, gemini: null, env: {} });
+  const server = createApp({ store, gemini: null, env: { DEV_SEED: '1' } }); // #2 이후 x-demo-user 헤더는 개발 모드에서만 받는다
   await new Promise((r) => server.listen(0, r));
   try {
     const res = await fetch(`http://localhost:${server.address().port}/api/rooms/demo-e`, { headers: { 'x-demo-user': 'cs' } });
