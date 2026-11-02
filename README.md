@@ -107,7 +107,7 @@ DEV_SEED=1 npm start   # http://localhost:4500/room.html → '데모 방 만들�
 
 ## 배포와 키 관리
 
-- **화면:** `main`에 push하면 `.github/workflows/pages.yml`이 `public/`을 GitHub Pages에 올립니다.
+- **화면:** `main`에 push하면 `.github/workflows/pages.yml`이 `public/`을 GitHub Pages에 올립니다. 올리기 전에 `scripts/stamp-version.mjs`가 화면 파일 주소에 커밋 버전(`?v=`)을 붙입니다. Pages는 파일을 10분 캐시해서, 버전이 없으면 배포 직후 새 파일과 캐시에 남은 옛 파일이 섞여 화면이 빌 수 있기 때문입니다.
 - **API 서버:** Cloud Run에 배포합니다. 키는 Secret Manager에 두고 환경변수로만 주입합니다.
 
 지금은 **데모용 배포**입니다. 저장소가 메모리(`MemoryStore`)라서 인스턴스를 최대 1대로 묶어야 방이 여러 서버에 흩어지지 않고, 누구나 개발용 데모 방을 만들 수 있게(`DEV_SEED=1`) 둡니다. 따라서 가상의 데모 데이터만 넣습니다. #2 로그인·#3 Firestore가 들어오면 인스턴스 고정과 `DEV_SEED`를 뺍니다.
