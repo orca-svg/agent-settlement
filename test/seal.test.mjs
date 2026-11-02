@@ -35,6 +35,23 @@ test('한 바이트만 바꿔도 풀리지 않는다', () => {
   assert.throws(() => unseal('enc:v1:' + raw.toString('base64url'), KEY, LABEL), /풀 수 없어요/);
 });
 
+test('IV·태그·암호문 어느 부분을 바꿔도 풀리지 않고, 원래 에러를 cause로 남긴다', () => {
+  const sealed = seal(PAYOUT, KEY, LABEL);
+  for (const at of [0, 12, 28]) { // IV 첫 바이트, 태그 첫 바이트, 암호문 첫 바이트
+    const raw = Buffer.from(sealed.slice('enc:v1:'.length), 'base64url');
+    raw[at] ^= 1;
+    assert.throws(
+      () => unseal('enc:v1:' + raw.toString('base64url'), KEY, LABEL),
+      (e) => /풀 수 없어요/.test(e.message) && e.cause instanceof Error,
+    );
+  }
+});
+
+test('JSON으로 바꿀 수 없는 값(undefined·함수)은 잠그지 않는다', () => {
+  assert.throws(() => seal(undefined, KEY, LABEL), /잠글 수 없는 값/);
+  assert.throws(() => seal(() => 1, KEY, LABEL), /잠글 수 없는 값/);
+});
+
 test('이름표(label)가 다르면 풀리지 않는다: 다른 문서로 옮겨 붙이기 방지', () => {
   const sealed = seal(PAYOUT, KEY, 'agents/ms/payout');
   assert.throws(() => unseal(sealed, KEY, LABEL), /풀 수 없어요/);

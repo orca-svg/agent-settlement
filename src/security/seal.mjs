@@ -11,11 +11,14 @@ const ALGO = 'aes-256-gcm';
 
 export const isSealed = (v) => typeof v === 'string' && v.startsWith(PREFIX);
 
+// value는 일반 JSON 값이어야 한다(객체·배열·문자열·숫자·불리언·null). undefined·함수는 잠글 수 없다
 export function seal(value, key, label) {
+  const json = JSON.stringify(value);
+  if (typeof json !== 'string') throw new Error(`잠글 수 없는 값이에요: ${label}`);
   const iv = crypto.randomBytes(IV_LEN);
   const cipher = crypto.createCipheriv(ALGO, key, iv, { authTagLength: TAG_LEN });
   cipher.setAAD(Buffer.from(label, 'utf8'));
-  const body = Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]);
+  const body = Buffer.concat([cipher.update(json, 'utf8'), cipher.final()]);
   return PREFIX + Buffer.concat([iv, cipher.getAuthTag(), body]).toString('base64url');
 }
 
@@ -29,8 +32,9 @@ export function unseal(text, key, label) {
     decipher.setAuthTag(raw.subarray(IV_LEN, IV_LEN + TAG_LEN));
     const plain = Buffer.concat([decipher.update(raw.subarray(IV_LEN + TAG_LEN)), decipher.final()]);
     return JSON.parse(plain.toString('utf8'));
-  } catch {
-    throw new Error(`잠긴 값을 풀 수 없어요(열쇠가 다르거나 값이 바뀌었어요): ${label}`);
+  } catch (cause) {
+    // 원래 에러를 cause로 남긴다(열쇠 길이 실수 같은 코드 버그를 변조와 구분할 수 있게). 계좌 내용은 들어 있지 않다
+    throw new Error(`잠긴 값을 풀 수 없어요(열쇠가 다르거나 값이 바뀌었어요): ${label}`, { cause });
   }
 }
 
