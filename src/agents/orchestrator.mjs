@@ -342,7 +342,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
         const stage = RECEIPT_REMINDERS.filter((ms) => now - new Date(t.sentAt) >= ms).length;
         if (stage > asked) {
           await store.put('transfers', { ...t, reminders: stage, remindedAt: now.toISOString() });
-          const text = stage === 1 ? `${subj(name(t.from))} 보낸 ${won(t.amount)}을 받았나요?` : `${subj(name(t.from))} 보낸 지 3일 됐어요. ${won(t.amount)}을 받았나요?`;
+          const text = stage === 1 ? `${subj(name(t.from))} 보낸 ${won(t.amount)}을 받았나요?` : `${subj(name(t.from))} 보낸 지 3일이 넘었어요. ${won(t.amount)}을 받았나요?`;
           await say(t.roomId, { from: t.to, to: t.to, kind: 'receipt_reminder', text, action: { type: 'confirm_receipt', ref: t.id, for: t.to } });
           reminded++;
         }

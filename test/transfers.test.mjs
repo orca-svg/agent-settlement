@@ -159,7 +159,7 @@ test('보내는 사람만 승인·보냈어요, 받는 사람만 받았어요(�
 // 보냈어요 뒤 받는 사람이 답이 없으면 sentAt 기준 1일·3일 뒤에 다시 묻는다. 그 뒤로는 할 일 카드만 남는다
 const reminderTexts = async (ctx, id) => (await ctx.store.listEvents('demo-t')).filter((e) => e.kind === 'receipt_reminder' && e.action?.ref === id).map((e) => e.text);
 const FIRST = '철수가 보낸 ₩41,155을 받았나요?';
-const SECOND = '철수가 보낸 지 3일 됐어요. ₩41,155을 받았나요?';
+const SECOND = '철수가 보낸 지 3일이 넘었어요. ₩41,155을 받았나요?';
 
 test('보냈어요 뒤 미확인이면 1일·3일에 한 번씩, 두 번만 다시 묻는다', async () => {
   const ctx = await setup();
@@ -168,9 +168,11 @@ test('보냈어요 뒤 미확인이면 1일·3일에 한 번씩, 두 번만 다�
   await at('2026-11-11T02:59:00Z'); // 아직 1일이 안 됨
   assert.deepEqual(await reminderTexts(ctx, id), []);
   await at('2026-11-11T03:00:00Z');
+  assert.deepEqual(await reminderTexts(ctx, id), [FIRST]);
   await at('2026-11-12T03:00:00Z'); // 2일: 더 묻지 않음
   assert.deepEqual(await reminderTexts(ctx, id), [FIRST]);
   await at('2026-11-13T03:00:00Z');
+  assert.deepEqual(await reminderTexts(ctx, id), [FIRST, SECOND]);
   await at('2026-11-20T03:00:00Z'); // 그 뒤로는 없음
   assert.deepEqual(await reminderTexts(ctx, id), [FIRST, SECOND]);
   assert.equal((await ctx.store.get('transfers', id)).reminders, 2);
