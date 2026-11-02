@@ -1,7 +1,7 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, ARROW, qrImageUrl, qrIsFresh } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, ARROW, qrImageUrl, qrIsFresh, sendMode, COMPUTER_QUERY } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
@@ -735,7 +735,7 @@ const copyRow = (label, value, key) => `<div class="row"><span class="grow"><spa
 // 데스크톱 QR(#8). 토큰은 수명이 15분이라, 송금 화면을 열 때마다 서버에서 새로 받는다.
 // QR에는 계좌·금액이 든 t.link를 바로 담지 않는다. 우리 서버의 짧은 수명 토큰(/api/qr/:token)을 담아,
 // QR 이미지를 만들어 주는 외부 서비스는 그 토큰만 보고 실제 계좌 정보는 보지 못하게 한다.
-const isDesktop = () => matchMedia('(min-width: 640px)').matches; // style.css의 .qr-desktop 기준과 같게
+const isComputer = () => matchMedia(COMPUTER_QUERY).matches;
 let qrTimer = 0;
 let qrAsked = { id: null, at: 0 };
 
@@ -761,19 +761,19 @@ async function refreshQr(tid) {
 }
 
 function qrBlock(t) {
-  if (!t.link || !isDesktop()) return '';
   if (!qrIsFresh(state.qr, t.id)) refreshQr(t.id);
   const qr = state.qr?.id === t.id ? state.qr : null;
   // 휴대폰 카메라가 찍을 절대 주소가 필요해서, API_BASE가 비어 있으면(로컬 개발) 지금 페이지 origin을 쓴다
   const img = qr?.token
     ? `<img src="${qrImageUrl(`${API_BASE || location.origin}/api/qr/${enc(qr.token)}`)}" width="220" height="220" alt="휴대폰으로 토스 송금 화면을 여는 QR 코드" referrerpolicy="no-referrer">`
     : `<div class="qr-wait">${qr?.failed ? 'QR을 만들지 못했어요.<br>위 계좌번호를 복사해 보내 주세요.' : 'QR을 만드는 중이에요'}</div>`;
-  // 휴대폰으로 보내고 돌아온 사람이 슬라이더(데스크톱에선 토스가 안 열림)를 거치지 않고 바로 끝낼 수 있게
-  return `<div class="qr-desktop"><p class="group-note">컴퓨터라면 휴대폰으로 QR을 찍어 토스를 열어요.</p>${img}
+  // 컴퓨터에는 슬라이더가 없으니, 휴대폰으로 보내고 돌아온 사람이 여기서 바로 끝낸다
+  return `<div class="qr-desktop"><p class="group-note">휴대폰 카메라로 QR을 찍으면 토스 송금 화면이 열려요.</p>${img}
     <button class="btn secondary" style="width:100%;margin-top:12px" data-action="mark-sent" data-id="${esc(t.id)}">휴대폰으로 보냈어요</button></div>`;
 }
 
-// 송금: 밀어서 보내면 그 제스처 안에서 토스를 연다. 앱이 안 열리면 계좌·금액을 복사해 둔다
+// 송금: 밀어서 보내면 그 제스처 안에서 토스를 연다. 앱이 안 열리면 계좌·금액을 복사해 둔다.
+// 컴퓨터에서는 토스가 열리지 않으니 슬라이더 대신 휴대폰으로 넘기는 QR만 보여 준다(sendMode)
 function transferSheet() {
   const t = byId('transfers', state.ref);
   if (!t) return notFound('송금');
@@ -787,13 +787,15 @@ function transferSheet() {
   }[state.transferNote];
   let actions = '';
   if (t.from === me && ['scheduled', 'due'].includes(t.status)) {
-    actions = t.link || t.fallback
-      ? `<div class="slider" data-commit="send" data-id="${esc(t.id)}"><span class="slider-fill"></span>
+    const mode = sendMode(t, { computer: isComputer() });
+    actions = mode === 'qr'
+      ? qrBlock(t)
+      : mode === 'slider'
+        ? `<div class="slider" data-commit="send" data-id="${esc(t.id)}"><span class="slider-fill"></span>
           <span class="slider-label">${t.link ? '밀어서 토스로 보내기' : '밀어서 계좌 복사하기'}</span>
           <button type="button" class="slider-thumb" aria-label="${t.link ? '밀어서 토스로 보내기' : '밀어서 계좌 복사하기'}. Enter 키로도 할 수 있어요">${ARROW}</button></div>
-        <p class="slider-hint">${t.link ? '토스가 열리지 않으면 계좌번호를 복사해 드려요' : '받는 사람의 계좌를 복사해 드려요'}</p>
-        ${qrBlock(t)}`
-      : `<p class="group-note">${esc(subj(toName))} 받을 계좌를 아직 알려 주지 않았어요. 알려 주면 바로 보낼 수 있어요.</p>`;
+        <p class="slider-hint">${t.link ? '토스가 열리지 않으면 계좌번호를 복사해 드려요' : '받는 사람의 계좌를 복사해 드려요'}</p>`
+        : `<p class="group-note">${esc(subj(toName))} 받을 계좌를 아직 알려 주지 않았어요. 알려 주면 바로 보낼 수 있어요.</p>`;
   } else if (t.from === me && t.status === 'opened') {
     actions = `<h3 style="margin:0 0 10px">보냈나요?</h3><div style="display:grid;gap:8px">
       <button class="btn" data-action="mark-sent" data-id="${esc(t.id)}">보냈어요</button>

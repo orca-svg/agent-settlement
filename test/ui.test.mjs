@@ -1,7 +1,8 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, topic, subj, whose, restNote, allocLabel, groupRuns, logItemHtml, qrImageUrl, qrIsFresh } from '../public/ui.js';
+import { readFileSync } from 'node:fs';
+import { esc, topic, subj, whose, restNote, allocLabel, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, sendMode, COMPUTER_QUERY } from '../public/ui.js';
 
 test('조사: 받침에 따라 은/는, 이/가, 나는 내가', () => {
   assert.equal(topic('오차즈케'), '오차즈케는');
@@ -61,6 +62,22 @@ test('qrIsFresh: 같은 송금의 QR 토큰이 1분 넘게 남았을 때만 그�
   assert.equal(qrIsFresh(qr, 't2', now), false); // 다른 송금의 토큰
   assert.equal(qrIsFresh(qr, 't1', Date.parse('2026-11-25T00:14:30Z')), false); // 30초 남음 → 새로 받는다
   assert.equal(qrIsFresh(null, 't1', now), false);
+});
+
+test('sendMode: 컴퓨터에서 토스 링크가 있으면 QR만, 휴대폰이나 링크가 없으면 슬라이더', () => {
+  const link = { link: 'supertoss://send?bank=x', fallback: { bank: 'x', accountNo: '1' } };
+  const copyOnly = { link: null, fallback: { bank: '경남은행', accountNo: '1' } };
+  const none = { link: null, fallback: null };
+  assert.equal(sendMode(link, { computer: true }), 'qr');
+  assert.equal(sendMode(link, { computer: false }), 'slider');
+  assert.equal(sendMode(copyOnly, { computer: true }), 'slider'); // QR로 열 토스 링크가 없으니 계좌 복사 슬라이더를 남긴다
+  assert.equal(sendMode(none, { computer: true }), 'no-payout');
+  assert.equal(sendMode(none, { computer: false }), 'no-payout');
+});
+
+test('style.css의 QR 표시 기준이 COMPUTER_QUERY와 같다', () => {
+  const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
+  assert.ok(css.includes(`@media ${COMPUTER_QUERY}`));
 });
 
 test('qrImageUrl: 빈 값이면 null', () => {
