@@ -156,17 +156,66 @@ test('보내는 사람만 승인·보냈어요, 받는 사람만 받았어요(�
   assert.equal((await orch.confirmReceipt('demo-t', t.id, 'me')).status, 'confirmed');
 });
 
-test('sent 후 24시간 미확인 → confirm_receipt 액션과 알림은 한 번만', async () => {
-  const { store, orch, clock, transfers, actions } = await setup();
-  await orch.tick();
-  const t = pair(await transfers(), 'ms', 'me');
-  await orch.markSent('demo-t', t.id, 'ms');
-  clock.now = new Date('2026-11-11T04:00:00Z');
-  await orch.tick();
-  await orch.tick();
-  const reminders = (await store.listEvents('demo-t')).filter((e) => e.kind === 'receipt_reminder');
-  assert.equal(reminders.length, 1);
-  assert.deepEqual((await actions()).filter((a) => a.type === 'confirm_receipt').map((a) => a.for), ['me']);
+// 보냈어요 뒤 받는 사람이 답이 없으면 sentAt 기준 1일·3일 뒤에 다시 묻는다. 그 뒤로는 할 일 카드만 남는다
+const reminderTexts = async (ctx, id) => (await ctx.store.listEvents('demo-t')).filter((e) => e.kind === 'receipt_reminder' && e.action?.ref === id).map((e) => e.text);
+const FIRST = '철수가 보낸 ₩41,155을 받았나요?';
+const SECOND = '철수가 보낸 지 3일 됐어요. ₩41,155을 받았나요?';
+
+test('보냈어요 뒤 미확인이면 1일·3일에 한 번씩, 두 번만 다시 묻는다', async () => {
+  const ctx = await setup();
+  const id = await sentCsYh(ctx); // 2026-11-10T03:00Z에 보냈어요
+  const at = async (iso) => { ctx.clock.now = new Date(iso); await ctx.orch.tick(); };
+  await at('2026-11-11T02:59:00Z'); // 아직 1일이 안 됨
+  assert.deepEqual(await reminderTexts(ctx, id), []);
+  await at('2026-11-11T03:00:00Z');
+  await at('2026-11-12T03:00:00Z'); // 2일: 더 묻지 않음
+  assert.deepEqual(await reminderTexts(ctx, id), [FIRST]);
+  await at('2026-11-13T03:00:00Z');
+  await at('2026-11-20T03:00:00Z'); // 그 뒤로는 없음
+  assert.deepEqual(await reminderTexts(ctx, id), [FIRST, SECOND]);
+  assert.equal((await ctx.store.get('transfers', id)).reminders, 2);
+  assert.deepEqual((await ctx.actions()).filter((a) => a.type === 'confirm_receipt' && a.ref === id).map((a) => a.for), ['yh']);
+});
+
+test('다시 알림이 밀려 3일 뒤 처음 돌면, 두 번째 문구 하나만 보낸다', async () => {
+  const ctx = await setup();
+  const id = await sentCsYh(ctx);
+  ctx.clock.now = new Date('2026-11-14T03:00:00Z');
+  await ctx.orch.tick();
+  await ctx.orch.tick();
+  assert.deepEqual(await reminderTexts(ctx, id), [SECOND]);
+  assert.equal((await ctx.store.get('transfers', id)).reminders, 2);
+});
+
+test('예전 송금(remindedAt만 있고 reminders 없음)은 한 번 물은 것으로 센다', async () => {
+  const ctx = await setup();
+  const id = await sentCsYh(ctx);
+  const legacy = { ...(await ctx.store.get('transfers', id)), remindedAt: '2026-11-11T03:00:00.000Z' };
+  delete legacy.reminders;
+  await ctx.store.put('transfers', legacy);
+  ctx.clock.now = new Date('2026-11-12T03:00:00Z');
+  await ctx.orch.tick();
+  assert.deepEqual(await reminderTexts(ctx, id), []);
+  ctx.clock.now = new Date('2026-11-13T03:00:00Z');
+  await ctx.orch.tick();
+  assert.deepEqual(await reminderTexts(ctx, id), [SECOND]);
+});
+
+// 리뷰 후속: 다시 보냈어요가 다시 알림을 처음부터 세는지 실제 tick으로 확인한다(remindedAt이 남아 있어도 reminders: 0이 이긴다)
+test('안 들어왔다고 한 뒤 다시 보냈어요를 누르면, 그때부터 1일 뒤에 다시 묻는다', async () => {
+  const ctx = await setup();
+  const id = await sentCsYh(ctx); // 2026-11-10T03:00Z
+  ctx.clock.now = new Date('2026-11-11T03:00:00Z');
+  await ctx.orch.tick(); // 1번째 다시 알림
+  await ctx.orch.reportNotReceived('demo-t', id, 'yh');
+  ctx.clock.now = new Date('2026-11-11T05:00:00Z');
+  await ctx.orch.markSent('demo-t', id, 'cs');
+  ctx.clock.now = new Date('2026-11-12T04:59:00Z');
+  await ctx.orch.tick();
+  assert.deepEqual(await reminderTexts(ctx, id), [FIRST]); // 다시 보낸 지 아직 1일이 안 됨
+  ctx.clock.now = new Date('2026-11-12T05:00:00Z');
+  await ctx.orch.tick();
+  assert.deepEqual(await reminderTexts(ctx, id), [FIRST, FIRST]);
 });
 
 test('cron tick은 비밀값이 맞을 때만 동작한다', async () => {

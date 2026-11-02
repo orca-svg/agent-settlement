@@ -15,6 +15,9 @@ import { findBank } from '../../public/banks.js';
 const OPEN = ['open', 'proposed'];
 const STALE = '지출이 바뀌었어요. 청구서를 다시 보낸 뒤 새 금액으로 보내 주세요';
 const DEFAULT_RULES = { autoAccept: 0, sendWhen: 'now', onDispute: 'ask' };
+// 보냈어요 뒤 받는 사람이 답이 없으면 다시 묻는 때(sentAt 기준). 1일 뒤, 3일 뒤 두 번. 그 뒤로는 할 일 카드만 남는다
+const DAY_MS = 24 * 3600_000;
+const RECEIPT_REMINDERS = [1 * DAY_MS, 3 * DAY_MS];
 
 export function createOrchestrator({ store, gemini = null, clock = () => new Date(), evidenceFor = async () => [], counterFor = async () => [] }) {
   const say = (roomId, ev) => store.appendEvent(roomId, ev);
@@ -317,7 +320,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return saved;
   }
 
-  // 주기적으로 부른다(로컬 30초, 배포는 Cloud Scheduler). 때가 된 송금을 알리고, 보냈는데 하루가 지나도 확인이 없으면 한 번 더 묻는다
+  // 주기적으로 부른다(로컬 30초, 배포는 Cloud Scheduler). 때가 된 송금을 알리고, 보냈는데 확인이 없으면 1일·3일 뒤에 다시 묻는다
   async function tick() {
     const now = clock();
     let due = 0;
@@ -333,13 +336,16 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
           action: { type: 'approve_transfer', ref: t.id, for: t.from },
         });
         due++;
-      } else if (t.status === 'sent' && !t.remindedAt && now - new Date(t.sentAt) >= 24 * 3600_000) {
-        await store.put('transfers', { ...t, remindedAt: now.toISOString() });
-        await say(t.roomId, {
-          from: t.to, to: t.to, kind: 'receipt_reminder', text: `${subj(name(t.from))} 보낸 ${won(t.amount)}을 받았나요?`,
-          action: { type: 'confirm_receipt', ref: t.id, for: t.to },
-        });
-        reminded++;
+      } else if (t.status === 'sent') {
+        // 지나간 단계 수(stage)가 물은 횟수보다 많을 때만, 마지막 단계 문구 하나만 보낸다(주기 작업이 며칠 멈췄다 돌아도 연달아 묻지 않게)
+        const asked = t.reminders ?? (t.remindedAt ? 1 : 0); // reminders가 없는 예전 송금은 remindedAt으로 센다
+        const stage = RECEIPT_REMINDERS.filter((ms) => now - new Date(t.sentAt) >= ms).length;
+        if (stage > asked) {
+          await store.put('transfers', { ...t, reminders: stage, remindedAt: now.toISOString() });
+          const text = stage === 1 ? `${subj(name(t.from))} 보낸 ${won(t.amount)}을 받았나요?` : `${subj(name(t.from))} 보낸 지 3일 됐어요. ${won(t.amount)}을 받았나요?`;
+          await say(t.roomId, { from: t.to, to: t.to, kind: 'receipt_reminder', text, action: { type: 'confirm_receipt', ref: t.id, for: t.to } });
+          reminded++;
+        }
       }
     }
     return { due, reminded };
