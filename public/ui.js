@@ -58,6 +58,10 @@ export function qrIsFresh(qr, transferId, now = Date.now(), marginMs = 60_000) {
   return Boolean(qr) && qr.id === transferId && Date.parse(qr.expiresAt) - marginMs > now;
 }
 
+// 컴퓨터인지는 화면 너비가 아니라 마우스로 가리키는지로 본다(#8). 가로로 돌린 휴대폰은 넓어도 토스가 바로 열리기 때문이다.
+// style.css의 .qr-desktop도 같은 미디어 쿼리를 쓴다(test/ui.test.mjs가 확인)
+export const COMPUTER_QUERY = '(hover: hover) and (pointer: fine)';
+
 // 비서끼리 기록 한 줄
 export const logItemHtml = ({ avatar, who, time, text, meta = '', tagHtml = '', enter = false, unread = false, extraHtml = '' }) => `<li class="${enter ? 'enter' : ''}${unread ? ' unread' : ''}">
     ${avatar}
