@@ -482,7 +482,7 @@ function transfersSection() {
   const { transfers, ledger } = state.data;
   const live = transfers.filter((t) => t.status !== 'superseded');
   const list = live.length ? live : settle(ledger).map((t) => ({ ...t, status: 'preview' }));
-  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: '송금 앱 열림', sent: '보냈어요', confirmed: '받았어요' })[t.status] ?? t.status;
+  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: t.notReceivedAt ? '아직 못 받았대요' : '송금 앱 열림', sent: '보냈어요', confirmed: '받았어요' })[t.status] ?? t.status;
   const me = currentUid();
   const rows = list.map((t) => {
     const mine = t.id && (t.from === me || t.to === me);
@@ -617,23 +617,26 @@ function actionButtons(a, size = '') {
     case 'set_payout':
       return `<button class="${cls}" data-action="open-payout">받을 계좌 알려 주기</button>`;
     case 'confirm_receipt':
-      return `<button class="${cls}" data-action="confirm-receipt" data-id="${id}">받았어요</button>`;
+      return `<button class="${cls}" data-action="confirm-receipt" data-id="${id}">받았어요</button><button class="${cls} secondary" data-action="not-received" data-id="${id}">아직 안 들어왔어요</button>`;
     default:
       return '';
   }
 }
 
 function actionNote(a) {
-  const opened = byId('transfers', a.ref)?.status === 'opened';
+  const t = byId('transfers', a.ref);
+  const opened = t?.status === 'opened';
   return {
     confirm_line: '비서들의 기억에 근거가 없는 줄이에요. 그래서 비서가 짐작으로 청구하지 않고 먼저 물어봐요.',
     answer_invoice: '자동 수락 한도를 넘어서 비서가 대신 받지 않고 먼저 물어봐요.',
     agree_dispute: byId('disputes', a.ref)?.status === 'proposed'
       ? '양쪽이 동의하면 그 지출을 중재안대로 다시 나누고 청구서를 다시 보내요.'
       : '중재 비서가 양쪽 근거와 영수증의 주문 시각을 보고 나누는 법을 제안해요.',
-    approve_transfer: opened ? '송금 앱에서 보냈다면 알려 주세요. 받는 사람에게 확인을 부탁할게요.' : '밀어서 보내면 토스 송금 화면이 받는 사람·금액이 채워진 채로 열려요.',
+    approve_transfer: !opened ? '밀어서 보내면 토스 송금 화면이 받는 사람·금액이 채워진 채로 열려요.'
+      : t.notReceivedAt ? '토스 송금 내역을 먼저 확인해 주세요. 보냈다면 ‘보냈어요’를, 아니면 ‘다시 보내기’를 눌러요.'
+      : '송금 앱에서 보냈다면 알려 주세요. 받는 사람에게 확인을 부탁할게요.',
     set_payout: '계좌번호는 나에게 돈을 보낼 사람에게만 보여요.',
-    confirm_receipt: '받았다면 확인해 주세요. 그래야 이 송금이 끝나요.',
+    confirm_receipt: `통장에 들어왔는지 보고 알려 주세요. 안 들어왔으면 ${t ? nameOf(t.from) : '보낸 사람'}에게 다시 확인을 부탁할게요.`,
   }[a.type] ?? '';
 }
 
@@ -795,14 +798,23 @@ function transferSheet() {
         ${qrBlock(t)}`
       : `<p class="group-note">${esc(subj(toName))} 받을 계좌를 아직 알려 주지 않았어요. 알려 주면 바로 보낼 수 있어요.</p>`;
   } else if (t.from === me && t.status === 'opened') {
-    actions = `<h3 style="margin:0 0 10px">보냈나요?</h3><div style="display:grid;gap:8px">
+    // 받는 사람이 "아직 안 들어왔어요"라고 했으면 제목만 바꾸고 송금 내역부터 보게 한다(버튼은 그대로)
+    const head = t.notReceivedAt
+      ? `<h3 style="margin:0 0 6px">${esc(subj(toName))} 아직 못 받았대요</h3><p class="group-note" style="margin:0 0 10px">토스 송금 내역을 먼저 확인해 주세요. 두 번 보내지 않게요.</p>`
+      : '<h3 style="margin:0 0 10px">보냈나요?</h3>';
+    actions = `${head}<div style="display:grid;gap:8px">
       <button class="btn" data-action="mark-sent" data-id="${esc(t.id)}">보냈어요</button>
       ${t.link ? `<button class="btn secondary" data-action="reopen-link" data-id="${esc(t.id)}">토스 다시 열기</button>` : ''}
       <button class="btn plain" data-action="close-sheet">아직이에요</button></div>`;
   } else if (t.to === me && t.status === 'sent') {
-    actions = `<button class="btn" style="width:100%" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>`;
+    actions = `<div style="display:grid;gap:8px"><button class="btn" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>
+      <button class="btn secondary" data-action="not-received" data-id="${esc(t.id)}">아직 안 들어왔어요</button></div>`;
+  } else if (t.to === me && t.status === 'opened' && t.notReceivedAt) {
+    // 다시 확인해 달라고 한 사이 돈이 늦게 들어왔으면 바로 끝낼 수 있게(서버 confirmReceipt는 opened도 받는다)
+    actions = `<p class="group-note">${esc(nameOf(t.from))}에게 다시 확인해 달라고 했어요. 그 사이 들어왔다면 알려 주세요.</p>
+      <button class="btn" style="width:100%" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>`;
   } else {
-    actions = `<p class="group-note">${{ scheduled: `${whenText(t.remindAt)}에 ${esc(nameOf(t.from))}에게 알려요.`, due: `${esc(subj(nameOf(t.from)))} 보낼 차례예요.`, opened: `${esc(subj(nameOf(t.from)))} 송금 앱을 열었어요.`, sent: `${esc(subj(nameOf(t.from)))} 보냈어요. 받는 사람의 확인을 기다려요.`, confirmed: '받았다고 확인했어요. 이 송금은 끝났어요.', superseded: '지출이 바뀌어 대체된 송금이에요.' }[t.status] ?? ''}</p>`;
+    actions = `<p class="group-note">${{ scheduled: `${whenText(t.remindAt)}에 ${esc(nameOf(t.from))}에게 알려요.`, due: `${esc(subj(nameOf(t.from)))} 보낼 차례예요.`, opened: t.notReceivedAt ? `${esc(subj(toName))} 아직 못 받았대요. ${esc(subj(nameOf(t.from)))} 확인하고 있어요.` : `${esc(subj(nameOf(t.from)))} 송금 앱을 열었어요.`, sent: `${esc(subj(nameOf(t.from)))} 보냈어요. 받는 사람의 확인을 기다려요.`, confirmed: '받았다고 확인했어요. 이 송금은 끝났어요.', superseded: '지출이 바뀌어 대체된 송금이에요.' }[t.status] ?? ''}</p>`;
   }
   return {
     title: '송금',
@@ -882,7 +894,7 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'open-payout', 'save-payout', 'copy']);
+const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
 
 async function agentAct(name, d) {
   const base = `/api/rooms/${enc(roomId)}`;
@@ -944,6 +956,8 @@ async function agentAct(name, d) {
     await post(`/transfers/${enc(d.id)}/sent`);
   } else if (name === 'confirm-receipt') {
     await post(`/transfers/${enc(d.id)}/confirm`);
+  } else if (name === 'not-received') {
+    await post(`/transfers/${enc(d.id)}/not-received`);
   } else if (name === 'open-payout') {
     const mine = state.data.me;
     state.payoutDraft = { bank: BANKS[0].label, accountNo: '', holder: mine.name, other: false };
