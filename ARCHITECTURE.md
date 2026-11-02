@@ -14,7 +14,7 @@
         ▼
 API 서버 (server.mjs → src/app.mjs)
   ├─ src/identity.mjs     누가 요청했나 (#2가 교체)
-  ├─ src/store/           Store 인터페이스, 지금은 MemoryStore (#3이 교체)
+  ├─ src/store/           Store 인터페이스, 지금은 MemoryStore (#3이 교체). encryptedStore가 계좌 칸을 잠가 저장
   ├─ src/gemini.mjs       Gemini 호출 (키는 Secret Manager·로컬 .env에만)
   ├─ src/agents/          메뉴 배분·중재, 이후 규칙 판단·청구·송금 안내
   └─ public/core.js       돈 계산(환율·몫·차액·송금 경로). 화면·서버·테스트가 같은 코드를 씀
@@ -27,7 +27,7 @@ API 서버 (server.mjs → src/app.mjs)
 - **비서는 사람이 정한 범위 안에서만 움직여요.** 자동 수락 한도를 넘거나 근거가 없는 일은 반드시 주인에게 물어요.
 - **우리 서비스는 돈을 보관하거나 이체하지 않아요.** 송금은 사용자의 송금 앱에서 일어나요. 우리는 금액이 채워진 송금 화면을 승인하는 순간 열어 줄 뿐이에요.
 - **비서 기록(이벤트)은 서버만 써요.** 화면은 읽기만 해요.
-- **민감 정보는 최소로 다뤄요.** 위치는 원본 대신 요약만, 계좌번호는 송금 당사자에게만 보여요.
+- **민감 정보는 최소로 다뤄요.** 위치는 원본 대신 요약만, 계좌번호는 송금 당사자에게만 보여요. 저장소에는 계좌를 잠근 채로 넣어요(`src/store/encrypted.mjs`).
 
 ## 확장 지점
 
@@ -40,8 +40,8 @@ API 서버 (server.mjs → src/app.mjs)
 | #4 방 | `rooms` 문서와 방 API | 개발용 시드 `POST /api/dev/seed` | 방 만들기·참가하기(환율 표 입력 포함) |
 | #5 비서 설정 | `agents` 문서의 `memory`·`rules` | 시드 기본값 | 설정 화면과 저장 |
 | #7 위치 | `src/agents/evidence.mjs`의 `evidenceFor()`·`counterFor()` | 빈 배열(개발용 데모 방의 '2차 바'만 고정 근거) | 위치 요약 → `Evidence` |
-| #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs`, `public/banks.js` | 받는 계좌 설정 화면(은행 선택 목록), `supertoss://send?…` 링크(실기기 검증 완료, 은행은 실기기로 확인한 표기로 바꿔 넣음), 데스크톱 QR 핸드오프(`src/payments/qr.mjs`) | 송금 확인 문구·다시 알림 횟수, iPhone 은행 표기 확인, 계좌 암호화(#10과 함께) |
-| #10 보안 | `src/http.mjs`, Firestore 보안 규칙 | 신원당 호출 제한 | 토큰 필수, 보안 규칙 테스트, 계좌 암호화 |
+| #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs`, `public/banks.js` | 받는 계좌 설정 화면(은행 선택 목록), `supertoss://send?…` 링크(실기기 검증 완료, 은행은 실기기로 확인한 표기로 바꿔 넣음), 데스크톱 QR 핸드오프(`src/payments/qr.mjs`), 계좌 칸 암호화 저장(`src/store/encrypted.mjs`) | 송금 확인 문구·다시 알림 횟수, iPhone 은행 표기 확인 |
+| #10 보안 | `src/http.mjs`, `src/store/encrypted.mjs`, Firestore 보안 규칙 | 신원당 호출 제한, 계좌 칸 암호화 저장(`PAYOUT_ENC_KEY`) | 토큰 필수, 보안 규칙 테스트 |
 
 ## Store 인터페이스
 
@@ -57,6 +57,17 @@ API 서버 (server.mjs → src/app.mjs)
 | `listEvents(roomId, afterSeq = 0)` | `seq > afterSeq`인 기록 |
 
 계약 테스트는 `test/store.test.mjs`예요. 따라서 `FirestoreStore`도 이 테스트를 그대로 통과해야 해요.
+
+### 계좌 칸 암호화 (`src/store/encrypted.mjs`)
+
+`server.mjs`는 Store를 `encryptedStore(store, key)`로 감싸요. 계좌번호가 들어가는 칸(`agents.payout`, `transfers.link`, `transfers.fallback`)은 넣을 때 AES-256-GCM으로 잠그고(`enc:v1:…`, `src/security/seal.mjs`) 꺼낼 때 풀어요. 그래서 다른 코드는 평문을 넣고 평문을 받고, 저장소에는 잠긴 글자만 남아요.
+
+- 잠긴 값에는 `컬렉션/문서id/칸` 이름표가 묶여 있어서, 다른 문서로 옮겨 붙이면 풀리지 않아요.
+- 잠긴 칸이 평문이거나 풀리지 않으면 오류를 내요. 잠긴 칸으로는 `list` 검색을 할 수 없어요.
+- 열쇠는 `PAYOUT_ENC_KEY`(base64, 32바이트)예요. 배포(`NODE_ENV=production`)에서 없으면 서버가 시작하지 않고, 로컬에서는 개발용 열쇠를 써요.
+- 진짜 저장소에 `eraseUser`(#2 탈퇴)가 있으면 그대로 전달하고, 그 사람이 낀 송금의 링크만 평문으로 풀어서 돌려줘요(QR 토큰 무효화용). 풀리지 않는 링크는 어차피 지울 값이라 건너뛰어요.
+- 잠긴 값은 `컬렉션/문서id/칸` 이름표에 묶여 있어요. 잠긴 문서의 `id`를 바꾸는 코드는 이 래퍼로 풀었다가 다시 넣어야 해요.
+- `FirestoreStore`(#3)도 같은 자리에서 감싸면 돼요.
 
 ## 컬렉션과 Firestore 경로
 

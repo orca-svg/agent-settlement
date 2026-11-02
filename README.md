@@ -53,7 +53,7 @@
    │  POST /api/allocate  영수증 줄 배분 (기억 기반)
    │  POST /api/mediate   이의 중재
    ▼
-API 서버 (Cloud Run: server.mjs)  ── GEMINI_API_KEY는 Secret Manager에서만 주입
+API 서버 (Cloud Run: server.mjs)  ── GEMINI_API_KEY·PAYOUT_ENC_KEY는 Secret Manager에서만 주입
    │  구조화 출력(responseSchema)
    ▼
 Gemini API
@@ -90,6 +90,10 @@ npm test           # 계산 sanity check
 
 - 키가 없거나 서버에 닿지 않으면 **규칙 모드**로 동작합니다. 이때 화면 상단에도 그렇게 표시합니다.
 - 모델은 `GEMINI_MODEL`로 고를 수 있습니다. 생략하면 이 키로 쓸 수 있는 최신 Flash 모델을 자동으로 고릅니다.
+- 받을 계좌는 저장소에 넣을 때 잠급니다(#8, #10). 열쇠는 `PAYOUT_ENC_KEY`(base64, 32바이트)입니다. 로컬에서는 없어도 개발용 열쇠로 잠그고 경고만 띄웁니다. 직접 정하려면 `.env`에 추가합니다.
+  ```bash
+  echo "PAYOUT_ENC_KEY=$(node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64'))")" >> .env
+  ```
 
 ### 실제 방 화면
 
@@ -111,10 +115,18 @@ DEV_SEED=1 npm start   # http://localhost:4500/room.html → '데모 방 만들�
 ```bash
 gcloud run deploy agent-settlement --source . --region asia-northeast1 \
   --allow-unauthenticated --min-instances 0 --max-instances 1 --memory 1Gi \
-  --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
+  --set-secrets GEMINI_API_KEY=gemini-api-key:latest,PAYOUT_ENC_KEY=payout-enc-key:latest \
   --set-env-vars DEV_SEED=1,CRON_SECRET=<임의의 긴 문자열>
 ```
 
+- 계좌 암호화 열쇠(`PAYOUT_ENC_KEY`)는 처음 한 번만 Secret Manager에 만들고, Cloud Run 서비스 계정이 읽을 수 있게 합니다(아래는 기본 서비스 계정 기준). 배포(`NODE_ENV=production`)에서 이 열쇠가 없으면 서버가 시작하지 않고 이전 버전이 계속 동작합니다. **열쇠를 잃거나 바꾸면 이미 저장된 계좌를 풀 수 없으니**(#3 Firestore 이후 특히) 한 번 만든 열쇠는 그대로 둡니다.
+  ```bash
+  node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64'))" \
+    | gcloud secrets create payout-enc-key --data-file=-
+  gcloud secrets add-iam-policy-binding payout-enc-key \
+    --member=serviceAccount:1081397156656-compute@developer.gserviceaccount.com \
+    --role=roles/secretmanager.secretAccessor
+  ```
 - 리전은 도쿄(`asia-northeast1`)입니다. Cloud Run 가격표에서 Tier 1이라 서울(`asia-northeast3`, Tier 2)보다 CPU·메모리 단가가 낮습니다. 화면이 부르는 서버 주소는 `public/api.js`에 있습니다.
 - 때가 된 송금 알림은 Cloud Scheduler 작업 `agent-settlement-tick`이 1분마다 `POST /api/cron/tick`을 `x-cron-secret` 헤더와 함께 부릅니다. Cloud Run은 요청이 없을 때 CPU를 거의 주지 않아 서버 안의 30초 타이머만으로는 부족하기 때문입니다.
 - 상시 인스턴스(`--min-instances 1`)는 두지 않습니다. 대신 1분마다 오는 스케줄러 요청이 인스턴스를 깨워 두어 메모리의 방이 대부분 유지되고, 요청 기반 과금이라 Cloud Run 무료 한도 안에 들어갑니다. 다만 Cloud Run이 인스턴스를 교체하면 방이 사라질 수 있으니, 시연 직전에는 데모 방을 새로 만듭니다.
