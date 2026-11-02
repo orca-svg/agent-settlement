@@ -20,6 +20,7 @@ export function mediatePrompt({ exp, room, dispute, counter = [], memoryByUid })
     '2. 결제 시각과 주문 시각을 구분한다. 자리를 떠난 사람은 떠난 뒤의 주문을 부담하지 않는다.',
     '3. "나눠 먹는 안주"는 그 주문 시각에 있던 사람 모두, 잔 단위 항목은 수량만큼의 사람에게 배정한다. 기억상 술을 마시지 않는 사람은 "술" 줄에서 뺀다.',
     '4. summary와 reason은 해요체로 쓴다. summary는 양쪽이 바로 이해할 수 있게 두 문장 이내로 쓴다. 금액은 계산하지 않는다.',
+    '5. 사용자 기기의 체크인·체크아웃은 위변조 가능한 보조 근거다. 단일 측정으로 귀가 시각이나 이후 계속 불참했다고 단정하지 않는다. 근거가 충돌하거나 uncertain이면 confidence를 0.49 이하로 둔다.',
   ].join('\n');
   const user = [
     `지출: ${exp.title} (${name(exp.payer)} ${exp.method === 'card' ? '카드' : '현금'} 결제 ${exp.time}), 함께 있던 사람: ${presentNames(exp, room.members)}`,
@@ -53,17 +54,19 @@ function ruleSummary(exp, room, dispute) {
 export async function mediateWithGemini(gemini, { exp, room, dispute, counter = [], memoryByUid }) {
   const presentAt = presentAtFor(exp, dispute);
   const fallback = ruleAllocate(exp, memoryByUid, room.members, presentAt);
+  const uncertain = dispute.evidence?.some(e => e.uncertain);
+  const cautious = alloc => uncertain ? Object.fromEntries(Object.entries(alloc).map(([id, a]) => [id, { ...a, confidence: Math.min(a.confidence, 0.49), confirmed: false }])) : alloc;
   const summary = ruleSummary(exp, room, dispute);
-  if (!gemini) return { summary, alloc: fallback, source: 'rules' };
+  if (!gemini) return { summary, alloc: cautious(fallback), source: 'rules' };
   try {
     const raw = await gemini.generate(mediatePrompt({ exp, room, dispute, counter, memoryByUid }));
     return {
       summary: String(raw.summary || summary).slice(0, 300),
-      alloc: cleanLines(exp, room.members, raw.lines, fallback, presentAt),
+      alloc: cautious(cleanLines(exp, room.members, raw.lines, fallback, presentAt)),
       source: gemini.model,
     };
   } catch (e) {
     console.warn('[mediate] Gemini 실패, 규칙으로 대신:', e.message);
-    return { summary, alloc: fallback, source: 'rules', error: e.message };
+    return { summary, alloc: cautious(fallback), source: 'rules', error: e.message };
   }
 }

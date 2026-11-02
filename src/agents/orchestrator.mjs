@@ -37,6 +37,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
   }
 
   const claimFrom = (name, { evidence }) => {
+    if (evidence.some(e => e.uncertain)) return `${name}의 위치 요약만으로 참석 여부를 확정할 수 없어 부담 항목 확인을 요청해요.`;
     const left = evidence.find((e) => e.kind === 'left_at' && e.time);
     return left
       ? `${topic(name)} ${left.time}에 자리를 떠났어요. 그 뒤에 시킨 것까지 똑같이 나누는 건 맞지 않아요.`
@@ -70,7 +71,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
         ...base,
         status: { accept: 'accepted', ask: 'asked', dispute: 'disputed' }[decision],
         decidedBy: decision === 'ask' ? null : 'agent',
-        reasons,
+        reasons: found?.evidence.some(e => e.locationId) ? ['위치 요약을 확인해 주세요'] : reasons,
       };
       await store.put('invoices', invoice);
       invoices.push(invoice);
@@ -107,9 +108,10 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
 
   // 같은 사람이 같은 지출에 이미 낸 이의가 열려 있으면 그것을 쓴다(다시 보내도 중복 없음)
   async function raiseDispute(roomId, { by, expenseId, claim, evidence = [] }) {
-    const { expenses } = await load(roomId);
+    const { expenses, room } = await load(roomId);
     const exp = expenses.find((e) => e.id === expenseId);
     if (!exp) throw new HttpError(400, '이의를 제기할 지출을 골라 주세요');
+    if (!evidence.length) evidence = await evidenceFor(by, exp, room);
     if (!String(claim ?? '').trim()) throw new HttpError(400, '무엇이 맞지 않는지 적어 주세요');
     const existing = (await store.list('disputes', { roomId })).find((d) => d.by === by && d.expenseId === expenseId && OPEN.includes(d.status));
     if (existing) return existing;
@@ -117,7 +119,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     await store.put('disputes', dispute);
     await say(roomId, {
       from: by, to: exp.payer, kind: 'dispute_raised', text: `${obj(`‘${exp.title}’`)} 다시 나누자고 이의를 제기했어요`,
-      ...(evidence.length ? { meta: `근거: ${evidence.map((e) => e.summary).join(' · ')}` } : {}),
+      ...(evidence.length ? { meta: evidence.some(e => e.locationId) ? '위치 요약 첨부 · 이의 내용에서 확인' : `근거: ${evidence.map((e) => e.summary).join(' · ')}` } : {}),
     });
     // 지출을 낸 사람이 이의를 중재 비서에게 맡겨 두었으면 바로 중재한다. 아니면 낸 사람에게 묻는다(pendingActions)
     if ((await settingsOf(exp.payer)).rules.onDispute === 'mediator') return mediate(roomId, dispute.id, exp.payer);
@@ -147,10 +149,14 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     const memoryByUid = Object.fromEntries(await Promise.all(room.members.map(async (m) => [m.uid, (await settingsOf(m.uid)).memory ?? []])));
     const started = Date.now();
     const out = await mediateWithGemini(gemini, { exp, room, dispute, counter: await counterFor(exp, room), memoryByUid });
+    if (dispute.evidence.some(e => e.locationId)) {
+      const live = new Set((await evidenceFor(dispute.by, exp, room)).map(e => e.locationId));
+      if (dispute.evidence.some(e => e.locationId && !live.has(e.locationId))) throw new HttpError(409, '위치 공유가 철회되었어요. 근거를 다시 확인해 주세요');
+    }
     const proposed = { ...dispute, status: 'proposed', proposal: { summary: out.summary, alloc: out.alloc, source: out.source } };
     await store.put('disputes', proposed);
     await say(roomId, {
-      from: 'mediator', to: 'all', kind: 'dispute_proposed', text: out.summary,
+      from: 'mediator', to: 'all', kind: 'dispute_proposed', text: dispute.evidence.some(e => e.locationId) ? '위치 요약을 참고한 중재안이에요. 당사자가 확인해 주세요.' : out.summary,
       meta: `mediate · ${out.source === 'rules' ? '규칙' : out.source} · ${((Date.now() - started) / 1000).toFixed(1)}초`,
     });
     // 이의를 낸 비서는 '근거가 있으면 이의'를 맡았으므로, 제안이 그 근거와 맞으면 스스로 동의한다
@@ -171,7 +177,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     if (!parties.every((p) => saved.agreedBy.includes(p))) return saved;
 
     // 두 사람이 동의한 배분이므로 줄마다 확인된 것으로 둔다
-    const alloc = Object.fromEntries(Object.entries(dispute.proposal.alloc).map(([id, a]) => [id, { ...a, confirmed: true }]));
+    const alloc = Object.fromEntries(Object.entries(dispute.proposal.alloc).map(([id, a]) => [id, { ...a, ...(dispute.evidence.some(e => e.locationId) ? { reason: '당사자가 합의한 배분' } : {}), confirmed: true }]));
     await store.put('expenses', { ...exp, split: 'items', alloc });
     await store.put('rooms', { ...room, version: room.version + 1 });
     const resolved = { ...saved, status: 'resolved' };
@@ -277,7 +283,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     if (!['scheduled', 'due', 'opened'].includes(t.status)) throw new HttpError(409, '이미 보냈거나 바뀐 송금이에요');
     if (!t.link) throw new HttpError(409, '받을 계좌가 아직 없어요');
     const now = clock().getTime();
-    return { qrToken: signQrToken(t.link, { now: () => now }), expiresAt: new Date(now + QR_TTL_MS).toISOString() };
+    return { qrToken: signQrToken(t.link, { now: () => now, subjectUids: [t.from, t.to] }), expiresAt: new Date(now + QR_TTL_MS).toISOString() };
   }
 
   async function markSent(roomId, tid, actorUid) {

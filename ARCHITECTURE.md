@@ -1,5 +1,7 @@
 # 아키텍처: 정산은 비서끼리
 
+> #2/#7 확장: 실제 API는 Firebase Bearer ID 토큰과 폐기 여부를 검증해요. `x-demo-user`는 Firebase가 설정되지 않은 비운영 `DEV_SEED=1`에서만 사용해요. 설정은 [연결 안내](docs/auth-location-setup.md), 계약 변경은 아래 표를 참고해 주세요.
+
 팀원이 각자 이슈를 맡아 개발할 때 맞춰야 하는 **계약**을 정리한 문서예요. 코드의 기준은 `src/domain/types.mjs`이고, 이 문서와 그 파일은 함께 고쳐요.
 
 ## 한눈에 보기
@@ -13,7 +15,7 @@
         │
         ▼
 API 서버 (server.mjs → src/app.mjs)
-  ├─ src/identity.mjs     누가 요청했나 (#2가 교체)
+  ├─ src/identity.mjs     Firebase 신원 검증 (#2)
   ├─ src/store/           Store 인터페이스, 지금은 MemoryStore (#3이 교체)
   ├─ src/gemini.mjs       Gemini 호출 (키는 Secret Manager·로컬 .env에만)
   ├─ src/agents/          메뉴 배분·중재, 이후 규칙 판단·청구·송금 안내
@@ -33,13 +35,13 @@ API 서버 (server.mjs → src/app.mjs)
 
 | 이슈 | 바꿀 곳 | 지금 구현 | 바꿀 구현 |
 | --- | --- | --- | --- |
-| #2 로그인 | `src/identity.mjs`의 `identify(req, store, roomId)` | `x-demo-user` 헤더의 uid가 방 멤버면 통과 | Firebase ID 토큰 검증 → `{ uid, name }` |
-| #2 로그인 | `public/room-api.js`의 `currentUid()` | localStorage에 고른 uid | 로그인한 사용자 |
+| #2 로그인 | `src/identity.mjs`의 `identify(req, store, roomId)` | Firebase ID 토큰·폐기 확인, 서버가 넣은 `req.identityContext` 사용. 방 조회는 멤버일 때만 통과 | 프로젝트 자격 증명 연결 |
+| #2 로그인 | `public/room-api.js`의 `currentUid()`·`api()` | Firebase 사용자·Bearer ID 토큰. 신원 헤더는 이 모듈 한 곳에서만 설정 | `initAuth()` 완료 후 사용 |
 | #3 Firestore | `src/store/`의 Store | `MemoryStore` | 같은 메서드를 가진 `FirestoreStore` |
 | #3 Firestore | `public/room-api.js`의 `subscribeRoom()` | 2초 폴링 | `onSnapshot` |
 | #4 방 | `rooms` 문서와 방 API | 개발용 시드 `POST /api/dev/seed` | 방 만들기·참가하기(환율 표 입력 포함) |
 | #5 비서 설정 | `agents` 문서의 `memory`·`rules` | 시드 기본값 | 설정 화면과 저장 |
-| #7 위치 | `src/agents/evidence.mjs`의 `evidenceFor()`·`counterFor()` | 빈 배열(개발용 데모 방의 '2차 바'만 고정 근거) | 위치 요약 → `Evidence` |
+| #7 위치 | `src/agents/evidence.mjs`의 provider | `createEvidenceProvider()`가 동일한 `(uid, expense, room)` 계약으로 위치 요약 반환. 고정 근거는 개발용 시드에서만 사용 | 타임라인 파일 파서는 장치별 형식 확인 후 별도 연동 |
 | #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs` | 받는 계좌 설정 화면, `supertoss://send?…` 링크(실기기 검증 완료), 데스크톱 QR 핸드오프(`src/payments/qr.mjs`) | 토스아이디(toss.me) 활용 조사 |
 | #10 보안 | `src/http.mjs`, Firestore 보안 규칙 | 신원당 호출 제한 | 토큰 필수, 보안 규칙 테스트, 계좌 암호화 |
 
@@ -55,8 +57,13 @@ API 서버 (server.mjs → src/app.mjs)
 | `list(col, where = {})` | 필드 동등 비교로 거르기(Firestore의 `==`와 같은 범위) |
 | `appendEvent(roomId, ev)` | 비서 기록 추가. `seq`(방마다 1부터)와 `at`(ISO 시각)을 채워서 돌려줌 |
 | `listEvents(roomId, afterSeq = 0)` | `seq > afterSeq`인 기록 |
+| `eraseUser(uid)` (선택 확장) | 탈퇴 기능을 제공하는 저장소에서 구현. 개인정보 삭제·방별 무작위 익명 UID 치환을 원자적으로 수행하고 `{ removedLinks }` 반환. 없으면 탈퇴 API는 데이터 변경 없이 503 |
 
 계약 테스트는 `test/store.test.mjs`예요. 따라서 `FirestoreStore`도 이 테스트를 그대로 통과해야 해요.
+
+탈퇴 확장 계약은 `test/account-erasure.test.mjs`로 확인해요. 프로필·비서 설정·위치 요약·본인이 등록/결제한 영수증 사진을 삭제하고, 공동 금액·분담·환율·이벤트 순번은 유지해요. `Member.deleted=true`인 익명 참여자는 새 지출에 넣을 수 없어요. 배분 사유·이의 근거·이벤트 문구에 복제된 개인정보는 지우고 열린 중재안은 다시 확인하게 해요. 원 계정과 익명 UID의 역매핑을 저장하지 않아요. 이미 발급한 QR은 무효화하고 AI 응답 캐시도 비워요. 최소 `deletedUsers/{uid}` 표식은 접근 차단·삭제 재시도용으로 유지해요. 이미 다른 참여자가 별도로 복사한 기록은 회수할 수 없어요.
+
+메모리 프로토타입에서는 방·계정 API와 tick을 한 큐로 직렬화해 AI 요청 도중 탈퇴/철회로 데이터가 되살아나는 경쟁을 막아요. 여러 인스턴스를 쓰는 #3 저장소에서는 같은 보장을 트랜잭션과 삭제 작업으로 구현해야 해요. 해당 능력이 없는 저장소에 탈퇴 기능을 조용히 활성화하지 않아요.
 
 ## 컬렉션과 Firestore 경로
 
@@ -69,6 +76,10 @@ API 서버 (server.mjs → src/app.mjs)
 | `disputes` | `Dispute` | `rooms/{roomId}/disputes/{disputeId}` |
 | `transfers` | `Transfer` | `rooms/{roomId}/transfers/{transferId}` |
 | `receipts` | 영수증 사진 `{ id(=지출 id), roomId, mimeType, data }` | Firebase Storage `receipts/{roomId}/{expenseId}.jpg` 권장 |
+| `users` | `UserProfile` | `users/{uid}` (본인만) |
+| `deletedUsers` | `DeletedUser` | `deletedUsers/{uid}` (서버 전용) |
+| `locationConsents` | `LocationConsent` | `rooms/{roomId}/locationConsents/{uid}` (본인·서버만) |
+| `locationEvidence` | `LocationEvidence` | `rooms/{roomId}/locationEvidence/{id}` (본인 원기록; 공유는 이의의 요약만) |
 | 비서 기록 | `AgentEvent` | `rooms/{roomId}/events/{seq}` |
 
 ## 도메인 타입 요약
@@ -87,11 +98,18 @@ API 서버 (server.mjs → src/app.mjs)
 
 ## API
 
-지금 있는 것이에요. 실제 방 API는 신원 헤더가 필요해요(#2 전까지는 `x-demo-user: <uid>`).
+실제 데이터 API는 `Authorization: Bearer <Firebase ID token>`이 필요해요. 없거나 유효하지 않으면 401, 인증은 됐지만 방 멤버가 아니면 403이에요. 비로그인 데모 API는 그대로 열려 있어요.
 
 | 메서드 | 경로 | 하는 일 |
 | --- | --- | --- |
-| GET | `/api/config` | Gemini 연결 상태 |
+| GET | `/api/config` | 기존 `mode`·`model` 유지, `auth: { firebase, dev, emulator }` 추가. Firebase 값은 공개 웹 앱 설정이며 비밀키를 포함하지 않음 |
+| GET / POST | `/api/me` | 내 프로필 읽기 / `{ name, color }` 저장 |
+| GET | `/api/rooms` | 내 방 목록 `{ rooms: [{ id, name, dates }] }` |
+| GET | `/api/me/deletion` | 삭제 재시도 상태 `{ pending }` |
+| POST | `/api/me/delete` | 5분 이내 Google 재인증 필요. 개인정보 삭제·공동 기록 익명화·Firebase 계정 삭제 |
+| GET / POST | `/api/rooms/:id/location` | 내 요약 목록 / `{ expenseId, action, observedAt, relation }` 기록. 좌표 원본·임의 요약 문자열은 거부 |
+| POST | `/api/rooms/:id/location/consent` | `{ agree: true, expiresAt }`. 최대 24시간 동의 |
+| POST | `/api/rooms/:id/location/revoke` | 내 동의와 요약, 연결된 미확정 중재안 삭제 |
 | POST | `/api/allocate`, `/api/mediate` | 데모 화면용 메뉴 배분·중재 |
 | POST | `/api/dev/seed` | 개발용 데모 방 만들기(`DEV_SEED=1`일 때만) |
 | GET | `/api/rooms/:id` | 방, 지출, 청구서, 이의, 송금, 사람별 차액, 그리고 **내가 처리할 일(`actions`)** |

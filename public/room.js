@@ -5,6 +5,7 @@ import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSe
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
+import { initAuth, authOptions, onSessionChange } from './auth.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
@@ -15,6 +16,8 @@ const members = () => state.data?.room.members ?? [];
 const nameOf = (uid) => ({ system: '시스템', mediator: '중재 비서', all: '모두' })[uid] ?? members().find((m) => m.uid === uid)?.name ?? uid;
 const agentName = (uid) => (uid === 'system' || uid === 'mediator' ? nameOf(uid) : `${nameOf(uid)}의 비서`);
 const colorOf = (uid) => {
+  const profileColor = members().find(m => m.uid === uid)?.color;
+  if (/^#[0-9a-f]{6}$/i.test(profileColor)) return profileColor;
   const i = members().findIndex((m) => m.uid === uid);
   return i < 0 ? '#8e8e93' : `var(--p${i % 4})`;
 };
@@ -97,7 +100,7 @@ function fitDate(d) {
 }
 function newDraft() {
   const { room, me } = state.data;
-  const uids = room.members.map((m) => m.uid);
+  const uids = room.members.filter(m => !m.deleted).map((m) => m.uid);
   const last = lastUsed();
   const currencies = ['KRW', room.fx?.currency].filter(Boolean);
   return fitDate({
@@ -418,6 +421,7 @@ async function act(name, d) {
 
 // ---------------------------------------------------------------- 화면
 function noRoom() {
+  if (!authOptions().dev) return '<section class="hero"><h1>내 정산 방</h1><p><a class="btn" href="account.html">로그인·내 방 목록</a></p></section>';
   const failed = state.error?.status === 'seed';
   return `<section class="hero"><h1>열 방이 없어요</h1>
     <p class="sub">실제 방 만들기·참가하기는 #4에서 생겨요. 그전까지는 개발용 데모 방으로 확인해요.</p></section>
@@ -427,10 +431,11 @@ function noRoom() {
 }
 
 function whoPicker() {
+  if (!authOptions().dev) return `<section class="group"><a class="btn secondary" href="location.html?room=${encodeURIComponent(roomId)}">참석 근거 · 위치 요약</a></section>`;
   const me = currentUid();
-  return `<section class="group"><h2 class="group-label"><span>누구로 볼까요?</span><span>개발용 · 로그인(#2)이 생기면 사라져요</span></h2>
+  return `<section class="group"><a class="text-btn" href="location.html?room=${encodeURIComponent(roomId)}">참석 근거 · 위치 요약</a><h2 class="group-label"><span>누구로 볼까요?</span><span>개발용 시드 신원</span></h2>
     <div class="seg" role="radiogroup" aria-label="보는 사람" data-seg="who"><span class="seg-thumb"></span>
-      ${members().map((m) => `<button type="button" role="radio" aria-checked="${m.uid === me}" data-action="who" data-id="${esc(m.uid)}">${esc(m.name)}</button>`).join('')}
+      ${members().filter(m => !m.deleted).map((m) => `<button type="button" role="radio" aria-checked="${m.uid === me}" data-action="who" data-id="${esc(m.uid)}">${esc(m.name)}</button>`).join('')}
     </div></section>`;
 }
 
@@ -501,7 +506,7 @@ const seg = (key, field, options, value) => `<div class="seg" role="radiogroup" 
 
 function addSheetHtml() {
   const d = state.draft;
-  const { room } = state.data;
+  const room = { ...state.data.room, members: state.data.room.members.filter(m => !m.deleted) };
   const currencies = ['KRW', room.fx?.currency].filter(Boolean);
   const dateField = d.currency === 'KRW'
     ? `<input type="date" data-field="date" value="${esc(d.date)}" aria-label="날짜">`
@@ -957,12 +962,14 @@ function render() {
     return;
   }
   if (state.error?.status === 404) {
+    if (!authOptions().dev) { main.innerHTML = '<section class="hero"><h1>방을 찾을 수 없어요</h1><a href="account.html">내 방 목록</a></section>'; return; }
     main.innerHTML = `<section class="hero"><h1>방을 찾을 수 없어요</h1>
       <p class="sub">서버를 다시 켜면 메모리에 있던 방이 사라져요. 개발용 데모 방을 다시 만들어 주세요.</p></section>
       <section class="next"><div class="actions"><button class="btn" data-action="seed">데모 방 만들기</button></div></section>`;
     return;
   }
   if (!state.data) {
+    if (!authOptions().dev) { main.innerHTML = `<section class="hero"><h1>방을 열 수 없어요</h1><p>${esc(state.error?.message || '연결을 확인해 주세요')}</p><a href="account.html">내 계정으로 돌아가기</a></section>`; return; }
     // 아직 누구인지 모르거나(401) 이 방 멤버가 아니면(403) 방 정보 없이 멤버 목록도 모른다.
     // 개발용 시드 방의 uid로 고르게 한다.
     const seedMembers = [['me', '나'], ['cs', '철수'], ['yh', '영희'], ['ms', '민수']];
@@ -1057,9 +1064,14 @@ async function loadConfig() {
 }
 
 loadConfig();
-if (roomId) {
-  load();
-  if (currentUid()) watch(); // 누구인지 정해진 뒤에만 기록을 받아 온다
-} else {
-  render();
-}
+try {
+  await initAuth();
+  if (roomId) {
+    if (!authOptions().dev && !currentUid()) location.replace('account.html');
+    else { await load(); if (currentUid()) watch(); }
+  } else render();
+  const sessionUid = currentUid();
+  onSessionChange(user => {
+    if (!user || user.uid !== sessionUid) { unsubscribe(); state.data = null; state.events = []; location.replace('account.html'); }
+  });
+} catch (e) { state.error = e; render(); }

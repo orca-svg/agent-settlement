@@ -59,7 +59,7 @@ export function allowCors(req, res, origins) {
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'content-type, x-demo-user');
+  res.setHeader('Access-Control-Allow-Headers', 'content-type, authorization, x-demo-user');
 }
 
 // 공개 주소라 누구나 부를 수 있으므로 Gemini 호출을 키(신원 또는 IP)당 창 안에서 max회로 막는다.

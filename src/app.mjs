@@ -7,7 +7,10 @@ import { randomUUID } from 'node:crypto';
 import { DEMO_ROOM, DEMO_EXPENSES, DEMO_DISPUTE, MEMORY_LIMIT } from '../public/data.js';
 import { ledger } from '../public/core.js';
 import { router, readJson, send, allowCors, createRateLimiter, clientIp, HttpError } from './http.mjs';
-import { identify } from './identity.mjs';
+import { createIdentity } from './identity.mjs';
+import { firebaseConfig } from './firebase.mjs';
+import { registerAccountRoutes } from './accounts.mjs';
+import { createLocationService } from './location.mjs';
 import { seedDemoRoom } from './dev/seed.mjs';
 import { registerExpenseRoutes } from './expenses/routes.mjs';
 import { pendingActions } from './actions.mjs';
@@ -15,7 +18,7 @@ import { createOrchestrator } from './agents/orchestrator.mjs';
 import { registerAgentRoutes } from './agents/routes.mjs';
 import { allocateWithGemini } from './agents/allocate.mjs';
 import { createCache } from './agents/cache.mjs';
-import { evidenceFor as demoEvidence, counterFor } from './agents/evidence.mjs';
+import { createEvidenceProvider, counterFor } from './agents/evidence.mjs';
 import { mediateWithGemini } from './agents/mediate.mjs';
 import { verifyQrToken } from './payments/qr.mjs';
 
@@ -54,7 +57,20 @@ function serveStatic(pathname, res) {
   fs.createReadStream(file).pipe(res);
 }
 
-export function createApp({ store, gemini = null, clock = () => new Date(), evidenceFor = demoEvidence, env = {} }) {
+export function createApp({ store, gemini = null, clock = () => new Date(), evidenceFor, auth = null, env = {} }) {
+  // MemoryStore is a single-process prototype. Serialize private operations so
+  // deletion/revocation cannot race an in-flight AI result and restore data.
+  // #3 must implement equivalent transactional guarantees across instances.
+  let pending = Promise.resolve();
+  const stateOperation = fn => {
+    const result = pending.then(fn);
+    pending = result.catch(() => {});
+    return result;
+  };
+  const dev = env.DEV_SEED === '1' && env.NODE_ENV !== 'production' && !env.FIREBASE_PROJECT_ID && !auth;
+  const identify = createIdentity({ auth, dev });
+  const locationService = createLocationService({ store, clock });
+  evidenceFor ??= createEvidenceProvider({ locationService, dev });
   const origins = (env.ALLOWED_ORIGINS || 'https://orca-svg.github.io').split(',');
   const overLimit = createRateLimiter({ max: 30, windowMs: 600_000 });
   const allocCache = createCache(); // 같은 입력의 메뉴 배분은 Gemini에게 다시 묻지 않는다
@@ -65,7 +81,13 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     if (overLimit(key)) throw new HttpError(429, '요청이 너무 많아요. 10분 뒤에 다시 시도해 주세요.');
   };
 
-  routes.get('/api/config', async () => ({ mode: gemini ? 'gemini' : 'rules', model: gemini?.model ?? null }));
+  routes.get('/api/config', async () => ({ mode: gemini ? 'gemini' : 'rules', model: gemini?.model ?? null, auth: { firebase: auth ? firebaseConfig(env) : null, dev, emulator: env.NODE_ENV !== 'production' ? env.FIREBASE_AUTH_EMULATOR_HOST || null : null } }));
+  async function authenticate(req, { allowDeleting = false } = {}) {
+    const who = await identify(req, store);
+    if (!who || (!allowDeleting && await store.get('deletedUsers', who.uid))) throw new HttpError(401, '로그인이 필요해요');
+    return who;
+  }
+  registerAccountRoutes(routes, { store, authenticate, auth, clock, onErased: () => allocCache.clear() });
 
   // 데스크톱 QR이 가리키는 곳. 계좌·금액이 든 진짜 링크는 여기서만 풀린다(QR 이미지 서비스는 이 토큰만 본다)
   routes.get('/api/qr/:token', async ({ res, params }) => {
@@ -98,18 +120,18 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
 
   // 방 멤버인지 확인한다. 방이 없으면 404, 누구인지 모르면 401, 멤버가 아니면 403
   async function member(req, roomId) {
+    const who = await authenticate(req);
+    await locationService.sweep();
     const room = await store.get('rooms', roomId);
     if (!room) throw new HttpError(404, '방을 찾을 수 없어요');
-    const who = await identify(req, store);
-    if (!who) throw new HttpError(401, '누구인지 알려 주세요');
     const me = room.members.find((m) => m.uid === who.uid);
-    if (!me) throw new HttpError(403, '이 방의 멤버가 아니에요');
+    if (!me || me.deleted) throw new HttpError(403, '이 방의 멤버가 아니에요');
     return { room, me: { uid: me.uid, name: me.name } };
   }
 
   // 개발용: 데모 방 만들기. #4 방 만들기가 생기기 전까지 실제 방 화면을 열어 보는 용도
   routes.post('/api/dev/seed', async () => {
-    if (env.DEV_SEED !== '1') throw new HttpError(404, 'not found');
+    if (!dev) throw new HttpError(404, 'not found');
     const id = `demo-${randomUUID().slice(0, 8)}`;
     await seedDemoRoom(store, { id });
     return { roomId: id };
@@ -137,17 +159,20 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     return { events: await store.listEvents(params.id, Number(url.searchParams.get('after') || 0)) };
   });
 
+  locationService.register(routes, member);
   registerExpenseRoutes(routes, { ...ctx, member });
-  const orchestrator = createOrchestrator({ store, gemini, clock, evidenceFor, counterFor });
+  const orchestrator = createOrchestrator({ store, gemini, clock, evidenceFor, counterFor: dev ? counterFor : async () => [] });
   registerAgentRoutes(routes, { orchestrator, member, overLimit });
 
   // 때가 된 송금 알림. 배포에서는 Cloud Scheduler가 x-cron-secret을 붙여 부른다. 비밀값이 설정되지 않았으면 열지 않는다
   routes.post('/api/cron/tick', async ({ req }) => {
     if (!env.CRON_SECRET || req.headers['x-cron-secret'] !== env.CRON_SECRET) throw new HttpError(401, 'unauthorized');
+    await locationService.sweep();
     return orchestrator.tick();
   });
 
   const server = http.createServer(async (req, res) => {
+    req.identityContext = { auth, dev };
     const url = new URL(req.url, 'http://localhost');
     allowCors(req, res, origins);
     if (req.method === 'OPTIONS') {
@@ -157,7 +182,9 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     try {
       const hit = routes.match(req.method, url.pathname);
       if (hit) {
-        const out = await hit.handler({ req, res, url, params: hit.params, ...ctx });
+        const invoke = () => hit.handler({ req, res, url, params: hit.params, ...ctx });
+        const isPrivateState = /^\/api\/(rooms|me|dev|cron)(\/|$)/.test(url.pathname);
+        const out = await (isPrivateState ? stateOperation(invoke) : invoke());
         if (!res.writableEnded) send(res, 200, out ?? {});
         return;
       }
@@ -169,6 +196,6 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       return send(res, 500, { error: e.message });
     }
   });
-  server.tick = orchestrator.tick; // 로컬 서버가 주기적으로 부른다(server.mjs)
+  server.tick = () => stateOperation(async () => { await locationService.sweep(); return orchestrator.tick(); });
   return server;
 }

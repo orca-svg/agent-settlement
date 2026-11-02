@@ -5,14 +5,14 @@
 export const TAGS = ['술', '무알코올 음료', '나눠 먹는 안주', '날생선', '1인 식사', '기타'];
 
 /** Store의 컬렉션 이름. Firestore 경로는 ARCHITECTURE.md의 표를 따른다. */
-export const COLLECTIONS = ['rooms', 'expenses', 'agents', 'invoices', 'disputes', 'transfers'];
+export const COLLECTIONS = ['rooms', 'expenses', 'agents', 'invoices', 'disputes', 'transfers', 'receipts', 'users', 'deletedUsers', 'locationConsents', 'locationEvidence'];
 
 /** 사람이 처리해야 하는 일. 비서 기록(AgentEvent)의 action.type으로 쓴다. */
 export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 'approve_transfer', 'confirm_receipt', 'set_payout'];
 
 /**
  * uid는 ASCII 문자열이다(#2 이후에는 Firebase uid). 표시 이름은 Member.name으로만 보여 준다.
- * @typedef {{ uid: string, name: string }} Member
+ * @typedef {{ uid: string, name: string, color?: string, deleted?: boolean }} Member
  */
 
 /**
@@ -66,7 +66,7 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
  * }} Invoice
  */
 
-/** #7이 위치 요약 등으로 만든다. 원본 위치는 넣지 않는다. @typedef {{ kind: 'left_at'|'not_present'|'text', time?: string, summary: string }} Evidence */
+/** 위치 원본은 넣지 않는다. 브라우저 보고는 text+uncertain으로만 저장한다. @typedef {{ kind: 'left_at'|'not_present'|'text', time?: string, summary: string, locationId?: string, source?: 'browser_self_report', uncertain?: boolean }} Evidence */
 
 /**
  * @typedef {{
@@ -96,3 +96,15 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
  */
 
 export {};
+
+/** #2. Public profile; identity always comes from a verified token. @typedef {{ id: string, name: string, color: string }} UserProfile */
+/** Minimal deletion/retry gate, never returned in room data. @typedef {{ id: string }} DeletedUser */
+/** #7. Maximum 24-hour opt-in; id is JSON.stringify([roomId, uid]). @typedef {{ id: string, roomId: string, uid: string, expiresAt: string }} LocationConsent */
+/** Raw coordinates and movement paths are deliberately not part of this type.
+ * @typedef {{ id: string, roomId: string, uid: string, expenseId: string, action: 'checkin'|'checkout', summary: string, observedAt: string }} LocationEvidence
+ */
+/** Optional Store capability needed to enable account deletion. Atomically deletes
+ * private records and unlinks shared financial records without changing amounts;
+ * returns internal links to revoke from the QR cache. Existing CRUD stays unchanged.
+ * @typedef {(uid: string) => Promise<{removedLinks: string[]}>} EraseUser
+ */

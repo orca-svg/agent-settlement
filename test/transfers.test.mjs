@@ -80,7 +80,7 @@ test('받을 계좌가 없으면 QR을 만들지 않는다(409)', async () => {
 test('HTTP: 보내는 사람이 QR을 요청하면 새 토큰을 주고, 그 토큰 주소는 토스 링크로 보낸다', async () => {
   const { store, transfers } = await setup();
   const t = pair(await transfers(), 'cs', 'me');
-  const server = createApp({ store, env: {} });
+  const server = createApp({ store, env: { DEV_SEED: '1' } });
   await new Promise((r) => server.listen(0, r));
   const base = `http://localhost:${server.address().port}`;
   const qr = (uid) => fetch(`${base}/api/rooms/demo-t/transfers/${encodeURIComponent(t.id)}/qr`, { method: 'POST', headers: { 'x-demo-user': uid } });
