@@ -54,6 +54,16 @@ test('null·없는 칸은 잠그지 않고 그대로', async () => {
   assert.deepEqual(await store.get('agents', 'ms'), { id: 'ms', uid: 'ms' });
 });
 
+test('넘긴 객체·돌려받은 계좌 객체를 고쳐도 저장본은 안 바뀐다(잠긴 칸도 복사본)', async () => {
+  const { store } = make();
+  const doc = { id: 'cs', uid: 'cs', payout: { ...PAYOUT } };
+  await store.put('agents', doc);
+  doc.payout.accountNo = '777';
+  (await store.get('agents', 'cs')).payout.accountNo = '999';
+  (await store.list('agents'))[0].payout.accountNo = '888';
+  assert.equal((await store.get('agents', 'cs')).payout.accountNo, '100000000002');
+});
+
 test('없는 문서는 null, 다른 컬렉션은 손대지 않는다', async () => {
   const { inner, store } = make();
   assert.equal(await store.get('agents', 'nope'), null);
@@ -152,7 +162,9 @@ test('32바이트가 아닌 열쇠, id가 없는 문서는 바로 거부한다',
 
 // ---------------------------------------------------------------- 통합: 데모 방 전체 흐름
 const DEMO_ACCOUNTS = ['100000000001', '100000000002', '100000000003', '100000000004'];
-const rawDump = async (inner) => JSON.stringify([...(await inner.list('agents')), ...(await inner.list('transfers'))]);
+// 진짜 저장소 전체(모든 컬렉션 + 비서 기록). 새 컬렉션이 생겨도 저절로 포함된다(MemoryStore의 cols·events를 직접 읽음)
+const rawDump = async (inner) =>
+  JSON.stringify({ cols: [...inner.cols].map(([name, docs]) => [name, [...docs.values()]]), events: [...inner.events.values()] });
 
 // 이의 없이 모두 수락하는 데모 방(test/transfers.test.mjs의 setup과 같은 조건)을 래퍼 위에 만든다
 async function demoRoom() {
@@ -171,7 +183,7 @@ test('통합: 청구→송금까지 돌려도 저장소에는 계좌번호가 �
   const { inner, store } = await demoRoom();
   const ts = await store.list('transfers', { roomId: 'demo-e' });
   assert.equal(ts.length, 3);
-  assert.ok(ts.every((t) => t.link.startsWith('supertoss://send?')));
+  assert.ok(ts.every((t) => t.link?.startsWith('supertoss://send?')));
 
   const dump = await rawDump(inner);
   for (const n of DEMO_ACCOUNTS) assert.ok(!dump.includes(n), `저장소에 ${n}이 평문으로 남음`);
@@ -195,6 +207,7 @@ test('통합: 받을 계좌를 새로 정해도 저장소에는 잠긴 글자만
   await orch.setPayout('demo-e', 'yh', { bank: '국민은행', accountNo: '123-456-789012', holder: '영희' });
   const dump = await rawDump(inner);
   assert.ok(!dump.includes('123456789012') && !dump.includes('123-456-789012'));
+  assert.ok(!dump.includes('국민') && !dump.includes(encodeURIComponent('국민'))); // 'KB국민은행'(저장 표기)·'국민'(토스 표기)
   assert.equal((await store.get('agents', 'yh')).payout.accountNo, '123-456-789012');
   const t = (await store.list('transfers', { roomId: 'demo-e' })).find((x) => x.to === 'yh');
   assert.equal(t.fallback.accountNo, '123456789012');
