@@ -95,7 +95,7 @@ API 서버 (server.mjs → src/app.mjs)
 - **uid:** ASCII 문자열이에요(#2 이후 Firebase uid). 화면에는 `Member.name`만 보여요.
 - **금액·날짜:** 금액은 정수예요(원·엔은 보조 단위가 없어요). 날짜는 `YYYY-MM-DD`, 시각은 `HH:MM`, 서버 일정은 `Asia/Seoul` 기준이에요.
 - **`Room`:** 멤버, 환율 표 `fx`(원/100 단위, 결제일별 매매기준율·카드 수수료·사람별 현찰 환율), 합의한 환율 정책, `version`을 가져요. `version`은 지출이 바뀔 때마다 올라가고, 청구서·송금은 이 version에 묶여요.
-- **`Expense`:** `split`이 `'items'`면 영수증 줄(`items`)마다 `alloc`의 `consumers`가 나눠 내요.
+- **`Expense`:** `split`이 `'items'`면 영수증 줄(`items`)마다 `alloc`의 `consumers`가 나눠 내요. `allocMemory`는 배분할 때 쓴 비서 기억의 지문이고, 방 응답의 `allocFresh`는 그 지문이 지금 기억과 같은지예요(같으면 화면이 '다시 나누기'를 막아요).
 - **`AgentSettings`:**
   - `memory`: 정산에 쓰라고 공유한 기억이에요. 무료 요금제는 5개까지예요.
   - `rules`: 자동 수락 한도, 보낼 시기(`'now'` 또는 `{ payday: 25 }`), 이의 처리예요.
@@ -118,7 +118,7 @@ API 서버 (server.mjs → src/app.mjs)
 | GET | `/api/rooms/:id/expenses/:eid/receipt` | 저장된 영수증 사진 `{ mimeType, data }`(방 멤버만) |
 | POST | `/api/rooms/:id/expenses/:eid` | 지출 고치기. 같은 검증을 거쳐 덮어써요. 영수증 줄이나 함께한 사람이 바뀌면 메뉴 배분을 지워 다시 나누게 해요 |
 | POST | `/api/rooms/:id/receipts/extract` | 영수증 사진(긴 변 1600px JPEG, base64) → 초안. **저장하지 않아요** |
-| POST | `/api/rooms/:id/expenses/:eid/allocate` | 비서들이 공유한 기억으로 영수증 줄 배분. 근거 없는 줄은 지출을 남긴 사람에게 물어요. 응답 `{ expense, source, how, latencyMs }` |
+| POST | `/api/rooms/:id/expenses/:eid/allocate` | 비서들이 공유한 기억으로 영수증 줄 배분. 근거 없는 줄은 지출을 남긴 사람에게 물어요. 응답 `{ expense, source, how, latencyMs }`. 이미 나눴고 비서 기억이 그대로면 409이고 아무것도 바꾸지 않아요(버전·확인한 줄 유지) |
 | POST | `/api/rooms/:id/expenses/:eid/lines/:itemId` | 줄 하나를 사람이 확정(`{ consumers }`) |
 
 | POST | `/api/rooms/:id/invoices/send` | 지금 방 `version`으로 청구서 보내기. 같은 version이면 다시 만들지 않아요(멱등). 각자의 비서가 규칙대로 수락·질문·이의를 정해요 |
