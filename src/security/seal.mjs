@@ -33,3 +33,20 @@ export function unseal(text, key, label) {
     throw new Error(`잠긴 값을 풀 수 없어요(열쇠가 다르거나 값이 바뀌었어요): ${label}`);
   }
 }
+
+// 개발용 열쇠: 코드에 공개되어 있으니 가짜 데이터만 있는 로컬에서만 쓴다
+const DEV_KEY = crypto.createHash('sha256').update('agent-settlement-dev-payout-key').digest();
+
+// 열쇠 고르기. PAYOUT_ENC_KEY(base64, 32바이트)가 있으면 그것, 없으면 로컬에서만 개발용 열쇠.
+// 배포(NODE_ENV=production)에서 없으면 에러를 내서 서버가 시작하지 않게 한다(공개된 열쇠로 조용히 돌지 않게)
+export function resolvePayoutKey(env = {}, { warn = console.warn } = {}) {
+  const raw = String(env.PAYOUT_ENC_KEY ?? '').trim();
+  if (raw) {
+    const key = Buffer.from(raw, 'base64');
+    if (key.length !== 32) throw new Error('PAYOUT_ENC_KEY는 base64로 32바이트여야 해요');
+    return key;
+  }
+  if (env.NODE_ENV === 'production') throw new Error('PAYOUT_ENC_KEY가 없어요. 배포에서는 Secret Manager로 넣어 주세요');
+  warn('[payout] PAYOUT_ENC_KEY가 없어 개발용 열쇠로 계좌를 잠가요. 배포에서는 꼭 설정해야 해요');
+  return Buffer.from(DEV_KEY);
+}
