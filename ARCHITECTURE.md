@@ -125,7 +125,7 @@ API 서버 (server.mjs → src/app.mjs)
 | GET | `/api/qr/:token` | 휴대폰으로 QR을 찍으면 열리는 주소. 토큰을 토스 링크로 바꿔 302로 넘겨요. **신원 헤더 없이** 열려요(토큰이 곧 열쇠). 만료되었거나 잘못된 토큰은 404. 토큰은 서버 메모리에만 있어서 서버가 한 대일 때만 맞아요 |
 | POST | `/api/cron/tick` | 때가 된 송금 알림, 보낸 뒤 미확인 알림(1일·3일 뒤 두 번). `x-cron-secret`이 `CRON_SECRET`과 같을 때만(로컬 서버는 30초마다 스스로 불러요) |
 
-`actions`는 이벤트 기록에서 세지 않고 서버가 현재 상태에서 계산해요(`src/actions.mjs`). 그래서 처리한 일은 자동으로 빠져요. 종류는 `confirm_line`(줄 확인), `answer_invoice`(한도를 넘은 청구서), `agree_dispute`(중재 맡기기·중재안 동의), `approve_transfer`(보낼 때가 된 송금), `set_payout`(받을 계좌 없음), `confirm_receipt`(받았는지 확인)예요.
+`actions`는 이벤트 기록에서 세지 않고 서버가 현재 상태에서 계산해요(`src/actions.mjs`). 그래서 처리한 일은 자동으로 빠져요. 종류는 `confirm_line`(줄 확인), `answer_invoice`(한도를 넘은 청구서), `agree_dispute`(중재 맡기기·중재안 동의), `approve_transfer`(보낼 때가 된 송금, 보냈는지 다시 묻는 송금), `set_payout`(받을 계좌 없음), `confirm_receipt`(받았는지 확인)예요.
 
 **송금 링크는 미리 만들어요.** 브라우저는 사용자 제스처 안에서만 앱을 열어 줘요. 그래서 송금을 만들 때 서버가 `link`(토스 송금 화면)와 `fallback`(계좌·금액 복사용)을 채워 두고, 화면은 밀어서 보내기를 놓는 그 순간 링크를 열어요.
 

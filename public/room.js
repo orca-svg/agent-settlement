@@ -623,7 +623,7 @@ function actionButtons(a, size = '') {
   }
 }
 
-// 일반 글자를 돌려준다(이름이 들어간다). HTML에 넣을 때는 쓰는 쪽에서 esc()로 감싼다(지금은 :464 한 곳)
+// 일반 글자를 돌려준다(이름이 들어간다). HTML에 넣을 때는 쓰는 쪽에서 esc()로 감싼다(지금은 nextCard() 한 곳)
 function actionNote(a) {
   const t = byId('transfers', a.ref);
   const opened = t?.status === 'opened';
@@ -764,7 +764,7 @@ async function refreshQr(tid) {
   renderSheet();
 }
 
-function qrBlock(t) {
+function qrBlock(t, { sentButton = true } = {}) {
   if (!t.link || !isDesktop()) return '';
   if (!qrIsFresh(state.qr, t.id)) refreshQr(t.id);
   const qr = state.qr?.id === t.id ? state.qr : null;
@@ -774,7 +774,7 @@ function qrBlock(t) {
     : `<div class="qr-wait">${qr?.failed ? 'QR을 만들지 못했어요.<br>위 계좌번호를 복사해 보내 주세요.' : 'QR을 만드는 중이에요'}</div>`;
   // 휴대폰으로 보내고 돌아온 사람이 슬라이더(데스크톱에선 토스가 안 열림)를 거치지 않고 바로 끝낼 수 있게
   return `<div class="qr-desktop"><p class="group-note">컴퓨터라면 휴대폰으로 QR을 찍어 토스를 열어요.</p>${img}
-    <button class="btn secondary" style="width:100%;margin-top:12px" data-action="mark-sent" data-id="${esc(t.id)}">휴대폰으로 보냈어요</button></div>`;
+    ${sentButton ? `<button class="btn secondary" style="width:100%;margin-top:12px" data-action="mark-sent" data-id="${esc(t.id)}">휴대폰으로 보냈어요</button>` : ''}</div>`;
 }
 
 // 송금: 밀어서 보내면 그 제스처 안에서 토스를 연다. 앱이 안 열리면 계좌·금액을 복사해 둔다
@@ -803,10 +803,11 @@ function transferSheet() {
     const head = t.notReceivedAt
       ? `<h3 style="margin:0 0 8px">${esc(subj(toName))} 아직 못 받았대요</h3><p class="group-note" style="padding:0;margin:0 0 10px">토스 송금 내역을 먼저 확인해 주세요. 두 번 보내지 않게요.</p>`
       : '<h3 style="margin:0 0 10px">보냈나요?</h3>';
+    // 컴퓨터에서는 토스 링크가 열리지 않으므로 토스 다시 열기 대신 휴대폰으로 넘길 QR을 보여 준다(보냈어요 버튼은 위에 있다)
     actions = `${head}<div style="display:grid;gap:8px">
       <button class="btn" data-action="mark-sent" data-id="${esc(t.id)}">보냈어요</button>
-      ${t.link ? `<button class="btn secondary" data-action="reopen-link" data-id="${esc(t.id)}">토스 다시 열기</button>` : ''}
-      <button class="btn plain" data-action="close-sheet">아직이에요</button></div>`;
+      ${t.link && !isDesktop() ? `<button class="btn secondary" data-action="reopen-link" data-id="${esc(t.id)}">토스 다시 열기</button>` : ''}
+      <button class="btn plain" data-action="close-sheet">아직이에요</button></div>${qrBlock(t, { sentButton: false })}`;
   } else if (t.to === me && t.status === 'sent') {
     actions = `<div style="display:grid;gap:8px"><button class="btn" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>
       <button class="btn secondary" data-action="not-received" data-id="${esc(t.id)}">아직 안 들어왔어요</button></div>`;
