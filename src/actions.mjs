@@ -34,13 +34,18 @@ export function pendingActions({ room, expenses = [], invoices = [], disputes = 
   // 송금: 때가 된 것은 보내는 사람에게, 받는 계좌가 없으면 받는 사람에게(한 번만), 보낸 뒤에는 받는 사람에게 확인을
   const live = transfers.filter((t) => ['scheduled', 'due', 'opened'].includes(t.status) && current(t));
   for (const t of live.filter((x) => x.status !== 'scheduled')) {
-    out.push({ type: 'approve_transfer', ref: t.id, for: t.from, transferId: t.id, text: t.status === 'opened' ? `${name(t.to)}에게 ${won(t.amount)}을 보냈나요?` : `${name(t.to)}에게 ${won(t.amount)}을 보낼까요?` });
+    // opened에 notReceivedAt이 있으면 받는 사람이 "아직 안 들어왔어요"라고 한 것(#8 송금 확인)
+    const text = t.status !== 'opened' ? `${name(t.to)}에게 ${won(t.amount)}을 보낼까요?`
+      : t.notReceivedAt ? `${subj(name(t.to))} ${won(t.amount)}을 아직 못 받았대요`
+      : `${name(t.to)}에게 ${won(t.amount)}을 보냈나요?`;
+    out.push({ type: 'approve_transfer', ref: t.id, for: t.from, transferId: t.id, text });
   }
   for (const to of new Set(live.filter((t) => !t.link && !t.fallback).map((t) => t.to))) {
     out.push({ type: 'set_payout', ref: `payout:${to}`, for: to, text: '받을 계좌를 알려 주면 바로 보낼 수 있어요' });
   }
   for (const t of transfers.filter((x) => x.status === 'sent')) {
-    out.push({ type: 'confirm_receipt', ref: t.id, for: t.to, transferId: t.id, text: `${subj(name(t.from))} 보낸 ${won(t.amount)}을 받았나요?` });
+    const text = t.notReceivedAt ? `${subj(name(t.from))} 송금 내역을 확인했대요. ${won(t.amount)}을 받았나요?` : `${subj(name(t.from))} 보낸 ${won(t.amount)}을 받았나요?`;
+    out.push({ type: 'confirm_receipt', ref: t.id, for: t.to, transferId: t.id, text });
   }
   return out;
 }

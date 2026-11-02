@@ -273,3 +273,16 @@ test('안 들어왔다고 한 뒤 다시 보냈어요: sentAt을 새로 적고 �
   const sent = (await ctx.store.listEvents('demo-t')).filter((e) => e.kind === 'transfer_sent').map((e) => e.text);
   assert.deepEqual(sent, ['영희에게 ₩41,155을 보냈어요', '송금 내역을 확인했어요. 영희에게 ₩41,155을 보냈어요']);
 });
+
+test('할 일 문구: 안 들어왔다고 하면 보내는 사람에게 "아직 못 받았대요", 다시 보내면 받는 사람에게 "송금 내역을 확인했대요"', async () => {
+  const ctx = await setup();
+  const id = await sentCsYh(ctx);
+  const of = async (type, uid) => (await ctx.actions()).filter((a) => a.type === type && a.for === uid && a.ref === id).map((a) => a.text);
+  assert.deepEqual(await of('confirm_receipt', 'yh'), ['철수가 보낸 ₩41,155을 받았나요?']);
+  await ctx.orch.reportNotReceived('demo-t', id, 'yh');
+  assert.deepEqual(await of('approve_transfer', 'cs'), ['영희가 ₩41,155을 아직 못 받았대요']);
+  assert.deepEqual(await of('confirm_receipt', 'yh'), []);
+  await ctx.orch.markSent('demo-t', id, 'cs');
+  assert.deepEqual(await of('approve_transfer', 'cs'), []);
+  assert.deepEqual(await of('confirm_receipt', 'yh'), ['철수가 송금 내역을 확인했대요. ₩41,155을 받았나요?']);
+});
