@@ -1,8 +1,7 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, COMPUTER_QUERY } from '../public/ui.js';
+import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers } from '../public/ui.js';
 
 test('allocButton: 나눈 뒤 바뀐 게 없으면 막고, 남은 일을 알려 준다', () => {
   assert.deepEqual(allocButton({ allocated: false, fresh: false, flagged: 0 }), { label: '비서에게 나누기 맡기기', disabled: false, hint: '' });
@@ -69,11 +68,6 @@ test('qrIsFresh: 같은 송금의 QR 토큰이 1분 넘게 남았을 때만 그�
   assert.equal(qrIsFresh(qr, 't2', now), false); // 다른 송금의 토큰
   assert.equal(qrIsFresh(qr, 't1', Date.parse('2026-11-25T00:14:30Z')), false); // 30초 남음 → 새로 받는다
   assert.equal(qrIsFresh(null, 't1', now), false);
-});
-
-test('style.css의 QR 표시 기준이 COMPUTER_QUERY와 같다', () => {
-  const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
-  assert.ok(css.includes(`@media ${COMPUTER_QUERY}`));
 });
 
 test('qrImageUrl: 빈 값이면 null', () => {

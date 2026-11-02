@@ -1,7 +1,7 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh, receiptPickers, COMPUTER_QUERY } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh, receiptPickers } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
@@ -484,8 +484,8 @@ function transfersSection() {
   const { transfers, ledger } = state.data;
   const live = transfers.filter((t) => t.status !== 'superseded');
   const list = live.length ? live : settle(ledger).map((t) => ({ ...t, status: 'preview' }));
+  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: '송금 앱 열림', sent: '보냈어요', confirmed: '받았어요' })[t.status] ?? t.status;
   const me = currentUid();
-  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: '송금 앱 열림', sent: !t.notReceivedAt ? '보냈어요' : t.to === me ? '확인을 부탁했어요' : '아직 못 받았대요', confirmed: '받았어요' })[t.status] ?? t.status;
   const rows = list.map((t) => {
     const mine = t.id && (t.from === me || t.to === me);
     const tag = mine ? `button type="button" class="row" data-action="open-transfer" data-id="${esc(t.id)}"` : 'div class="row"';
@@ -614,36 +614,29 @@ function actionButtons(a, size = '') {
     case 'agree_dispute':
       return `<button class="${cls}" data-action="open-dispute" data-id="${id}">${byId('disputes', a.ref)?.status === 'proposed' ? '중재안 보기' : '이의 보기'}</button>`;
     case 'approve_transfer':
-      // opened(송금 앱을 열었다)와, 받는 사람이 안 들어왔다고 한 sent는 둘 다 보냈는지 묻는다
-      return ['opened', 'sent'].includes(byId('transfers', a.ref)?.status)
+      return byId('transfers', a.ref)?.status === 'opened'
         ? `<button class="${cls}" data-action="mark-sent" data-id="${id}">보냈어요</button><button class="${cls} secondary" data-action="open-transfer" data-id="${id}">다시 보내기</button>`
         : `<button class="${cls}" data-action="open-transfer" data-id="${id}">보내러 가기</button>`;
     case 'set_payout':
       return `<button class="${cls}" data-action="open-payout">받을 계좌 알려 주기</button>`;
     case 'confirm_receipt':
-      // 이미 안 들어왔다고 했으면 보내는 사람의 답을 기다리는 중이라 받았어요만 둔다
-      return `<button class="${cls}" data-action="confirm-receipt" data-id="${id}">받았어요</button>${byId('transfers', a.ref)?.notReceivedAt ? '' : `<button class="${cls} secondary" data-action="not-received" data-id="${id}">아직 안 들어왔어요</button>`}`;
+      return `<button class="${cls}" data-action="confirm-receipt" data-id="${id}">받았어요</button>`;
     default:
       return '';
   }
 }
 
-// 일반 글자를 돌려준다(이름이 들어간다). HTML에 넣을 때는 쓰는 쪽에서 esc()로 감싼다(지금은 nextCard() 한 곳)
 function actionNote(a) {
-  const t = byId('transfers', a.ref);
-  const opened = t?.status === 'opened';
+  const opened = byId('transfers', a.ref)?.status === 'opened';
   return {
     confirm_line: '비서들의 기억에 근거가 없는 줄이에요. 그래서 비서가 짐작으로 청구하지 않고 먼저 물어봐요.',
     answer_invoice: '자동 수락 한도를 넘어서 비서가 대신 받지 않고 먼저 물어봐요.',
     agree_dispute: byId('disputes', a.ref)?.status === 'proposed'
       ? '양쪽이 동의하면 그 지출을 중재안대로 다시 나누고 청구서를 다시 보내요.'
       : '중재 비서가 양쪽 근거와 영수증의 주문 시각을 보고 나누는 법을 제안해요.',
-    approve_transfer: t?.notReceivedAt ? '토스 송금 내역을 먼저 확인해 주세요. 보냈다면 ‘보냈어요’를, 아니면 ‘다시 보내기’를 눌러요.'
-      : !opened ? '밀어서 보내면 토스 송금 화면이 받는 사람·금액이 채워진 채로 열려요.'
-      : '송금 앱에서 보냈다면 알려 주세요. 받는 사람에게 확인을 부탁할게요.',
+    approve_transfer: opened ? '송금 앱에서 보냈다면 알려 주세요. 받는 사람에게 확인을 부탁할게요.' : '밀어서 보내면 토스 송금 화면이 받는 사람·금액이 채워진 채로 열려요.',
     set_payout: '계좌번호는 나에게 돈을 보낼 사람에게만 보여요.',
-    confirm_receipt: t?.notReceivedAt ? `${nameOf(t.from)}에게 송금 내역을 확인해 달라고 했어요. 그 사이 들어왔다면 알려 주세요.`
-      : `통장에 들어왔는지 보고 알려 주세요. 안 들어왔으면 ${t ? nameOf(t.from) : '보낸 사람'}에게 다시 확인을 부탁할게요.`,
+    confirm_receipt: '받았다면 확인해 주세요. 그래야 이 송금이 끝나요.',
   }[a.type] ?? '';
 }
 
@@ -745,7 +738,7 @@ const copyRow = (label, value, key) => `<div class="row"><span class="grow"><spa
 // 데스크톱 QR(#8). 토큰은 수명이 15분이라, 송금 화면을 열 때마다 서버에서 새로 받는다.
 // QR에는 계좌·금액이 든 t.link를 바로 담지 않는다. 우리 서버의 짧은 수명 토큰(/api/qr/:token)을 담아,
 // QR 이미지를 만들어 주는 외부 서비스는 그 토큰만 보고 실제 계좌 정보는 보지 못하게 한다.
-const isComputer = () => matchMedia(COMPUTER_QUERY).matches;
+const isDesktop = () => matchMedia('(min-width: 640px)').matches; // style.css의 .qr-desktop 기준과 같게
 let qrTimer = 0;
 let qrAsked = { id: null, at: 0 };
 
@@ -770,8 +763,8 @@ async function refreshQr(tid) {
   renderSheet();
 }
 
-// 부르는 쪽에서 t.link && isComputer()일 때만 부른다(링크가 없으면 QR로 열 토스 화면이 없고, 휴대폰은 토스가 바로 열린다)
-function qrBlock(t, { sentButton = true } = {}) {
+function qrBlock(t) {
+  if (!t.link || !isDesktop()) return '';
   if (!qrIsFresh(state.qr, t.id)) refreshQr(t.id);
   const qr = state.qr?.id === t.id ? state.qr : null;
   // 휴대폰 카메라가 찍을 절대 주소가 필요해서, API_BASE가 비어 있으면(로컬 개발) 지금 페이지 origin을 쓴다
@@ -780,7 +773,7 @@ function qrBlock(t, { sentButton = true } = {}) {
     : `<div class="qr-wait">${qr?.failed ? 'QR을 만들지 못했어요.<br>위 계좌번호를 복사해 보내 주세요.' : 'QR을 만드는 중이에요'}</div>`;
   // 휴대폰으로 보내고 돌아온 사람이 슬라이더(데스크톱에선 토스가 안 열림)를 거치지 않고 바로 끝낼 수 있게
   return `<div class="qr-desktop"><p class="group-note">컴퓨터라면 휴대폰으로 QR을 찍어 토스를 열어요.</p>${img}
-    ${sentButton ? `<button class="btn secondary" style="width:100%;margin-top:12px" data-action="mark-sent" data-id="${esc(t.id)}">휴대폰으로 보냈어요</button>` : ''}</div>`;
+    <button class="btn secondary" style="width:100%;margin-top:12px" data-action="mark-sent" data-id="${esc(t.id)}">휴대폰으로 보냈어요</button></div>`;
 }
 
 // 송금: 밀어서 보내면 그 제스처 안에서 토스를 연다. 앱이 안 열리면 계좌·금액을 복사해 둔다
@@ -802,28 +795,17 @@ function transferSheet() {
           <span class="slider-label">${t.link ? '밀어서 토스로 보내기' : '밀어서 계좌 복사하기'}</span>
           <button type="button" class="slider-thumb" aria-label="${t.link ? '밀어서 토스로 보내기' : '밀어서 계좌 복사하기'}. Enter 키로도 할 수 있어요">${ARROW}</button></div>
         <p class="slider-hint">${t.link ? '토스가 열리지 않으면 계좌번호를 복사해 드려요' : '받는 사람의 계좌를 복사해 드려요'}</p>
-        ${t.link && isComputer() ? qrBlock(t) : ''}`
+        ${qrBlock(t)}`
       : `<p class="group-note">${esc(subj(toName))} 받을 계좌를 아직 알려 주지 않았어요. 알려 주면 바로 보낼 수 있어요.</p>`;
-  } else if (t.from === me && (t.status === 'opened' || (t.status === 'sent' && t.notReceivedAt))) {
-    // 받는 사람이 "아직 안 들어왔어요"라고 했으면(상태는 sent 그대로) 제목만 바꾸고 송금 내역부터 보게 한다(버튼은 같다)
-    const head = t.notReceivedAt
-      ? `<h3 style="margin:0 0 8px">${esc(subj(toName))} 아직 못 받았대요</h3><p class="group-note" style="padding:0;margin:0 0 10px">토스 송금 내역을 먼저 확인해 주세요. 두 번 보내지 않게요.</p>`
-      : '<h3 style="margin:0 0 10px">보냈나요?</h3>';
-    // 컴퓨터(마우스 기기)에서는 토스 링크가 열리지 않으므로 토스 다시 열기 대신 휴대폰으로 넘길 QR을 보여 준다(보냈어요 버튼은 위에 있다).
-    // 너비로 판단하면 가로로 돌린 휴대폰에서 토스 다시 열기가 사라지고 자기 화면의 QR이 뜬다
-    actions = `${head}<div style="display:grid;gap:8px">
+  } else if (t.from === me && t.status === 'opened') {
+    actions = `<h3 style="margin:0 0 10px">보냈나요?</h3><div style="display:grid;gap:8px">
       <button class="btn" data-action="mark-sent" data-id="${esc(t.id)}">보냈어요</button>
-      ${t.link && !isComputer() ? `<button class="btn secondary" data-action="reopen-link" data-id="${esc(t.id)}">토스 다시 열기</button>` : ''}
-      <button class="btn plain" data-action="close-sheet">아직이에요</button></div>${t.link && isComputer() ? qrBlock(t, { sentButton: false }) : ''}`;
-  } else if (t.to === me && t.status === 'sent' && !t.notReceivedAt) {
-    actions = `<div style="display:grid;gap:8px"><button class="btn" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>
-      <button class="btn secondary" data-action="not-received" data-id="${esc(t.id)}">아직 안 들어왔어요</button></div>`;
+      ${t.link ? `<button class="btn secondary" data-action="reopen-link" data-id="${esc(t.id)}">토스 다시 열기</button>` : ''}
+      <button class="btn plain" data-action="close-sheet">아직이에요</button></div>`;
   } else if (t.to === me && t.status === 'sent') {
-    // 다시 확인해 달라고 한 사이 돈이 늦게 들어왔으면 바로 끝낼 수 있게
-    actions = `<p class="group-note">${esc(nameOf(t.from))}에게 다시 확인해 달라고 했어요. 그 사이 들어왔다면 알려 주세요.</p>
-      <button class="btn" style="width:100%;margin-top:10px" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>`;
+    actions = `<button class="btn" style="width:100%" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>`;
   } else {
-    actions = `<p class="group-note">${{ scheduled: `${whenText(t.remindAt)}에 ${esc(nameOf(t.from))}에게 알려요.`, due: `${esc(subj(nameOf(t.from)))} 보낼 차례예요.`, opened: `${esc(subj(nameOf(t.from)))} 송금 앱을 열었어요.`, sent: t.notReceivedAt ? `${esc(subj(toName))} 아직 못 받았대요. ${esc(subj(nameOf(t.from)))} 확인하고 있어요.` : `${esc(subj(nameOf(t.from)))} 보냈어요. 받는 사람의 확인을 기다려요.`, confirmed: '받았다고 확인했어요. 이 송금은 끝났어요.', superseded: '지출이 바뀌어 대체된 송금이에요.' }[t.status] ?? ''}</p>`;
+    actions = `<p class="group-note">${{ scheduled: `${whenText(t.remindAt)}에 ${esc(nameOf(t.from))}에게 알려요.`, due: `${esc(subj(nameOf(t.from)))} 보낼 차례예요.`, opened: `${esc(subj(nameOf(t.from)))} 송금 앱을 열었어요.`, sent: `${esc(subj(nameOf(t.from)))} 보냈어요. 받는 사람의 확인을 기다려요.`, confirmed: '받았다고 확인했어요. 이 송금은 끝났어요.', superseded: '지출이 바뀌어 대체된 송금이에요.' }[t.status] ?? ''}</p>`;
   }
   return {
     title: '송금',
@@ -903,7 +885,7 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
+const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'open-payout', 'save-payout', 'copy']);
 
 async function agentAct(name, d) {
   const base = `/api/rooms/${enc(roomId)}`;
@@ -965,8 +947,6 @@ async function agentAct(name, d) {
     await post(`/transfers/${enc(d.id)}/sent`);
   } else if (name === 'confirm-receipt') {
     await post(`/transfers/${enc(d.id)}/confirm`);
-  } else if (name === 'not-received') {
-    await post(`/transfers/${enc(d.id)}/not-received`);
   } else if (name === 'open-payout') {
     const mine = state.data.me;
     state.payoutDraft = { bank: BANKS[0].label, accountNo: '', holder: mine.name, other: false };
