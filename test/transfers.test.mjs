@@ -25,6 +25,13 @@ async function setup({ withoutPayout } = {}) {
 }
 const pair = (ts, from, to) => ts.find((t) => t.from === from && t.to === to && t.status !== 'superseded');
 
+// 철수→영희 송금을 보냈어요까지 진행한다(철수는 월급날 규칙이라 scheduled지만 보냈어요는 미리 눌러도 된다)
+async function sentCsYh(ctx) {
+  const t = pair(await ctx.transfers(), 'cs', 'yh');
+  await ctx.orch.markSent('demo-t', t.id, 'cs');
+  return t.id;
+}
+
 test('청구가 끝나면 송금을 만든다. 0원은 없다', async () => {
   const { transfers } = await setup();
   const ts = await transfers();
@@ -207,4 +214,46 @@ test('지출이 바뀌면 이전 version의 물은 청구서에는 답할 수 �
   const stale = pendingActions({ room: await store.get('rooms', 'demo-t'), invoices: await store.list('invoices', { roomId: 'demo-t' }) });
   assert.deepEqual(stale, []);
   await assert.rejects(orch.answerInvoice('demo-t', 'demo-t:v2:cs', 'cs', { decision: 'accept' }), (e) => e.status === 409);
+});
+
+// 송금 확인 UX(#8): 받는 사람이 "아직 안 들어왔어요"를 누르면 opened로 되돌려 보내는 사람에게 다시 묻는다
+test('아직 안 들어왔어요: 받는 사람만, 보냈다고 한 송금에만(아니면 403·409)', async () => {
+  const ctx = await setup();
+  const t = pair(await ctx.transfers(), 'cs', 'yh');
+  await assert.rejects(ctx.orch.reportNotReceived('demo-t', t.id, 'yh'), (e) => e.status === 409); // 아직 scheduled
+  await ctx.orch.markSent('demo-t', t.id, 'cs');
+  await assert.rejects(ctx.orch.reportNotReceived('demo-t', t.id, 'cs'), (e) => e.status === 403);
+  await assert.rejects(ctx.orch.reportNotReceived('demo-t', t.id, 'me'), (e) => e.status === 403);
+  await ctx.orch.confirmReceipt('demo-t', t.id, 'yh');
+  await assert.rejects(ctx.orch.reportNotReceived('demo-t', t.id, 'yh'), (e) => e.status === 409); // 이미 confirmed
+});
+
+test('아직 안 들어왔어요: opened로 돌아가고 표시를 붙이며, 보내는 사람에게 알린다', async () => {
+  const ctx = await setup();
+  const id = await sentCsYh(ctx);
+  ctx.clock.now = new Date('2026-11-10T05:00:00Z');
+  const saved = await ctx.orch.reportNotReceived('demo-t', id, 'yh');
+  assert.equal(saved.status, 'opened');
+  assert.equal(saved.notReceivedAt, '2026-11-10T05:00:00.000Z');
+  assert.equal((await ctx.store.get('transfers', id)).status, 'opened');
+  const ev = (await ctx.store.listEvents('demo-t')).filter((e) => e.kind === 'transfer_not_received');
+  assert.deepEqual(ev.map((e) => [e.from, e.to, e.text, e.action?.type, e.action?.for]), [
+    ['yh', 'cs', '아직 ₩41,155을 못 받았어요. 송금 내역을 한 번 확인해 주세요', 'approve_transfer', 'cs'],
+  ]);
+});
+
+test('HTTP: 받는 사람이 not-received를 부르면 opened가 되고, 보내는 사람은 403', async () => {
+  const ctx = await setup();
+  const id = await sentCsYh(ctx);
+  const server = createApp({ store: ctx.store, env: {} });
+  await new Promise((r) => server.listen(0, r));
+  const call = (uid) => fetch(`http://localhost:${server.address().port}/api/rooms/demo-t/transfers/${encodeURIComponent(id)}/not-received`, { method: 'POST', headers: { 'x-demo-user': uid } });
+  try {
+    assert.equal((await call('cs')).status, 403);
+    const res = await call('yh');
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).status, 'opened');
+  } finally {
+    server.close();
+  }
 });

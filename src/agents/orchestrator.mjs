@@ -282,6 +282,20 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return { qrToken: signQrToken(t.link, { now: () => now }), expiresAt: new Date(now + QR_TTL_MS).toISOString() };
   }
 
+  // 받는 사람이 "아직 안 들어왔어요"를 눌렀다(#8 송금 확인). opened로 되돌려 보내는 사람에게 다시 묻는다.
+  // 못 받은 돈은 안 보낸 돈이므로, 그 사이 지출이 바뀌면 다른 opened 송금처럼 대체된다
+  async function reportNotReceived(roomId, tid, actorUid) {
+    const { t } = await transferOf(roomId, tid, actorUid, 'to');
+    if (t.status !== 'sent') throw new HttpError(409, '보냈다고 한 송금에만 할 수 있어요');
+    const saved = { ...t, status: 'opened', notReceivedAt: clock().toISOString() };
+    await store.put('transfers', saved);
+    await say(roomId, {
+      from: t.to, to: t.from, kind: 'transfer_not_received', text: `아직 ${won(t.amount)}을 못 받았어요. 송금 내역을 한 번 확인해 주세요`,
+      action: { type: 'approve_transfer', ref: t.id, for: t.from },
+    });
+    return saved;
+  }
+
   async function markSent(roomId, tid, actorUid) {
     const { t, name } = await transferOf(roomId, tid, actorUid, 'from');
     if (!['scheduled', 'due', 'opened'].includes(t.status)) throw new HttpError(409, '이미 보냈거나 바뀐 송금이에요');
@@ -329,5 +343,5 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return { due, reminded };
   }
 
-  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers, setPayout, approveTransfer, qrFor, markSent, confirmReceipt, tick };
+  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers, setPayout, approveTransfer, qrFor, markSent, reportNotReceived, confirmReceipt, tick };
 }
