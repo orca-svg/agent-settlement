@@ -257,3 +257,19 @@ test('HTTP: 받는 사람이 not-received를 부르면 opened가 되고, 보내�
     server.close();
   }
 });
+
+test('안 들어왔다고 한 뒤 다시 보냈어요: sentAt을 새로 적고 다시 알림을 처음부터 센다', async () => {
+  const ctx = await setup();
+  const id = await sentCsYh(ctx); // 2026-11-10T03:00Z
+  ctx.clock.now = new Date('2026-11-11T04:00:00Z');
+  await ctx.orch.tick(); // 하루가 지나 한 번 물었다
+  await ctx.orch.reportNotReceived('demo-t', id, 'yh');
+  ctx.clock.now = new Date('2026-11-11T06:00:00Z');
+  const saved = await ctx.orch.markSent('demo-t', id, 'cs');
+  assert.equal(saved.status, 'sent');
+  assert.equal(saved.sentAt, '2026-11-11T06:00:00.000Z');
+  assert.equal(saved.reminders, 0);
+  assert.ok(saved.notReceivedAt); // 받는 사람 쪽 문구("송금 내역을 확인했대요")에 쓴다
+  const sent = (await ctx.store.listEvents('demo-t')).filter((e) => e.kind === 'transfer_sent').map((e) => e.text);
+  assert.deepEqual(sent, ['영희에게 ₩41,155을 보냈어요', '송금 내역을 확인했어요. 영희에게 ₩41,155을 보냈어요']);
+});

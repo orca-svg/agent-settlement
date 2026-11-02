@@ -299,9 +299,11 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
   async function markSent(roomId, tid, actorUid) {
     const { t, name } = await transferOf(roomId, tid, actorUid, 'from');
     if (!['scheduled', 'due', 'opened'].includes(t.status)) throw new HttpError(409, '이미 보냈거나 바뀐 송금이에요');
-    const saved = { ...t, status: 'sent', sentAt: clock().toISOString() };
+    // 받는 사람이 안 들어왔다고 한 뒤 다시 보냈어요를 누를 수도 있다. 그때도 다시 알림은 처음부터 센다
+    const saved = { ...t, status: 'sent', sentAt: clock().toISOString(), reminders: 0 };
     await store.put('transfers', saved);
-    await say(roomId, { from: t.from, to: t.to, kind: 'transfer_sent', text: `${name(t.to)}에게 ${won(t.amount)}을 보냈어요` });
+    const text = `${name(t.to)}에게 ${won(t.amount)}을 보냈어요`;
+    await say(roomId, { from: t.from, to: t.to, kind: 'transfer_sent', text: t.notReceivedAt ? `송금 내역을 확인했어요. ${text}` : text });
     return saved;
   }
 
