@@ -16,6 +16,10 @@ export function createLocationService({ store, clock }) {
       delete next.proposal;
       await store.put('disputes', next);
     }
+    if (docs.length) await store.appendEvent(roomId, {
+      at: clock().toISOString(), from: 'system', to: 'all', kind: 'location_removed',
+      text: '공유 기간이 끝났거나 동의가 철회되어 참석 근거를 삭제했어요. 열린 이의를 다시 확인해 주세요.',
+    });
     // Events contain only generic wording for location-derived actions, so no
     // location summary is left in the immutable event stream after revocation.
   }

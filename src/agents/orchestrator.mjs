@@ -10,6 +10,7 @@ import { evaluateInvoice, nextSendAt } from './rules.mjs';
 import { tossSendLink, payoutFallback } from '../payments/toss.mjs';
 import { signQrToken, QR_TTL_MS } from '../payments/qr.mjs';
 import { mediateWithGemini } from './mediate.mjs';
+import { findBank } from '../../public/banks.js';
 
 const OPEN = ['open', 'proposed'];
 const STALE = '지출이 바뀌었어요. 청구서를 다시 보낸 뒤 새 금액으로 보내 주세요';
@@ -247,7 +248,8 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
   async function setPayout(roomId, actorUid, { bank, accountNo, holder } = {}) {
     if (!String(bank ?? '').trim() || !/\d{6,}/.test(String(accountNo ?? '').replace(/\D/g, ''))) throw new HttpError(400, '은행과 계좌번호를 확인해 주세요');
     const agent = await settingsOf(actorUid);
-    const payout = { bank: String(bank).trim().slice(0, 30), accountNo: String(accountNo).replace(/[^\d-]/g, '').slice(0, 30), holder: String(holder ?? '').trim().slice(0, 30) };
+    // 은행은 목록의 이름으로 통일해 저장한다('국민은행' → 'KB국민은행'). 목록에 없으면 쓴 그대로
+    const payout = { bank: (findBank(bank)?.label ?? String(bank).trim()).slice(0, 30), accountNo: String(accountNo).replace(/[^\d-]/g, '').slice(0, 30), holder: String(holder ?? '').trim().slice(0, 30) };
     await store.put('agents', { ...agent, id: actorUid, uid: actorUid, payout });
     for (const t of (await store.list('transfers', { roomId })).filter((x) => x.to === actorUid && ['scheduled', 'due', 'opened'].includes(x.status))) {
       await store.put('transfers', { ...t, ...paymentOf(payout, t.amount) });

@@ -67,6 +67,7 @@ test('profile updates only verified user and room list never leaks other rooms',
   assert.equal(await store.get('users', 'ms'), null);
   assert.deepEqual((await (await request('/api/rooms')).json()).rooms.map(r => r.id), ['room-one']);
   assert.equal((await request('/api/me', { body: { name: 'x', color: 'url(evil)' } })).status, 400);
+  assert.equal((await store.listEvents('room-one')).at(-1).kind, 'profile_updated');
 });
 
 test('account deletion removes private data; failures can be retried', async t => {
@@ -105,6 +106,10 @@ test('location requires consent, rejects coordinates/stale times/cross-room data
   advance(61000);
   assert.deepEqual((await (await request(path)).json()).records, []);
   assert.deepEqual(await store.list('locationEvidence'), []);
+  const events = await store.listEvents('room-one');
+  assert.equal(events.at(-1).kind, 'location_removed');
+  await request(path);
+  assert.equal((await store.listEvents('room-one')).length, events.length);
 });
 
 test('revocation removes attached summaries and reopens an unconfirmed proposal', async t => {
@@ -126,6 +131,7 @@ test('revocation removes attached summaries and reopens an unconfirmed proposal'
   assert.equal(after.status, 'open');
   assert.deepEqual(after.agreedBy, []);
   assert.ok(!(JSON.stringify(await store.listEvents('room-one'))).includes('한국 시각'));
+  assert.equal((await store.listEvents('room-one')).at(-1).kind, 'location_removed');
 });
 
 test('uncertain location cannot turn a model assertion into a confirmed allocation', async t => {

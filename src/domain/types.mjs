@@ -44,7 +44,7 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
  * @typedef {{
  *   id: string, roomId: string, title: string, kind: string, date: string, time: string,
  *   payer: string, method: 'card'|'cash', currency: string, amount?: number, items?: Item[],
- *   split: 'equal'|'items', present: string[], alloc?: Record<string, LineAlloc>,
+ *   split: 'equal'|'items', present: string[], alloc?: Record<string, LineAlloc>, allocMemory?: string,
  *   source: 'manual'|'receipt', createdBy: string,
  * }} Expense
  */

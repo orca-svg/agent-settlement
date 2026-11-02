@@ -30,6 +30,17 @@ export function allocLabel({ source, how, latencyMs }) {
 // 사람별 몫 아래 한 줄. 원 단위로 나누고 남은 돈이 있을 때만 보인다(core.js의 shares().rest).
 export const restNote = (rest) => (rest ? `<p class="group-note">나누고 남은 ${won(rest)}은 낸 사람 몫에 더했어요.</p>` : '');
 
+// 영수증 사진을 넣는 버튼(#6). capture가 붙은 입력은 iOS·Android 모두 고르는 메뉴 없이 카메라로 바로 가고,
+// 없으면 운영체제가 정한다(iOS는 사진 보관함·사진 찍기 메뉴, Android 14 이상 Chrome은 카메라 없는 사진 선택기).
+// 그래서 휴대폰·태블릿(touch)에는 갈 곳이 정해진 버튼 둘을 같은 크기로 두고, 컴퓨터에는 capture 없는 하나만 둔다.
+export function receiptPickers(touch) {
+  const pick = (label, cls, attrs = '') => `<label class="btn${cls}" style="display:inline-flex;align-items:center;justify-content:center${touch ? ';flex:1' : ''}">${label}
+      <input type="file" accept="image/*"${attrs} data-receipt hidden></label>`;
+  return touch
+    ? pick('사진 찍기', '', ' capture="environment"') + pick('앨범에서 고르기', ' secondary')
+    : pick('사진 고르기', '');
+}
+
 const ICONS = {
   stay: '<path d="M3 19V6M3 15h18v4M21 15v-3a3 3 0 0 0-3-3h-7v6"/><circle cx="7" cy="11.5" r="2"/>',
   food: '<path d="M7 3v18M4.5 3v5a2.5 2.5 0 0 0 5 0V3M17 21V3c-2 1.5-3 4-3 7s1 4 3 4"/>',
@@ -56,6 +67,15 @@ export function qrImageUrl(data, size = 220) {
 // 만료까지 marginMs(기본 1분)보다 적게 남았으면 false다. 휴대폰을 꺼내 찍는 사이에 만료되지 않게 미리 새로 받는다.
 export function qrIsFresh(qr, transferId, now = Date.now(), marginMs = 60_000) {
   return Boolean(qr) && qr.id === transferId && Date.parse(qr.expiresAt) - marginMs > now;
+}
+
+// 메뉴 배분 버튼. 이미 나눴고 그 뒤로 비서의 기억이 그대로면(fresh, 서버의 allocFresh) 다시 나눠도 같은 답이고
+// 확인한 줄만 지워지니 막는다. 막을 때는 무엇이 남았는지 버튼 아래(hint)에 알려 준다
+export function allocButton({ allocated, fresh, flagged }) {
+  if (!allocated) return { label: '비서에게 나누기 맡기기', disabled: false, hint: '' };
+  if (!fresh) return { label: '비서에게 다시 나누기', disabled: false, hint: '' };
+  if (flagged) return { label: '비서가 나누기를 마쳤어요', disabled: true, hint: `확인 필요한 ${flagged}줄만 확인하면 끝나요.` };
+  return { label: '나누기를 모두 마쳤어요', disabled: true, hint: '지출을 고치거나 비서의 기억이 바뀌면 다시 나눌 수 있어요.' };
 }
 
 // 비서끼리 기록 한 줄

@@ -16,7 +16,10 @@ export function registerAccountRoutes(routes, { store, authenticate, auth, clock
     if (!input || typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 40 || !/^#[0-9a-f]{6}$/i.test(input.color)) throw new HttpError(400, '이름(1~40자)과 프로필 색을 확인해 주세요');
     const profile = await store.put('users', { id: me.uid, name: input.name.trim(), color: input.color });
     for (const room of await store.list('rooms')) {
-      if (room.members.some(m => m.uid === me.uid)) await store.put('rooms', { ...room, members: room.members.map(m => m.uid === me.uid ? { ...m, name: profile.name, color: profile.color } : m) });
+      if (room.members.some(m => m.uid === me.uid)) {
+        await store.put('rooms', { ...room, members: room.members.map(m => m.uid === me.uid ? { ...m, name: profile.name, color: profile.color } : m) });
+        await store.appendEvent(room.id, { at: clock().toISOString(), from: 'system', to: 'all', kind: 'profile_updated', text: '참여자 프로필이 바뀌었어요.' });
+      }
     }
     return { profile };
   });

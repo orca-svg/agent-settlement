@@ -1,11 +1,12 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, ARROW, qrImageUrl, qrIsFresh } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh, receiptPickers } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
 import { initAuth, authOptions, onSessionChange } from './auth.js';
+import { BANKS } from './banks.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
@@ -274,12 +275,14 @@ function expSheetHtml(exp) {
   const { krw, how } = toKrw(exp, room, room.policy);
   const s = shares(exp, room, room.policy);
   const busy = state.allocating === exp.id;
+  const ab = allocButton({ allocated: Boolean(exp.alloc), fresh: Boolean(exp.allocFresh), flagged: (exp.items ?? []).filter((it) => isFlagged(exp.alloc?.[it.id])).length });
   const lines = exp.items?.length
     ? `<section class="group"><h3 class="group-label"><span>영수증 ${exp.items.length}줄 · 어떻게 나눌까요</span><span>${esc(state.allocSource[exp.id] ?? (exp.alloc ? '' : '나누기 전'))}</span></h3>
         ${busy ? '<div class="next" aria-busy="true" style="margin:0 0 12px"><h2 style="font-size:1.0625rem">비서들이 기억으로 나누는 중이에요</h2><div class="progress"><i></i></div></div>' : ''}
         <div class="list">${linesHtml(exp)}</div>
         <p class="group-note">${exp.alloc ? '이름을 눌러 고친 뒤 확인하면 그 줄은 더 묻지 않아요.' : '각자의 비서가 공유한 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄은 짐작하지 않고 물어봐요.'}</p>
-        <button class="btn ${exp.alloc ? 'secondary' : ''}" style="width:100%;margin-top:10px" data-action="allocate-exp" data-id="${esc(exp.id)}" ${busy ? 'disabled' : ''}>${exp.alloc ? '비서에게 다시 나누기' : '비서에게 나누기 맡기기'}</button></section>`
+        <button class="btn ${exp.alloc ? 'secondary' : ''}" style="width:100%;margin-top:10px" data-action="allocate-exp" data-id="${esc(exp.id)}" ${busy || ab.disabled ? 'disabled' : ''}>${ab.label}</button>
+        ${ab.hint ? `<p class="group-note" style="margin-top:8px">${esc(ab.hint)}</p>` : ''}</section>`
     : `<p class="how">영수증 줄이 없어서 함께 있던 ${exp.present.length}명이 똑같이 나눠요.</p>`;
   return `<div class="big"><div class="amt">${won(krw)}</div>
       <p class="sub">${money(amountOf(exp), exp.currency)} · ${esc(nameOf(exp.payer))} ${exp.method === 'card' ? '카드' : '현금'} · ${dayLabel(exp.date)} ${esc(exp.time)}</p></div>
@@ -541,10 +544,11 @@ function photoPickHtml() {
   if (!state.aiReady) {
     return `<p class="preview-note">사진 읽기는 AI 서버가 필요해요. 지금은 '직접 입력'을 써 주세요.</p>`;
   }
-  return `<section class="next" style="margin:0"><h2>영수증을 찍거나 골라 주세요</h2>
+  // 터치가 주 입력인 기기(휴대폰·태블릿)면 찍기와 앨범에서 고르기를 따로 둔다(receiptPickers)
+  const touch = matchMedia('(pointer: coarse)').matches;
+  return `<section class="next" style="margin:0"><h2>${touch ? '영수증을 찍거나 골라 주세요' : '영수증 사진을 골라 주세요'}</h2>
     <p>AI가 읽은 내용은 저장 전에 직접 확인하고 고칠 수 있어요. 사진 원본은 저장하지 않아요.</p>
-    <div class="actions"><label class="btn" style="display:inline-flex;align-items:center">사진 고르기
-      <input type="file" accept="image/*" capture="environment" data-receipt hidden></label></div></section>`;
+    <div class="actions">${receiptPickers(touch)}</div></section>`;
 }
 
 // 읽은 줄을 고칠 수 있는 목록. 합계와 줄 합을 나란히 보여 준다.
@@ -818,14 +822,19 @@ function transferSheet() {
 
 function payoutSheet() {
   const p = state.payoutDraft;
+  // 은행은 목록에서 고른다(#8). 토스는 모르는 은행 이름이면 에러를 내서, 실기기로 확인한 은행만 목록에 둔다(public/banks.js).
+  // 목록에 없는 은행만 직접 쓴다
+  const options = BANKS.map((b) => `<option value="${esc(b.label)}"${!p.other && p.bank === b.label ? ' selected' : ''}>${esc(b.label)}</option>`).join('');
   return {
     title: '받을 계좌',
     html: `<p class="how">계좌번호는 나에게 돈을 보낼 사람에게만 보여요. 받을 송금이 있으면 바로 토스 링크가 채워져요.</p>
       <section class="group"><div class="list">
-        <label class="row field"><span class="grow">은행</span><input data-pf="bank" value="${esc(p.bank)}" maxlength="30" placeholder="예: 토스뱅크"></label>
+        <label class="row field"><span class="grow">은행</span><select data-bank-pick>${options}<option value=""${p.other ? ' selected' : ''}>목록에 없어요</option></select></label>
+        ${p.other ? `<label class="row field"><span class="grow">은행 이름</span><input data-pf="bank" value="${esc(p.bank)}" maxlength="30" placeholder="예: 경남은행"></label>` : ''}
         <label class="row field"><span class="grow">계좌번호</span><input data-pf="accountNo" value="${esc(p.accountNo)}" inputmode="numeric" maxlength="30" placeholder="숫자만 또는 - 포함"></label>
         <label class="row field"><span class="grow">예금주</span><input data-pf="holder" value="${esc(p.holder)}" maxlength="30"></label>
-      </div></section>${formError()}
+      </div></section>
+      ${p.other ? '<p class="group-note">목록에 없는 은행은 토스가 알아보지 못할 수 있어요. 그때는 보내는 사람에게 계좌번호를 복사해 보내도록 안내해요.</p>' : ''}${formError()}
       <button class="btn" style="width:100%" data-action="save-payout">저장</button>`,
   };
 }
@@ -945,7 +954,7 @@ async function agentAct(name, d) {
     await post(`/transfers/${enc(d.id)}/confirm`);
   } else if (name === 'open-payout') {
     const mine = state.data.me;
-    state.payoutDraft = { bank: '토스뱅크', accountNo: '', holder: mine.name };
+    state.payoutDraft = { bank: BANKS[0].label, accountNo: '', holder: mine.name, other: false };
     openAgentSheet('payout');
   } else if (name === 'save-payout') {
     if (await post('/payout', state.payoutDraft)) sheet.close();
@@ -974,7 +983,7 @@ function render() {
     // 개발용 시드 방의 uid로 고르게 한다.
     const seedMembers = [['me', '나'], ['cs', '철수'], ['yh', '영희'], ['ms', '민수']];
     main.innerHTML = `<section class="hero"><h1>누구로 볼까요?</h1>
-      <p class="sub">개발용 데모 방의 멤버 중 한 명을 골라 주세요. 로그인(#2)이 생기면 이 단계는 사라져요.</p></section>
+      <p class="sub">개발용 데모 방의 멤버 중 한 명을 골라 주세요. 실제 계정으로 로그인한 경우에는 본인으로만 참여해요.</p></section>
       <section class="group"><div class="list">${seedMembers.map(([uid, name]) => `<button class="row" data-action="who" data-id="${uid}">
         ${avatarHtml(name[0], '#8e8e93')}<span class="grow">${name}</span></button>`).join('')}</div></section>`;
     return;
@@ -1029,6 +1038,12 @@ document.addEventListener('change', (e) => {
 document.addEventListener('change', (e) => {
   const f = e.target.dataset?.field;
   if (f && state.draft) state.draft[f] = e.target.value;
+  // 받을 계좌의 은행 선택. '목록에 없어요'(빈 값)면 직접 쓰는 칸을 보여 주려고 다시 그린다
+  if (e.target.matches?.('select[data-bank-pick]') && state.payoutDraft) {
+    state.payoutDraft.other = !e.target.value;
+    state.payoutDraft.bank = e.target.value;
+    renderSheet();
+  }
 });
 const sheet = createSheet($('#sheet-root'), {
   onClosed: () => {

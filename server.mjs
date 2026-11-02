@@ -7,6 +7,8 @@ import { createApp } from './src/app.mjs';
 import { createGemini, resolveModel, withMonthlyBudget } from './src/gemini.mjs';
 import { MemoryStore } from './src/store/memory.mjs';
 import { firebaseAuth } from './src/firebase.mjs';
+import { encryptedStore } from './src/store/encrypted.mjs';
+import { resolvePayoutKey } from './src/security/seal.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 
@@ -20,13 +22,15 @@ try {
 
 const KEY = process.env.GEMINI_API_KEY || '';
 const PORT = Number(process.env.PORT || 4500);
+// 계좌가 들어가는 칸은 저장소에 넣을 때 잠근다(#8, #10). 배포에서 PAYOUT_ENC_KEY가 없으면 여기서 멈춘다
+const PAYOUT_KEY = resolvePayoutKey(process.env);
 const MODEL = KEY ? await resolveModel(KEY, process.env.GEMINI_MODEL) : null;
 
 // 요금이 갑자기 느는 걸 막는 안전장치. 한도를 넘으면 그 달은 규칙 모드로만 동작한다(#10)
 const GEMINI_MONTHLY_LIMIT = Number(process.env.GEMINI_MONTHLY_LIMIT || 2000);
 
 const app = createApp({
-  store: new MemoryStore(),
+  store: encryptedStore(new MemoryStore(), PAYOUT_KEY),
   auth: await firebaseAuth(process.env),
   gemini: withMonthlyBudget(createGemini({ key: KEY, model: MODEL }), { maxCalls: GEMINI_MONTHLY_LIMIT }),
   env: process.env,

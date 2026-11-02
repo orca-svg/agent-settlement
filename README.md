@@ -57,7 +57,7 @@ Google 로그인, 토큰 검증, 계정·탈퇴 화면과 브라우저 체크인
    │  POST /api/allocate  영수증 줄 배분 (기억 기반)
    │  POST /api/mediate   이의 중재
    ▼
-API 서버 (Cloud Run: server.mjs)  ── GEMINI_API_KEY는 Secret Manager에서만 주입
+API 서버 (Cloud Run: server.mjs)  ── GEMINI_API_KEY·PAYOUT_ENC_KEY는 Secret Manager에서만 주입
    │  구조화 출력(responseSchema)
    ▼
 Gemini API
@@ -96,6 +96,10 @@ npm test           # 계산 sanity check
 
 - 키가 없거나 서버에 닿지 않으면 **규칙 모드**로 동작합니다. 이때 화면 상단에도 그렇게 표시합니다.
 - 모델은 `GEMINI_MODEL`로 고를 수 있습니다. 생략하면 이 키로 쓸 수 있는 최신 Flash 모델을 자동으로 고릅니다.
+- 받을 계좌는 저장소에 넣을 때 잠급니다(#8, #10). 열쇠는 `PAYOUT_ENC_KEY`(base64, 32바이트)입니다. 로컬에서는 없어도 개발용 열쇠로 잠그고 경고만 띄웁니다. 직접 정하려면 `.env`에 추가합니다(bash·Git Bash 기준. 앞의 줄바꿈은 `.env` 마지막 줄에 붙지 않게 하려는 것).
+  ```bash
+  printf '\nPAYOUT_ENC_KEY=%s\n' "$(node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64'))")" >> .env
+  ```
 
 ### 실제 방 화면
 
@@ -109,7 +113,7 @@ DEV_SEED=1 npm start   # http://localhost:4500/room.html → '데모 방 만들�
 
 ## 배포와 키 관리
 
-- **화면:** `main`에 push하면 `.github/workflows/pages.yml`이 `public/`을 GitHub Pages에 올립니다.
+- **화면:** `main`에 push하면 `.github/workflows/pages.yml`이 `public/`을 GitHub Pages에 올립니다. 올리기 전에 `scripts/stamp-version.mjs`가 화면 파일 주소에 커밋 버전(`?v=`)을 붙입니다. Pages는 파일을 10분 캐시해서, 버전이 없으면 배포 직후 새 파일과 캐시에 남은 옛 파일이 섞여 화면이 빌 수 있기 때문입니다.
 - **API 서버:** Cloud Run에 배포합니다. 키는 Secret Manager에 두고 환경변수로만 주입합니다.
 
 지금은 **데모용 배포**입니다. 저장소가 메모리(`MemoryStore`)라서 인스턴스를 최대 1대로 묶어야 방이 여러 서버에 흩어지지 않습니다. 따라서 가상의 데모 데이터만 넣습니다. 운영 모드에서는 개발용 신원과 시드 API를 막고, 실제 방은 Firebase 설정과 검증된 로그인 토큰이 있어야 접근할 수 있습니다. Firebase 환경변수·서비스 계정은 [설정 안내](docs/auth-location-setup.md)에 따라 연결합니다. #3 Firestore 전에는 영구 데이터 저장을 보장하지 않습니다.
@@ -117,10 +121,22 @@ DEV_SEED=1 npm start   # http://localhost:4500/room.html → '데모 방 만들�
 ```bash
 gcloud run deploy agent-settlement --source . --region asia-northeast1 \
   --allow-unauthenticated --min-instances 0 --max-instances 1 --memory 1Gi \
-  --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
+  --set-secrets GEMINI_API_KEY=gemini-api-key:latest,PAYOUT_ENC_KEY=payout-enc-key:1 \
   --set-env-vars NODE_ENV=production,CRON_SECRET=<임의의 긴 문자열>
 ```
 
+- 계좌 암호화 열쇠(`PAYOUT_ENC_KEY`)는 **위 배포 명령을 처음 실행하기 전에** 한 번만 Secret Manager에 만들고, Cloud Run 서비스 계정이 읽을 수 있게 합니다(bash·Git Bash 기준). 배포(`NODE_ENV=production`, `Dockerfile`이 넣어 줌)에서 이 열쇠가 없으면 서버가 시작하지 않고 이전 버전이 계속 동작합니다. **열쇠를 잃거나 바꾸면 이미 저장된 계좌를 풀 수 없으니**(#3 Firestore 이후 특히) 한 번 만든 열쇠는 그대로 둡니다. 그래서 배포 명령은 `latest` 대신 버전 `1`로 고정합니다.
+  ```bash
+  # 0) 서비스 계정 확인: 비어 있거나 …-compute@developer.gserviceaccount.com이면 2)를 그대로, 다른 계정이면 2)의 --member를 그 계정으로 바꾼다
+  gcloud run services describe agent-settlement --region asia-northeast1 --format='value(spec.template.spec.serviceAccountName)'
+  # 1) 열쇠를 만들어 Secret Manager에 넣기(버전 1이 된다)
+  node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64'))" \
+    | gcloud secrets create payout-enc-key --data-file=-
+  # 2) Cloud Run이 열쇠를 읽을 수 있게 권한 주기
+  gcloud secrets add-iam-policy-binding payout-enc-key \
+    --member=serviceAccount:1081397156656-compute@developer.gserviceaccount.com \
+    --role=roles/secretmanager.secretAccessor
+  ```
 - 리전은 도쿄(`asia-northeast1`)입니다. Cloud Run 가격표에서 Tier 1이라 서울(`asia-northeast3`, Tier 2)보다 CPU·메모리 단가가 낮습니다. 화면이 부르는 서버 주소는 `public/api.js`에 있습니다.
 - 때가 된 송금 알림은 Cloud Scheduler 작업 `agent-settlement-tick`이 1분마다 `POST /api/cron/tick`을 `x-cron-secret` 헤더와 함께 부릅니다. Cloud Run은 요청이 없을 때 CPU를 거의 주지 않아 서버 안의 30초 타이머만으로는 부족하기 때문입니다.
 - 상시 인스턴스(`--min-instances 1`)는 두지 않습니다. 대신 1분마다 오는 스케줄러 요청이 인스턴스를 깨워 두어 메모리의 방이 대부분 유지되고, 요청 기반 과금이라 Cloud Run 무료 한도 안에 들어갑니다. 다만 Cloud Run이 인스턴스를 교체하면 방이 사라질 수 있으니, 시연 직전에는 데모 방을 새로 만듭니다.

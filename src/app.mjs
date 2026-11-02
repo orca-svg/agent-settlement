@@ -19,6 +19,7 @@ import { registerAgentRoutes } from './agents/routes.mjs';
 import { allocateWithGemini } from './agents/allocate.mjs';
 import { createCache } from './agents/cache.mjs';
 import { createEvidenceProvider, counterFor } from './agents/evidence.mjs';
+import { roomMemory, memoryKey } from './agents/memory.mjs';
 import { mediateWithGemini } from './agents/mediate.mjs';
 import { verifyQrToken } from './payments/qr.mjs';
 
@@ -142,10 +143,12 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     const [expenses, invoices, disputes, transfers] = await Promise.all(
       ['expenses', 'invoices', 'disputes', 'transfers'].map((col) => store.list(col, { roomId: room.id })),
     );
+    // 배분이 지금의 비서 기억과 맞는지. 맞으면 다시 나눠도 같은 답이라 화면이 '다시 나누기'를 막는다
+    const memoryNow = memoryKey(await roomMemory(store, room));
     return {
       room,
       me,
-      expenses,
+      expenses: expenses.map((e) => ({ ...e, allocFresh: Boolean(e.alloc) && e.allocMemory === memoryNow })),
       invoices,
       disputes,
       transfers: transfers.map((t) => redactTransfer(t, me.uid)),
@@ -174,6 +177,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   const server = http.createServer(async (req, res) => {
     req.identityContext = { auth, dev };
     const url = new URL(req.url, 'http://localhost');
+    if (url.pathname.startsWith('/api/')) res.setHeader('cache-control', 'no-store');
     allowCors(req, res, origins);
     if (req.method === 'OPTIONS') {
       res.writeHead(204);

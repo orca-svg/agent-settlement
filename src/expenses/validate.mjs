@@ -3,6 +3,8 @@ import { TAGS } from '../domain/types.mjs';
 
 const KINDS = ['stay', 'food', 'ticket', 'drink', 'shop', 'bus'];
 const isInt = (n) => Number.isInteger(n);
+// 영수증 줄 id는 AI 프롬프트의 표와 배분 결과의 키로 쓰인다. 줄바꿈 등으로 프롬프트 모양을 바꾸지 못하게 형식을 좁힌다(#10)
+const SAFE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 
 export function validateExpense(input, room) {
   const errors = [];
@@ -15,13 +17,14 @@ export function validateExpense(input, room) {
   if (Array.isArray(input?.items) && input.items.length) {
     if (input.items.length > 50) errors.push('영수증 줄은 50개까지예요');
     items = input.items.slice(0, 50).map((it, i) => ({
-      id: String(it.id || `line-${i + 1}`).slice(0, 40),
+      id: String(it.id || `line-${i + 1}`),
       name: String(it.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 40) || `항목 ${i + 1}`,
       qty: Number(it.qty),
       unit: Number(it.unit),
       ...(/^\d{2}:\d{2}$/.test(it.time ?? '') ? { time: it.time } : {}),
       tags: (Array.isArray(it.tags) ? it.tags : []).map((t) => (TAGS.includes(t) ? t : '기타')).filter((t, j, a) => a.indexOf(t) === j),
     }));
+    if (items.some((it) => !SAFE_ID.test(it.id))) errors.push('영수증 줄 id 형식이 맞지 않아요');
     if (items.some((it) => !isInt(it.qty) || it.qty < 1 || it.qty > 99)) errors.push('수량은 1~99 사이 정수여야 해요');
     if (items.some((it) => !isInt(it.unit))) errors.push('단가는 정수여야 해요');
     const sum = items.reduce((s, it) => s + it.qty * it.unit, 0);

@@ -6,6 +6,7 @@ import { ledger } from '../public/core.js';
 import { createApp } from '../src/app.mjs';
 import { validateExpense } from '../src/expenses/validate.mjs';
 import { signQrToken, verifyQrToken } from '../src/payments/qr.mjs';
+import { encryptedStore } from '../src/store/encrypted.mjs';
 
 test('eraseUser preserves shared amounts, unlinks identity per room and removes private copies', async () => {
   const store = new MemoryStore();
@@ -52,8 +53,11 @@ test('eraseUser preserves shared amounts, unlinks identity per room and removes 
 });
 
 test('authenticated deletion unlinks a room member, invalidates QR and rejects stale access', async t => {
-  const store = new MemoryStore();
+  const store = encryptedStore(new MemoryStore(), Buffer.alloc(32, 7));
   await seedDemoRoom(store, { id: 'room' });
+  await store.put('transfers', { id: 'room:me:cs', roomId: 'room', from: 'me', to: 'cs', amount: 100, link: 'supertoss://current-account', fallback: { accountNo: '123' } });
+  await store.put('transfers', { id: 'room:ms:cs', roomId: 'room', from: 'ms', to: 'cs', amount: 200, link: 'supertoss://unrelated-account', fallback: { accountNo: '456' } });
+  const currentQr = signQrToken('supertoss://current-account');
   const oldQr = signQrToken('supertoss://old-account', { subjectUids: ['me', 'cs'] });
   let authTime = Math.floor(Date.now() / 1000) - 600;
   const removed = [];
@@ -67,6 +71,11 @@ test('authenticated deletion unlinks a room member, invalidates QR and rejects s
   assert.equal((await req('/api/me/delete', 'POST')).status, 200);
   assert.deepEqual(removed, ['me']);
   assert.equal(verifyQrToken(oldQr), null);
+  assert.equal(verifyQrToken(currentQr), null);
+  const transfers = await store.list('transfers');
+  assert.equal(transfers.find(t => t.amount === 100).link, null);
+  assert.equal(transfers.find(t => t.amount === 200).fallback.accountNo, '456');
+  assert.equal((await req('/api/me/deletion')).headers.get('cache-control'), 'no-store');
   assert.equal((await req('/api/rooms/room')).status, 401);
   assert.equal((await req('/api/me', 'POST')).status, 401);
   assert.deepEqual(await (await req('/api/me/deletion')).json(), { pending: true });
