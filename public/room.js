@@ -1,7 +1,7 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh, receiptPickers } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
@@ -539,10 +539,11 @@ function photoPickHtml() {
   if (!state.aiReady) {
     return `<p class="preview-note">사진 읽기는 AI 서버가 필요해요. 지금은 '직접 입력'을 써 주세요.</p>`;
   }
-  return `<section class="next" style="margin:0"><h2>영수증을 찍거나 골라 주세요</h2>
+  // 터치가 주 입력인 기기(휴대폰·태블릿)면 찍기와 앨범에서 고르기를 따로 둔다(receiptPickers)
+  const touch = matchMedia('(pointer: coarse)').matches;
+  return `<section class="next" style="margin:0"><h2>${touch ? '영수증을 찍거나 골라 주세요' : '영수증 사진을 골라 주세요'}</h2>
     <p>AI가 읽은 내용은 저장 전에 직접 확인하고 고칠 수 있어요. 사진 원본은 저장하지 않아요.</p>
-    <div class="actions"><label class="btn" style="display:inline-flex;align-items:center">사진 고르기
-      <input type="file" accept="image/*" capture="environment" data-receipt hidden></label></div></section>`;
+    <div class="actions">${receiptPickers(touch)}</div></section>`;
 }
 
 // 읽은 줄을 고칠 수 있는 목록. 합계와 줄 합을 나란히 보여 준다.
