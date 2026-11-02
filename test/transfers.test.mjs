@@ -287,6 +287,7 @@ test('아직 안 들어왔어요: opened로 돌아가고 표시를 붙이며, �
   assert.equal(saved.status, 'opened');
   assert.equal(saved.notReceivedAt, '2026-11-10T05:00:00.000Z');
   assert.equal((await ctx.store.get('transfers', id)).status, 'opened');
+  assert.equal((await ctx.orch.reportNotReceived('demo-t', id, 'yh')).status, 'opened'); // 두 번 눌러도 오류 없이 같은 결과
   const ev = (await ctx.store.listEvents('demo-t')).filter((e) => e.kind === 'transfer_not_received');
   assert.deepEqual(ev.map((e) => [e.from, e.to, e.text, e.action?.type, e.action?.for, e.action?.ref]), [
     ['yh', 'cs', '아직 ₩41,155을 못 받았어요. 송금 내역을 한 번 확인해 주세요', 'approve_transfer', 'cs', id],

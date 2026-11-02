@@ -289,6 +289,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
   // 못 받은 돈은 안 보낸 돈이므로, 그 사이 지출이 바뀌면 다른 opened 송금처럼 대체된다
   async function reportNotReceived(roomId, tid, actorUid) {
     const { t } = await transferOf(roomId, tid, actorUid, 'to');
+    if (t.status === 'opened' && t.notReceivedAt) return t; // 두 번 눌러도 같은 결과(받았어요 확인과 같다)
     if (t.status !== 'sent') throw new HttpError(409, '보냈다고 한 송금에만 할 수 있어요');
     const saved = { ...t, status: 'opened', notReceivedAt: clock().toISOString() };
     await store.put('transfers', saved);
