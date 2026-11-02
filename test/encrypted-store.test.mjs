@@ -96,22 +96,22 @@ test('진짜 저장소에 eraseUser가 있으면 전달하고, 지운 링크는 
   const inner = new MemoryStore();
   const calls = [];
   let rawRemoved = [];
-  inner.eraseUser = async (uid) => {
+  inner.eraseUser = async function (uid) {
     calls.push(uid);
-    const mine = (await inner.list('transfers')).filter((t) => t.from === uid || t.to === uid);
+    const mine = (await this.list('transfers')).filter((t) => t.from === uid || t.to === uid);
     rawRemoved = mine.map((t) => t.link);
-    for (const t of mine) await inner.put('transfers', { ...t, link: null, fallback: null });
-    return { removedLinks: rawRemoved }; // 진짜 저장소는 잠긴 글자를 돌려준다
+    for (const t of mine) await this.put('transfers', { ...t, link: null, fallback: null });
+    return { removedLinks: rawRemoved, anonymized: true }; // 진짜 저장소는 잠긴 글자를 돌려준다
   };
   const store = encryptedStore(inner, KEY);
   const other = 'supertoss://send?bank=x&accountNo=100000000001&amount=500&origin=linkgen';
   await store.put('transfers', { id: 't1', roomId: 'r1', from: 'ms', to: 'cs', link: LINK, fallback: FALLBACK });
   await store.put('transfers', { id: 't2', roomId: 'r1', from: 'yh', to: 'me', link: other, fallback: null });
 
-  const { removedLinks } = await store.eraseUser('cs');
+  const result = await store.eraseUser('cs');
   assert.deepEqual(calls, ['cs']);
-  assert.ok(rawRemoved.every(isSealed));
-  assert.deepEqual(removedLinks, [LINK]);
+  assert.ok(rawRemoved.every((v) => isSealed(v)));
+  assert.deepEqual(result, { removedLinks: [LINK], anonymized: true });
   assert.equal((await store.get('transfers', 't1')).link, null);
   assert.equal((await store.get('transfers', 't2')).link, other);
 });
@@ -119,4 +119,30 @@ test('진짜 저장소에 eraseUser가 있으면 전달하고, 지운 링크는 
 test('진짜 저장소에 eraseUser가 없으면 래퍼에도 없다(탈퇴 API가 503으로 알림)', () => {
   const { store } = make();
   assert.equal(typeof store.eraseUser, 'undefined');
+});
+
+test('탈퇴는 그 사람의 송금만 풀어 보고, 풀리지 않는 값이 있어도 막히지 않는다', async () => {
+  const inner = new MemoryStore();
+  inner.eraseUser = async function () {
+    return { removedLinks: [] };
+  };
+  const store = encryptedStore(inner, KEY);
+  await store.put('transfers', { id: 't1', roomId: 'r1', from: 'ms', to: 'cs', link: LINK, fallback: FALLBACK });
+  // 다른 방의 손상된 송금(풀어 보지도 않아야 한다)과, 이 사람의 손상된 송금(건너뛴다)
+  await inner.put('transfers', { id: 'x1', roomId: 'r2', from: 'yh', to: 'me', link: 'enc:v1:broken-broken-broken-broken-broken', fallback: null });
+  await inner.put('transfers', { id: 't9', roomId: 'r1', from: 'cs', to: 'yh', link: 'enc:v1:broken-broken-broken-broken-broken', fallback: null });
+  const { removedLinks } = await store.eraseUser('cs');
+  assert.deepEqual(removedLinks, [LINK]);
+});
+
+test('진짜 저장소의 메서드를 래퍼도 모두 갖는다(새 메서드가 래퍼 뒤에서 사라지지 않게)', () => {
+  const { store } = make();
+  const methods = Object.getOwnPropertyNames(MemoryStore.prototype).filter((n) => n !== 'constructor');
+  for (const m of methods) assert.equal(typeof store[m], 'function', `래퍼에 ${m}이 없어요`);
+});
+
+test('32바이트가 아닌 열쇠, id가 없는 문서는 바로 거부한다', async () => {
+  assert.throws(() => encryptedStore(new MemoryStore(), Buffer.alloc(16)), /32바이트/);
+  const { store } = make();
+  await assert.rejects(store.put('agents', { uid: 'cs', payout: PAYOUT }), /id가 없는 문서/);
 });
