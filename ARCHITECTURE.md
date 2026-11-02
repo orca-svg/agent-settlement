@@ -111,6 +111,8 @@ API 서버 (server.mjs → src/app.mjs)
 | POST | `/api/rooms/:id/disputes/:did/agree` | 중재안에 동의. 양쪽이 동의하면 지출을 다시 나누고 version을 올려 청구서를 다시 보내요 |
 | POST | `/api/rooms/:id/payout` | 받을 계좌 `{ bank, accountNo, holder }`. 나에게 오는 송금에 토스 링크를 채워요 |
 | POST | `/api/rooms/:id/transfers/:tid/approve` · `sent` · `confirm` | 송금 화면 열기·보냈어요(보내는 사람), 받았어요(받는 사람) |
+| POST | `/api/rooms/:id/transfers/:tid/qr` | 컴퓨터 송금 화면에 띄울 QR 토큰 받기(보내는 사람만). 응답 `{ qrToken, expiresAt }`, 15분 뒤 만료. 받을 계좌가 없거나 이미 보낸 송금이면 409 |
+| GET | `/api/qr/:token` | 휴대폰으로 QR을 찍으면 열리는 주소. 토큰을 토스 링크로 바꿔 302로 넘겨요. **신원 헤더 없이** 열려요(토큰이 곧 열쇠). 만료되었거나 잘못된 토큰은 404. 토큰은 서버 메모리에만 있어서 서버가 한 대일 때만 맞아요 |
 | POST | `/api/cron/tick` | 때가 된 송금 알림, 보낸 뒤 24시간 미확인 알림. `x-cron-secret`이 `CRON_SECRET`과 같을 때만(로컬 서버는 30초마다 스스로 불러요) |
 
 `actions`는 이벤트 기록에서 세지 않고 서버가 현재 상태에서 계산해요(`src/actions.mjs`). 그래서 처리한 일은 자동으로 빠져요. 종류는 `confirm_line`(줄 확인), `answer_invoice`(한도를 넘은 청구서), `agree_dispute`(중재 맡기기·중재안 동의), `approve_transfer`(보낼 때가 된 송금), `set_payout`(받을 계좌 없음), `confirm_receipt`(받았는지 확인)예요.
