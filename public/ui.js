@@ -69,6 +69,15 @@ export function qrIsFresh(qr, transferId, now = Date.now(), marginMs = 60_000) {
   return Boolean(qr) && qr.id === transferId && Date.parse(qr.expiresAt) - marginMs > now;
 }
 
+// 메뉴 배분 버튼. 이미 나눴고 그 뒤로 비서의 기억이 그대로면(fresh, 서버의 allocFresh) 다시 나눠도 같은 답이고
+// 확인한 줄만 지워지니 막는다. 막을 때는 무엇이 남았는지 버튼 아래(hint)에 알려 준다
+export function allocButton({ allocated, fresh, flagged }) {
+  if (!allocated) return { label: '비서에게 나누기 맡기기', disabled: false, hint: '' };
+  if (!fresh) return { label: '비서에게 다시 나누기', disabled: false, hint: '' };
+  if (flagged) return { label: '비서가 나누기를 마쳤어요', disabled: true, hint: `확인 필요한 ${flagged}줄만 확인하면 끝나요.` };
+  return { label: '나누기를 모두 마쳤어요', disabled: true, hint: '지출을 고치거나 비서의 기억이 바뀌면 다시 나눌 수 있어요.' };
+}
+
 // 비서끼리 기록 한 줄
 export const logItemHtml = ({ avatar, who, time, text, meta = '', tagHtml = '', enter = false, unread = false, extraHtml = '' }) => `<li class="${enter ? 'enter' : ''}${unread ? ' unread' : ''}">
     ${avatar}

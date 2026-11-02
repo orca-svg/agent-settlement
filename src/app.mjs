@@ -15,6 +15,7 @@ import { createOrchestrator } from './agents/orchestrator.mjs';
 import { registerAgentRoutes } from './agents/routes.mjs';
 import { allocateWithGemini } from './agents/allocate.mjs';
 import { createCache } from './agents/cache.mjs';
+import { roomMemory, memoryKey } from './agents/memory.mjs';
 import { evidenceFor as demoEvidence, counterFor } from './agents/evidence.mjs';
 import { mediateWithGemini } from './agents/mediate.mjs';
 import { verifyQrToken } from './payments/qr.mjs';
@@ -120,10 +121,12 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     const [expenses, invoices, disputes, transfers] = await Promise.all(
       ['expenses', 'invoices', 'disputes', 'transfers'].map((col) => store.list(col, { roomId: room.id })),
     );
+    // 배분이 지금의 비서 기억과 맞는지. 맞으면 다시 나눠도 같은 답이라 화면이 '다시 나누기'를 막는다
+    const memoryNow = memoryKey(await roomMemory(store, room));
     return {
       room,
       me,
-      expenses,
+      expenses: expenses.map((e) => ({ ...e, allocFresh: Boolean(e.alloc) && e.allocMemory === memoryNow })),
       invoices,
       disputes,
       transfers: transfers.map((t) => redactTransfer(t, me.uid)),

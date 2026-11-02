@@ -1,7 +1,14 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, topic, subj, whose, restNote, allocLabel, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers } from '../public/ui.js';
+import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers } from '../public/ui.js';
+
+test('allocButton: 나눈 뒤 바뀐 게 없으면 막고, 남은 일을 알려 준다', () => {
+  assert.deepEqual(allocButton({ allocated: false, fresh: false, flagged: 0 }), { label: '비서에게 나누기 맡기기', disabled: false, hint: '' });
+  assert.deepEqual(allocButton({ allocated: true, fresh: false, flagged: 1 }), { label: '비서에게 다시 나누기', disabled: false, hint: '' }); // 기억이 바뀌었다
+  assert.deepEqual(allocButton({ allocated: true, fresh: true, flagged: 1 }), { label: '비서가 나누기를 마쳤어요', disabled: true, hint: '확인 필요한 1줄만 확인하면 끝나요.' });
+  assert.deepEqual(allocButton({ allocated: true, fresh: true, flagged: 0 }), { label: '나누기를 모두 마쳤어요', disabled: true, hint: '지출을 고치거나 비서의 기억이 바뀌면 다시 나눌 수 있어요.' });
+});
 
 test('조사: 받침에 따라 은/는, 이/가, 나는 내가', () => {
   assert.equal(topic('오차즈케'), '오차즈케는');

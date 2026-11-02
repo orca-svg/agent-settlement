@@ -81,21 +81,24 @@ test('createCache: 오래된 답은 버리고, 가득 차면 가장 오래 안 �
   assert.equal(cache.get('a'), undefined);
 });
 
-test('방의 메뉴 배분: 같은 지출을 다시 나누면 Gemini를 한 번만 부르고 how로 알린다', async () => {
+test('방의 메뉴 배분: 같은 내용이면 Gemini를 한 번만 부르고 how로 알린다. 같은 방에서 바뀐 게 없으면 아예 다시 나누지 않는다', async () => {
   const g = fakeGemini();
   const store = new MemoryStore();
   const server = createApp({ store, gemini: g, env: { DEV_SEED: '1' } });
   await new Promise((r) => server.listen(0, r));
   const url = `http://localhost:${server.address().port}`;
   try {
-    const roomId = (await (await fetch(`${url}/api/dev/seed`, { method: 'POST' })).json()).roomId;
-    const allocate = () => fetch(`${url}/api/rooms/${roomId}/expenses/${roomId}-izakaya/allocate`, {
+    const seed = async () => (await (await fetch(`${url}/api/dev/seed`, { method: 'POST' })).json()).roomId;
+    const allocate = (roomId) => fetch(`${url}/api/rooms/${roomId}/expenses/${roomId}-izakaya/allocate`, {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-demo-user': 'me' }, body: '{}',
-    }).then((r) => r.json());
-    assert.equal((await allocate()).how, 'gemini');
-    assert.equal((await allocate()).how, 'cache');
+    });
+    const first = await seed();
+    assert.equal((await (await allocate(first)).json()).how, 'gemini');
+    assert.equal((await allocate(first)).status, 409); // 바뀐 게 없어 Gemini도 부르지 않는다
+    const second = await seed(); // 시연에서 데모 방을 다시 만든 경우: 같은 영수증·같은 기억
+    assert.equal((await (await allocate(second)).json()).how, 'cache');
     assert.equal(g.calls, 1);
-    const metas = (await store.listEvents(roomId)).filter((e) => e.kind === 'allocated').map((e) => e.meta);
+    const metas = (await store.listEvents(second)).filter((e) => e.kind === 'allocated').map((e) => e.meta);
     assert.match(metas.at(-1), /이전 답 재사용/);
   } finally {
     server.close();
