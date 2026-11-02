@@ -43,7 +43,7 @@ export function registerAgentRoutes(routes, { orchestrator, member, overLimit = 
   });
 
   // qr: 데스크톱 송금 화면을 열 때 휴대폰으로 넘길 QR 토큰을 새로 받는다(보내는 사람만)
-  // not-received: 받는 사람이 "아직 안 들어왔어요"(sent일 때만). opened로 되돌려 보내는 사람에게 다시 묻는다
+  // not-received: 받는 사람이 "아직 안 들어왔어요"(sent일 때만). 상태는 sent로 두고 표시만 붙여 보내는 사람에게 다시 묻는다
   const step = { approve: 'approveTransfer', qr: 'qrFor', sent: 'markSent', confirm: 'confirmReceipt', 'not-received': 'reportNotReceived' };
   for (const [path, fn] of Object.entries(step)) {
     routes.post(`/api/rooms/:id/transfers/:tid/${path}`, async ({ req, params }) => {

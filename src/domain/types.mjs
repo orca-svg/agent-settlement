@@ -78,13 +78,13 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
  */
 
 /**
- * 우리 서비스는 돈을 옮기지 않는다. link는 금액이 채워진 송금 앱 링크, fallback은 계좌·금액 복사용. notReceivedAt은 받는 사람이 "아직 안 들어왔어요"를 누른 시각(opened로 되돌아감), reminders는 보냈어요 뒤 받았나요?를 다시 물은 횟수(#8).
+ * 우리 서비스는 돈을 옮기지 않는다. link는 금액이 채워진 송금 앱 링크, fallback은 계좌·금액 복사용. notReceivedAt은 받는 사람이 "아직 안 들어왔어요"를 누른 시각(상태는 sent 그대로, 보내는 사람이 답하면 지운다), recheckedAt은 그 뒤 보내는 사람이 보냈어요로 답한 시각, reminders는 보냈어요 뒤 받았나요?를 다시 물은 횟수(#8).
  * @typedef {{
  *   id: string, roomId: string, version: number, from: string, to: string, amount: number,
  *   status: 'scheduled'|'due'|'opened'|'sent'|'confirmed'|'superseded',
  *   remindAt: string | null, link: string | null,
  *   fallback: { bank: string, accountNo: string, amount: number } | null,
- *   notReceivedAt?: string, reminders?: number,
+ *   notReceivedAt?: string, recheckedAt?: string, reminders?: number,
  * }} Transfer
  */
 
