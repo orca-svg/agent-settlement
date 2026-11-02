@@ -90,3 +90,33 @@ test('delete와 비서 기록(appendEvent·listEvents)은 그대로 위임', asy
   assert.equal(ev.seq, 1);
   assert.deepEqual((await store.listEvents('r1')).map((e) => e.text), ['a']);
 });
+
+// #2 탈퇴(eraseUser): 팀원 브랜치의 MemoryStore처럼 진짜 저장소에 붙어 있으면 전달한다
+test('진짜 저장소에 eraseUser가 있으면 전달하고, 지운 링크는 평문으로 돌려준다', async () => {
+  const inner = new MemoryStore();
+  const calls = [];
+  let rawRemoved = [];
+  inner.eraseUser = async (uid) => {
+    calls.push(uid);
+    const mine = (await inner.list('transfers')).filter((t) => t.from === uid || t.to === uid);
+    rawRemoved = mine.map((t) => t.link);
+    for (const t of mine) await inner.put('transfers', { ...t, link: null, fallback: null });
+    return { removedLinks: rawRemoved }; // 진짜 저장소는 잠긴 글자를 돌려준다
+  };
+  const store = encryptedStore(inner, KEY);
+  const other = 'supertoss://send?bank=x&accountNo=100000000001&amount=500&origin=linkgen';
+  await store.put('transfers', { id: 't1', roomId: 'r1', from: 'ms', to: 'cs', link: LINK, fallback: FALLBACK });
+  await store.put('transfers', { id: 't2', roomId: 'r1', from: 'yh', to: 'me', link: other, fallback: null });
+
+  const { removedLinks } = await store.eraseUser('cs');
+  assert.deepEqual(calls, ['cs']);
+  assert.ok(rawRemoved.every(isSealed));
+  assert.deepEqual(removedLinks, [LINK]);
+  assert.equal((await store.get('transfers', 't1')).link, null);
+  assert.equal((await store.get('transfers', 't2')).link, other);
+});
+
+test('진짜 저장소에 eraseUser가 없으면 래퍼에도 없다(탈퇴 API가 503으로 알림)', () => {
+  const { store } = make();
+  assert.equal(typeof store.eraseUser, 'undefined');
+});

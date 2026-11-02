@@ -22,7 +22,7 @@ export function encryptedStore(inner, key) {
     return doc;
   };
 
-  return {
+  const store = {
     async get(col, id) {
       return open(col, await inner.get(col, id));
     },
@@ -43,4 +43,16 @@ export function encryptedStore(inner, key) {
     appendEvent: (roomId, ev) => inner.appendEvent(roomId, ev),
     listEvents: (roomId, afterSeq) => inner.listEvents(roomId, afterSeq),
   };
+
+  // #2 탈퇴: 진짜 저장소에 계정 삭제 기능이 있을 때만 붙인다(없으면 탈퇴 API가 503으로 알린다).
+  // 진짜 저장소는 지운 송금 링크를 잠긴 글자로 돌려주므로, 지우기 전에 평문 링크를 모아 대신 돌려준다
+  // (탈퇴 API는 이 링크를 평문으로 비교해 이미 발급한 QR 토큰을 무효화한다)
+  if (typeof inner.eraseUser === 'function') {
+    store.eraseUser = async (uid) => {
+      const removedLinks = (await store.list('transfers')).filter((t) => (t.from === uid || t.to === uid) && t.link).map((t) => t.link);
+      return { ...(await inner.eraseUser(uid)), removedLinks };
+    };
+  }
+
+  return store;
 }
