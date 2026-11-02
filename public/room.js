@@ -1,7 +1,7 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, ARROW, qrImageUrl, qrIsFresh } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, ARROW, qrImageUrl, qrIsFresh, disputeWaiting, agreedNote } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
@@ -9,7 +9,7 @@ import { BANKS } from './banks.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
-const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null };
+const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null, agreed: null };
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
@@ -319,6 +319,7 @@ function closePhoto() {
 const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit) || 0), 0);
 
 async function act(name, d) {
+  if (name !== 'agree') state.agreed = null; // 동의 결과 한 줄은 다음 조작 전까지만 남긴다
   if (AGENT_ACTIONS.has(name)) return agentAct(name, d); // 송금 링크는 이 호출 안에서 동기적으로 연다
   if (name === 'show-receipt') {
     showReceipt(d.id);
@@ -712,7 +713,7 @@ function disputeSheet() {
         <span class="meta" style="display:block">${esc(it.time || '')} · ${(d.proposal.alloc[it.id]?.consumers ?? []).map(nameOf).map(esc).join('·')}</span></span></div>`).join('');
     const people = exp.present.map((u) => `<div class="row" style="--inset:52px">${avatar(u)}<span class="grow">${esc(nameOf(u))}</span>
         <span class="amount num">${won(now[u] ?? 0)} → ${won(after[u] ?? 0)}</span></div>`).join('');
-    const waiting = [exp.payer, d.by].filter((u) => !d.agreedBy.includes(u));
+    const waiting = disputeWaiting(d, exp);
     body = `<section class="group"><h3 class="group-label"><span>중재안</span><span>${esc(allocLabel({ source: d.proposal.source }))}</span></h3>
         <p class="how">${esc(d.proposal.summary)}</p><div class="list">${lines}</div></section>
       <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>지금 → 중재안</span></h3><div class="list">${people}</div></section>
@@ -726,6 +727,14 @@ function disputeSheet() {
     html: `<p class="how"><b>${esc(nameOf(d.by))}의 비서</b> · ${esc(d.claim)}</p>
       ${evidence ? `<section class="group"><h3 class="group-label"><span>근거</span></h3>${evidence}</section>` : ''}${body}`,
   };
+}
+
+// 중재안에 동의하면 시트가 닫히므로, 사용자가 돌아오는 다음 할 일 카드 바로 위에 결과를 한 줄 남긴다.
+// 상대가 이어서 동의하면 기록을 받아 다시 그릴 때 '다시 나눴어요'로 바뀐다
+function agreedLine() {
+  const d = state.agreed && byId('disputes', state.agreed);
+  const exp = d && byId('expenses', d.expenseId);
+  return exp ? `<p class="done-note" id="agreed-note" role="status">${CHECK}<span>${esc(agreedNote(d, exp, nameOf))}</span></p>` : '';
 }
 
 const copyRow = (label, value, key) => `<div class="row"><span class="grow"><span class="meta" style="display:block">${label}</span>
@@ -935,7 +944,13 @@ async function agentAct(name, d) {
     state.busy = null;
     renderSheet();
   } else if (name === 'agree') {
-    await post(`/disputes/${enc(d.id)}/agree`);
+    // 동의하면 시트를 닫고 결과는 방 화면에 한 줄로 남긴다. 실패(409 등)하면 시트를 그대로 두고 까닭을 보여 준다
+    if (await post(`/disputes/${enc(d.id)}/agree`)) {
+      state.agreed = d.id;
+      sheet.close();
+      render();
+      $('#agreed-note')?.scrollIntoView({ block: 'nearest' });
+    }
   } else if (name === 'open-transfer') {
     state.transferNote = null;
     openAgentSheet('transfer', d.id);
@@ -982,7 +997,7 @@ function render() {
   $('#nav-add').hidden = false;
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
-  main.innerHTML = [hero(), whoPicker(), nextCard(), expensesSection(), transfersSection()].join('');
+  main.innerHTML = [hero(), whoPicker(), agreedLine(), nextCard(), expensesSection(), transfersSection()].join('');
   mountSegs(main);
   if (['exp', 'dispute', 'transfer'].includes(state.sheet) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
 }

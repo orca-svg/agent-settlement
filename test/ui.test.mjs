@@ -1,7 +1,7 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, topic, subj, whose, restNote, allocLabel, groupRuns, logItemHtml, qrImageUrl, qrIsFresh } from '../public/ui.js';
+import { esc, topic, subj, whose, restNote, allocLabel, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, disputeWaiting, agreedNote } from '../public/ui.js';
 
 test('조사: 받침에 따라 은/는, 이/가, 나는 내가', () => {
   assert.equal(topic('오차즈케'), '오차즈케는');
@@ -18,6 +18,22 @@ test('esc: HTML 특수문자를 바꾼다', () => {
 test('restNote: 남은 원이 있을 때만 한 줄로 알린다', () => {
   assert.equal(restNote(0), '');
   assert.equal(restNote(1), '<p class="group-note">나누고 남은 ₩1은 낸 사람 몫에 더했어요.</p>');
+});
+
+test('disputeWaiting: 지출을 낸 사람과 이의를 낸 사람 중 아직 동의하지 않은 사람', () => {
+  const exp = { payer: 'me' };
+  assert.deepEqual(disputeWaiting({ by: 'ms', agreedBy: [] }, exp), ['me', 'ms']);
+  assert.deepEqual(disputeWaiting({ by: 'ms', agreedBy: ['me'] }, exp), ['ms']);
+  assert.deepEqual(disputeWaiting({ by: 'ms', agreedBy: ['ms', 'me'] }, exp), []);
+  assert.deepEqual(disputeWaiting({ by: 'me', agreedBy: [] }, exp), ['me']); // 낸 사람이 스스로 이의를 내도 한 번만
+});
+
+test('agreedNote: 동의한 뒤 방 화면에 남길 한 줄. 지금 이의 상태로 만든다', () => {
+  const exp = { title: '2차 바', payer: 'me' };
+  const nameOf = (u) => ({ me: '나', ms: '민수', cs: '철수' })[u];
+  assert.equal(agreedNote({ status: 'proposed', by: 'ms', agreedBy: ['me'] }, exp, nameOf), '중재안에 동의했어요. 민수의 동의를 기다려요.');
+  assert.equal(agreedNote({ status: 'proposed', by: 'ms', agreedBy: ['ms'] }, { ...exp, payer: 'cs' }, nameOf), '중재안에 동의했어요. 철수의 동의를 기다려요.');
+  assert.equal(agreedNote({ status: 'resolved', by: 'ms', agreedBy: ['ms', 'me'] }, exp, nameOf), '양쪽이 동의해서 ‘2차 바’를 중재안대로 다시 나눴어요. 청구서도 다시 보냈어요.');
 });
 
 test('whose: 나는 내 몫, 다른 이름은 그대로', () => {

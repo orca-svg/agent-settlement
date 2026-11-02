@@ -227,6 +227,23 @@ h1, h2, h3, p { margin: 0; }
 .next h2 { font-size: 1.375rem; line-height: 1.25; font-weight: 700; letter-spacing: -0.02em; }
 .next p { color: var(--label-2); font-size: 0.9375rem; letter-spacing: 0; }
 .next .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+/* 방금 한 일(중재안 동의). 시트가 닫힌 뒤 다음 할 일 카드 바로 위에 한 줄로 남긴다.
+   초록 글자는 옅은 초록 바탕에서 대비가 모자라서 글자는 본문색으로, 초록은 체크 표시에만 쓴다 */
+.done-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--green-soft);
+  color: var(--label);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  letter-spacing: 0;
+  scroll-margin-top: calc(60px + env(safe-area-inset-top));
+}
+.done-note svg { flex: none; width: 18px; height: 18px; margin-top: 1px; color: var(--green); }
 .progress { height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; }
 .progress i {
   display: block;
