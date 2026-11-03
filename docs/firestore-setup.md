@@ -6,7 +6,8 @@
 - 비서 기록 `seq`는 방마다 트랜잭션으로 매기고, 탈퇴(`eraseUser`)도 한 트랜잭션으로 써요. 결과는 `MemoryStore`와 같아요(`eraseUserSnapshot`을 같이 씀).
 - 영수증 사진은 Firestore 문서 한도(1MiB)를 넘을 수 있어서 Cloud Storage `receipts/{지출 id}`에 둬요.
 - 보안 규칙: `firestore.rules`(방 멤버만 읽기, 송금은 당사자만, 쓰기는 모두 서버만), `storage.rules`(전부 서버만).
-- 방 화면은 서버가 Firestore이고 로그인한 상태면 비서 기록을 `onSnapshot`으로 받아요. 그 밖에는 2초 폴링이에요. 실시간 연결이 거부되면 폴링으로 이어 가요.
+- 방 화면은 서버가 Firestore이고 로그인한 상태면 비서 기록을 `onSnapshot`으로 받아요. 그 밖에는 2초 폴링이에요. 실시간 연결이 거부되면 폴링으로 이어 가고, 다음에 방을 열 때 실시간을 다시 시도해요.
+- Firestore는 읽은 문서 수만큼 돈이 들어서 자주 도는 읽기를 줄였어요. `tick()`(1분마다)은 할 일이 있는 송금(`scheduled`·`due`·`opened`·`sent`)만 읽고, 방은 tick 한 번에 방마다 한 번만 읽어요. 내 방 목록과 프로필 변경은 `roomsOf(uid)`로 `_memberUids` 색인을 써서 내 방만 읽어요.
 - 돈 계산은 원래 서버가 해요. 화면은 지출 입력(줄·단가·함께한 사람)만 보내고, 몫·차액·청구서·송금은 서버가 `public/core.js`로 계산해요. Firestore 위에서도 "몫의 합 = 결제액, 차액의 합 = 0"을 테스트로 확인했어요.
 - 비로그인 데모(`index.html`)는 저장소를 쓰지 않아서 그대로예요.
 
@@ -16,7 +17,7 @@
 
 1. **Firestore 만들기.** Console → Firestore Database → 데이터베이스 만들기 → Native 모드. 위치는 Cloud Run과 같은 `asia-northeast1`(도쿄)을 권장해요. 위치는 나중에 못 바꿔요.
 2. **Storage 만들기.** Console → Storage. 2026-02-03부터 Cloud Storage for Firebase는 **Blaze 요금제**가 필요해요(무료 사용량은 그대로 있어요). 버킷 이름(`<project>.firebasestorage.app` 또는 예전 `<project>.appspot.com`)을 적어 둬요.
-3. **규칙 배포.** `firebase deploy --only firestore:rules,storage --project <project>`
+3. **규칙 배포.** `firebase deploy --only firestore:rules,storage --project <project>`. 서버를 `STORE=firestore`로 바꾸기(5번) 전에 해요. 규칙이 없으면 화면의 실시간 구독이 거부돼 2초 폴링으로 돌아가는데, 폴링은 2초마다 최소 4읽기(탈퇴 표식·위치 동의·방·기록)라 방을 연 탭 하나가 시간당 약 7,200읽기를 써요(하루 무료 5만 읽기).
 4. **서버 권한.** Cloud Run 서비스 계정에 `Cloud Datastore 사용자`(roles/datastore.user)와 버킷의 `Storage 개체 관리자`(roles/storage.objectAdmin)를 줘요. 로컬은 `gcloud auth application-default login`.
 5. **환경변수.** #2의 Firebase 값 네 개에 더해:
 

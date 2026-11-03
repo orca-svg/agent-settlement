@@ -51,10 +51,12 @@ API 서버 (server.mjs → src/app.mjs)
 
 | 메서드 | 하는 일 |
 | --- | --- |
-| `get(col, id)` | 문서 하나, 없으면 `null` |
+| `get(col, id)` | 문서 하나, 없으면 `null`. 넣을 수 없는 id(문자열이 아니거나 `/`가 든 것 등)도 `null` |
 | `put(col, doc)` | `doc.id`로 저장(덮어쓰기) |
-| `delete(col, id)` | 문서 지우기(없어도 오류 아님) |
+| `putIfAbsent(col, doc)` | 없을 때만 넣고, 있으면 있던 문서를 돌려줌. 동시에 불러도 하나만 남음(줄 밖에서 만드는 첫 프로필 등) |
+| `delete(col, id)` | 문서 지우기(없어도, 넣을 수 없는 id여도 오류 아님) |
 | `list(col, where = {})` | 필드 동등 비교로 거르기(Firestore의 `==`와 같은 범위) |
+| `roomsOf(uid)` | `uid`가 탈퇴하지 않은 멤버인 방. `FirestoreStore`는 모든 방을 읽지 않고 `_memberUids` 색인으로 그 방만 읽음 |
 | `appendEvent(roomId, ev)` | 비서 기록 추가. `seq`(방마다 1부터)와 `at`(ISO 시각)을 채워서 돌려줌 |
 | `listEvents(roomId, afterSeq = 0)` | `seq > afterSeq`인 기록 |
 | `eraseUser(uid)` (선택 확장) | 탈퇴 기능을 제공하는 저장소에서 구현. 개인정보 삭제·방별 무작위 익명 UID 치환을 원자적으로 수행하고 `{ removedLinks }` 반환. 없으면 탈퇴 API는 데이터 변경 없이 503 |
