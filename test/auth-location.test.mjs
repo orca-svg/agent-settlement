@@ -229,3 +229,37 @@ test('self-reported timeline keeps confidence but cannot turn a model assertion 
   });
   assert.ok(Object.values(result.alloc).every(a => a.confidence === 1 && a.confirmed === false));
 });
+
+// 처음 들어온 사람의 색은 요청이 동시에 와도 하나로 정해진다(Firestore에서는 읽고 쓰는 사이에 왕복이 있다, #3)
+test('first profile reads arriving together settle on one stored color', async t => {
+  const { request, store } = await setup(t);
+  const get = store.get.bind(store);
+  store.get = async (col, id) => {
+    const out = await get(col, id);
+    if (col === 'users') await new Promise(r => setTimeout(r, 20));
+    return out;
+  };
+  const colors = await Promise.all(Array.from({ length: 6 }, async () => (await (await request('/api/me')).json()).profile.color));
+  const saved = (await store.get('users', 'me')).color;
+  assert.deepEqual(colors, colors.map(() => saved));
+});
+
+// 내 방 목록과 프로필 변경은 내가 멤버인 방만 읽는다. 남의 방 문서는 저장소에서 꺼내지도 않는다(#3)
+test('room list and profile update read only my rooms from the store', async t => {
+  const { request, store } = await setup(t);
+  await store.put('rooms', { id: 'secret', name: '비공개', members: [{ uid: 'outsider', name: '타인' }] });
+  const seen = new Set();
+  for (const method of ['get', 'list', 'roomsOf']) {
+    if (typeof store[method] !== 'function') continue;
+    const original = store[method].bind(store);
+    store[method] = async (...args) => {
+      const out = await original(...args);
+      for (const doc of [out].flat()) if (doc?.members) seen.add(doc.id);
+      return out;
+    };
+  }
+  assert.deepEqual((await (await request('/api/rooms')).json()).rooms.map(r => r.id), ['room-one']);
+  assert.equal((await request('/api/me', { body: { name: '새 이름', color: '#112233' } })).status, 200);
+  assert.equal((await store.get('rooms', 'room-one')).members.find(m => m.uid === 'me').name, '새 이름');
+  assert.ok(!seen.has('secret'), [...seen].join());
+});

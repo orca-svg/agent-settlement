@@ -8,8 +8,9 @@ export function registerAccountRoutes(routes, { store, authenticate, auth, clock
   });
   routes.get('/api/me', async ({ req }) => {
     const me = await authenticate(req);
-    // 처음 들어온 사람은 견본 중 무작위 색으로 시작한다. 저장해 두어 다시 열어도 같은 색이다
-    const profile = await store.get('users', me.uid) || await store.put('users', { id: me.uid, name: me.name, color: randomProfileColor() });
+    // 처음 들어온 사람은 견본 중 무작위 색으로 시작한다. 저장해 두어 다시 열어도 같은 색이다.
+    // 이 GET은 줄에 서지 않으므로, 동시에 와도 색이 하나로 정해지게 없을 때만 넣는다
+    const profile = await store.get('users', me.uid) || await store.putIfAbsent('users', { id: me.uid, name: me.name, color: randomProfileColor() });
     return { profile };
   });
   routes.post('/api/me', async ({ req }) => {
@@ -17,17 +18,16 @@ export function registerAccountRoutes(routes, { store, authenticate, auth, clock
     const input = await readJson(req);
     if (!input || typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 40 || !/^#[0-9a-f]{6}$/i.test(input.color)) throw new HttpError(400, '이름(1~40자)과 프로필 색을 확인해 주세요');
     const profile = await store.put('users', { id: me.uid, name: input.name.trim(), color: input.color });
-    for (const room of await store.list('rooms')) {
-      if (room.members.some(m => m.uid === me.uid)) {
-        await store.put('rooms', { ...room, members: room.members.map(m => m.uid === me.uid ? { ...m, name: profile.name, color: profile.color } : m) });
-        await store.appendEvent(room.id, { at: clock().toISOString(), from: 'system', to: 'all', kind: 'profile_updated', text: '참여자 프로필이 바뀌었어요.' });
-      }
+    for (const room of await store.roomsOf(me.uid)) {
+      await store.put('rooms', { ...room, members: room.members.map(m => m.uid === me.uid ? { ...m, name: profile.name, color: profile.color } : m) });
+      await store.appendEvent(room.id, { at: clock().toISOString(), from: 'system', to: 'all', kind: 'profile_updated', text: '참여자 프로필이 바뀌었어요.' });
     }
     return { profile };
   });
   routes.get('/api/rooms', async ({ req }) => {
     const me = await authenticate(req);
-    return { rooms: (await store.list('rooms')).filter(r => r.members.some(m => m.uid === me.uid)).map(({ id, name, dates }) => ({ id, name, dates })) };
+    // 서비스의 모든 방이 아니라 내가 멤버인 방만 읽는다(Firestore는 읽은 문서 수가 비용, #3)
+    return { rooms: (await store.roomsOf(me.uid)).map(({ id, name, dates }) => ({ id, name, dates })) };
   });
   routes.post('/api/me/delete', async ({ req }) => {
     const me = await authenticate(req, { allowDeleting: true });

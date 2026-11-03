@@ -7,6 +7,7 @@ import { MAX_RECEIPT } from '../http.mjs';
 import { allocateWithGemini } from '../agents/allocate.mjs';
 import { roomMemory, memoryKey } from '../agents/memory.mjs';
 import { isFlagged } from '../actions.mjs';
+import { supersedeDisputes } from '../agents/disputes.mjs';
 import { validateExpense } from './validate.mjs';
 import { extractReceipt } from './receipt.mjs';
 
@@ -65,6 +66,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     await store.put('expenses', saved);
     await store.put('rooms', { ...room, version: room.version + 1 });
     await store.appendEvent(room.id, { from: 'system', to: 'all', kind: 'expense_edited', text: `${subj(me.name)} ${obj(`‘${saved.title}’`)} 고쳤어요` });
+    await supersedeDisputes(store, room.id, exp, saved);
     return { expense: saved };
   });
 
@@ -75,6 +77,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     await store.delete('receipts', exp.id);
     await store.put('rooms', { ...room, version: room.version + 1 });
     await store.appendEvent(room.id, { from: 'system', to: 'all', kind: 'expense_deleted', text: `${subj(me.name)} ${obj(`‘${exp.title}’`)} 지웠어요` });
+    await supersedeDisputes(store, room.id, exp);
     return { deleted: exp.id };
   });
 
@@ -118,6 +121,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
         action: { type: 'confirm_line', ref: `${exp.id}:${it.id}`, for: exp.createdBy },
       });
     }
+    await supersedeDisputes(store, room.id, exp, saved);
     console.log(`[allocate] ${out.how} ${out.source} ${latencyMs}ms`);
     return { expense: saved, source: out.source, how: out.how, latencyMs };
   });
@@ -140,6 +144,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     await store.put('rooms', { ...room, version: room.version + 1 });
     const names = consumers.map((u) => room.members.find((m) => m.uid === u)?.name ?? u).join('·');
     await store.appendEvent(room.id, { from: me.uid, to: 'all', kind: 'line_confirmed', text: `${topic(`‘${item.name}’`)} ${whose(names)} 몫으로 확인했어요` });
+    await supersedeDisputes(store, room.id, exp, saved);
     return { expense: saved };
   });
 }

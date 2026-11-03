@@ -1,7 +1,7 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode, flaggedLines, blockedNotice, askedBy, shake, nudge } from '../public/ui.js';
+import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, disputeWaiting, disputeChoices, disputeNote, disputeStatus, disputeLive, flaggedLines, blockedNotice, askedBy, shake, nudge } from '../public/ui.js';
 import { reduceMotion } from '../public/motion.js';
 
 test('allocButton: 나눈 뒤 바뀐 게 없으면 막고, 남은 일을 알려 준다', () => {
@@ -26,6 +26,40 @@ test('esc: HTML 특수문자를 바꾼다', () => {
 test('restNote: 남은 원이 있을 때만 한 줄로 알린다', () => {
   assert.equal(restNote(0), '');
   assert.equal(restNote(1), '<p class="group-note">나누고 남은 ₩1은 낸 사람 몫에 더했어요.</p>');
+});
+
+test('disputeWaiting: 지출을 낸 사람과 이의를 낸 사람 중 아직 동의하지 않은 사람', () => {
+  const exp = { payer: 'me' };
+  assert.deepEqual(disputeWaiting({ by: 'ms', agreedBy: [] }, exp), ['me', 'ms']);
+  assert.deepEqual(disputeWaiting({ by: 'ms', agreedBy: ['me'] }, exp), ['ms']);
+  assert.deepEqual(disputeWaiting({ by: 'ms', agreedBy: ['ms', 'me'] }, exp), []);
+  assert.deepEqual(disputeWaiting({ by: 'me', agreedBy: [] }, exp), ['me']); // 낸 사람이 스스로 이의를 내도 한 번만
+});
+
+test('disputeNote: 동의·거부한 뒤 방 화면에 남길 한 줄. 지금 이의 상태로 만든다', () => {
+  const exp = { title: '2차 바', payer: 'me' };
+  const nameOf = (u) => ({ me: '나', ms: '민수', cs: '철수' })[u];
+  assert.equal(disputeNote({ status: 'proposed', by: 'ms', agreedBy: ['me'] }, exp, nameOf), '중재안에 동의했어요. 민수의 동의를 기다려요.');
+  assert.equal(disputeNote({ status: 'proposed', by: 'ms', agreedBy: ['ms'] }, { ...exp, payer: 'cs' }, nameOf), '중재안에 동의했어요. 철수의 동의를 기다려요.');
+  assert.equal(disputeNote({ status: 'resolved', by: 'ms', agreedBy: ['ms', 'me'] }, exp, nameOf), '양쪽이 동의해서 ‘2차 바’를 중재안대로 다시 나눴어요. 청구서도 다시 보냈어요.');
+});
+
+test('disputeNote: 거부로 끝난 이의는 누가 거부했는지와 다음 단계를 알린다', () => {
+  const exp = { title: '2차 바', payer: 'me' };
+  const nameOf = (u) => ({ me: '나', ms: '민수', cs: '철수' })[u];
+  assert.equal(disputeNote({ status: 'dismissed', by: 'ms', agreedBy: ['ms'], rejectedBy: 'me' }, exp, nameOf), '내가 중재안을 거부해서 ‘2차 바’ 이의가 끝났어요. 지금 배분 그대로 정산해요.');
+  assert.equal(disputeNote({ status: 'withdrawn', by: 'ms', agreedBy: [], rejectedBy: 'ms' }, exp, nameOf), '민수가 중재안을 거부하고 ‘2차 바’ 이의를 거뒀어요. 지금 배분 그대로 정산해요.');
+});
+
+test('disputeChoices: 중재안이 살아 있는 동안 당사자만 동의·거부한다', () => {
+  const exp = { payer: 'me' };
+  const d = (over) => ({ status: 'proposed', by: 'ms', agreedBy: ['ms'], ...over });
+  assert.deepEqual(disputeChoices(d(), exp, 'me'), { agree: true, reject: true });
+  assert.deepEqual(disputeChoices(d(), exp, 'ms'), { agree: false, reject: true }); // 비서가 먼저 동의했어도 사람은 물러설 수 있다
+  assert.deepEqual(disputeChoices(d(), exp, 'yh'), { agree: false, reject: false });
+  for (const status of ['open', 'resolved', 'withdrawn', 'dismissed', 'superseded']) {
+    assert.deepEqual(disputeChoices(d({ status }), exp, 'me'), { agree: false, reject: false }, status);
+  }
 });
 
 test('whose: 나는 내 몫, 다른 이름은 그대로', () => {
@@ -98,6 +132,28 @@ test('sendMode: 컴퓨터에서 토스 링크가 있으면 QR만, 휴대폰이�
 test('qrImageUrl: 빈 값이면 null', () => {
   assert.equal(qrImageUrl(''), null);
   assert.equal(qrImageUrl(null), null);
+});
+
+test('disputeNote: 지출이 바뀌어 닫힌 이의도 알린다', () => {
+  const exp = { title: '2차 바', payer: 'me' };
+  assert.equal(disputeNote({ status: 'superseded', by: 'ms', agreedBy: ['ms', 'me'] }, exp, () => '나'), '지출이 바뀌어 ‘2차 바’ 이의가 닫혔어요.');
+});
+
+test('disputeStatus: 이의 목록의 한 줄. 열린 이의는 누구를 기다리는지, 끝난 이의는 어떻게 끝났는지', () => {
+  const exp = { title: '2차 바', payer: 'me' };
+  const nameOf = (u) => ({ me: '나', ms: '민수', cs: '철수' })[u];
+  const d = (over) => ({ status: 'proposed', by: 'ms', agreedBy: [], ...over });
+  assert.equal(disputeStatus(d({ status: 'open' }), exp, nameOf), '아직 중재 전이에요');
+  assert.equal(disputeStatus(d({ agreedBy: ['ms'] }), exp, nameOf), '중재안이 나왔어요. 나의 동의를 기다려요');
+  assert.equal(disputeStatus(d(), exp, nameOf), '중재안이 나왔어요. 나·민수의 동의를 기다려요');
+  assert.equal(disputeStatus(d({ status: 'resolved', agreedBy: ['ms', 'me'] }), exp, nameOf), '양쪽이 동의해서 다시 나눴어요');
+  assert.equal(disputeStatus(d({ status: 'withdrawn', rejectedBy: 'ms' }), exp, nameOf), '민수가 중재안을 거부하고 이의를 거뒀어요');
+  assert.equal(disputeStatus(d({ status: 'dismissed', rejectedBy: 'me' }), exp, nameOf), '내가 중재안을 거부해서 끝났어요');
+  assert.equal(disputeStatus(d({ status: 'superseded' }), exp, nameOf), '지출이 바뀌어 닫혔어요');
+});
+
+test('disputeLive: 열린(open·proposed) 이의만', () => {
+  assert.deepEqual(['open', 'proposed', 'resolved', 'withdrawn', 'dismissed', 'superseded'].map((status) => disputeLive({ status })), [true, true, false, false, false, false]);
 });
 
 // 영수증 사진 버튼을 (라벨, capture 여부)로 읽는다. 모두 영수증 입력(data-receipt)이고 이미지만 받아야 한다.
@@ -257,4 +313,24 @@ test('nudge: 움직임이 허용되면 흔들고, 줄이면 위치·색 없이 �
     mock.timers.reset();
     reduceMotion.matches = false;
   }
+});
+
+// 밀어서 보낸 뒤 안내. iPhone Safari는 'Open in "Toss"?'를 묻는 동안 페이지가 그대로 보여서, 시간이 지났다고 실패로 단정하면
+// 사용자가 Open을 눌러 토스가 열려도 '열리지 않았어요'가 남는다. 시간이 지나면 복사 안내만 띄우고, 나중에 토스로 넘어갔다 돌아오면 '보냈나요?'로 바꾼다
+test('sendFollowUp: iOS 확인 창 때문에 늦게 앱으로 넘어가도 돌아오면 보냈는지 묻는다', () => {
+  let p = { id: 't1', left: false };
+  let r = sendFollowUp(p, 'timeout');
+  assert.equal(r.note, 'fallback');
+  assert.deepEqual(r.pending, p); // 기다림을 끝내지 않는다
+  r = sendFollowUp(r.pending, 'hidden');
+  assert.equal(r.note, null);
+  assert.equal(r.pending.left, true);
+  r = sendFollowUp(r.pending, 'visible');
+  assert.deepEqual(r, { pending: null, note: 'back' });
+});
+
+test('sendFollowUp: 바로 앱으로 넘어갔으면 시간이 지나도 실패 안내를 띄우지 않는다', () => {
+  let r = sendFollowUp({ id: 't1', left: false }, 'hidden');
+  assert.equal(sendFollowUp(r.pending, 'timeout').note, null);
+  assert.deepEqual(sendFollowUp(null, 'visible'), { pending: null, note: null });
 });

@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "test:emulators": "firebase emulators:exec --only auth,firestore,storage --project demo-agent-settlement \"node --test\""
   },
   "dependencies": {
     "firebase-admin": "14.5.0"

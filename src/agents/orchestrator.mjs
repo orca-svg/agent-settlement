@@ -3,37 +3,44 @@
 // LLM은 중재안만 낸다. 금액은 public/core.js가 계산한다.
 import { randomUUID } from 'node:crypto';
 import { ledger, settle, won, dayLabel } from '../../public/core.js';
-import { topic, subj, obj } from '../../public/ui.js';
+import { topic, subj, obj, disputeRejected } from '../../public/ui.js';
 import { HttpError } from '../http.mjs';
 import { isFlagged, awaitsSender } from '../actions.mjs';
 import { evaluateInvoice, nextSendAt } from './rules.mjs';
 import { tossSendLink, payoutFallback } from '../payments/toss.mjs';
 import { signQrToken, QR_TTL_MS } from '../payments/qr.mjs';
 import { mediateWithGemini } from './mediate.mjs';
+import { OPEN } from './disputes.mjs';
 import { findBank } from '../../public/banks.js';
 
-const OPEN = ['open', 'proposed'];
 const STALE = '지출이 바뀌었어요. 청구서를 다시 보낸 뒤 새 금액으로 보내 주세요';
 const DEFAULT_RULES = { autoAccept: 0, sendWhen: 'now', onDispute: 'ask' };
 // 보냈어요 뒤 받는 사람이 답이 없으면 다시 묻는 때(sentAt 기준). 1일 뒤, 3일 뒤 두 번. 그 뒤로는 할 일 카드만 남는다
 const DAY_MS = 24 * 3600_000;
 const RECEIPT_REMINDERS = [1 * DAY_MS, 3 * DAY_MS];
+// tick이 할 일이 있는 송금 상태. 아직 안 보냈으면 때가 됐는지·지출이 바뀌었는지, 보냈으면 받았나요 다시 알림
+const TICK_STATUSES = ['scheduled', 'due', 'opened', 'sent'];
 
 export function createOrchestrator({ store, gemini = null, clock = () => new Date(), evidenceFor = async () => [], counterFor = async () => [] }) {
   const say = (roomId, ev) => store.appendEvent(roomId, ev);
   const settingsOf = async (uid) => (await store.get('agents', uid)) ?? { uid, memory: [], rules: DEFAULT_RULES, payout: null };
 
-  async function load(roomId) {
+  async function loadRoom(roomId) {
     const room = await store.get('rooms', roomId);
     if (!room) throw new HttpError(404, '방을 찾을 수 없어요');
-    const expenses = await store.list('expenses', { roomId });
     const name = (uid) => room.members.find((m) => m.uid === uid)?.name ?? uid;
+    return { room, name };
+  }
+
+  async function load(roomId) {
+    const { room, name } = await loadRoom(roomId);
+    const expenses = await store.list('expenses', { roomId });
     return { room, expenses, name };
   }
 
-  // 이 사람이 함께한 지출 중 근거가 있는 첫 지출. 이미 이의가 해결된 지출은 다시 보지 않는다
-  async function firstEvidence(uid, room, expenses, resolved) {
-    for (const exp of expenses.filter((e) => e.present.includes(uid) && !resolved.has(`${uid}:${e.id}`))) {
+  // 이 사람이 함께한 지출 중 근거가 있는 첫 지출. 이미 끝난 이의(동의로 해결했거나 거부로 끝난)는 다시 보지 않는다
+  async function firstEvidence(uid, room, expenses, ended) {
+    for (const exp of expenses.filter((e) => e.present.includes(uid) && !ended.has(`${uid}:${e.id}`))) {
       const evidence = await evidenceFor(uid, exp, room);
       if (evidence.length) return { exp, evidence };
     }
@@ -63,13 +70,13 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     if (stale.length) await say(roomId, { from: actorUid, to: 'all', kind: 'invoices_superseded', text: '지출이 바뀌어 다시 보내요' });
 
     const rows = ledger(room, expenses, room.policy);
-    const resolved = new Set((await store.list('disputes', { roomId })).filter((d) => d.status === 'resolved').map((d) => `${d.by}:${d.expenseId}`));
+    const ended = new Set((await store.list('disputes', { roomId })).filter((d) => !OPEN.includes(d.status)).map((d) => `${d.by}:${d.expenseId}`));
     await say(roomId, { from: actorUid, to: 'all', kind: 'invoices_sent', text: `지출 ${expenses.length}건으로 각자의 비서에게 청구서를 보냈어요`, meta: `지출이 바뀔 때마다 새로 보내는 청구서의 ${room.version}번째 묶음이에요` });
     const invoices = [];
     for (const m of room.members) {
       const r = rows[m.uid];
       const base = { id: `${roomId}:v${room.version}:${m.uid}`, roomId, version: room.version, to: m.uid, owed: r.owed, paid: r.paid, net: r.net };
-      const found = await firstEvidence(m.uid, room, expenses, resolved);
+      const found = await firstEvidence(m.uid, room, expenses, ended);
       const { decision, reasons } = evaluateInvoice({ invoice: base, settings: await settingsOf(m.uid), evidence: found?.evidence ?? [] });
       // 청구서는 방 사람 모두가 읽고 위치 요약을 지워도 남으므로 요약 글은 빼고, 붙었다는 사실만 hasLocationSummary로 둔다
       const hidden = new Set((found?.evidence ?? []).filter(e => e.locationId).map(e => e.summary));
@@ -139,6 +146,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     if (!dispute || dispute.roomId !== roomId) throw new HttpError(404, '이의를 찾을 수 없어요');
     const { room, expenses } = await load(roomId);
     const exp = expenses.find((e) => e.id === dispute.expenseId);
+    if (!exp) throw new HttpError(409, '지출이 지워져 이 이의는 닫혔어요'); // 지출을 지울 때 이의도 닫지만, 옛 데이터에는 이의만 남아 있을 수 있다
     return { dispute, room, exp, parties: [exp.payer, dispute.by] };
   }
 
@@ -195,6 +203,28 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     await say(roomId, { from: 'mediator', to: 'all', kind: 'dispute_resolved', text: `양쪽이 동의해서 ${obj(`‘${exp.title}’`)} 중재안대로 다시 나눴어요` });
     await sendInvoices(roomId, actorUid);
     return resolved;
+  }
+
+  // 중재안을 거부하면 이의가 끝나고 지출은 지금 배분 그대로 둔 채 정산이 이어진다.
+  // 이의를 낸 사람이 거부하면 철회(withdrawn), 지출을 낸 사람이 거부하면 기각(dismissed).
+  // 비서가 근거 규칙으로 먼저 동의해 뒀어도 사람은 물러설 수 있어서, 이미 동의한 당사자도 거부할 수 있다.
+  // 같은 사람이 같은 거부를 다시 보내면 처음 결과를 돌려준다(기록·송금이 늘지 않는다)
+  async function reject(roomId, disputeId, actorUid, { reason } = {}) {
+    const { dispute, exp, parties } = await disputeOf(roomId, disputeId);
+    if (!parties.includes(actorUid)) throw new HttpError(403, '이의 당사자만 거부할 수 있어요');
+    if (disputeRejected(dispute) && dispute.rejectedBy === actorUid) return dispute;
+    if (dispute.status !== 'proposed') throw new HttpError(409, dispute.status === 'open' ? '아직 중재안이 없어요' : '이미 끝난 이의예요');
+    const why = typeof reason === 'string' ? reason.replace(/\s+/g, ' ').trim().slice(0, 100).trim() : '';
+    const status = actorUid === dispute.by ? 'withdrawn' : 'dismissed';
+    const saved = { ...dispute, status, rejectedBy: actorUid, ...(why ? { rejectReason: why } : {}) };
+    await store.put('disputes', saved);
+    await say(roomId, {
+      from: actorUid, to: 'all', kind: `dispute_${status}`,
+      text: status === 'withdrawn' ? `중재안을 거부하고 ‘${exp.title}’ 이의를 거뒀어요` : `중재안을 거부해서 ‘${exp.title}’ 이의가 끝났어요`,
+      ...(why ? { meta: `사유: ${why}` } : {}),
+    });
+    await settleIfReady(roomId);
+    return saved;
   }
 
   // 지금 version의 청구서에 묻는 중인 것도, 열린 이의도 없으면 송금으로 넘어간다
@@ -337,13 +367,21 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return saved;
   }
 
-  // 주기적으로 부른다(로컬 30초, 배포는 Cloud Scheduler). 때가 된 송금을 알리고, 보냈는데 확인이 없으면 1일·3일 뒤에 다시 묻는다
+  // 주기적으로 부른다(로컬 30초, 배포는 Cloud Scheduler). 때가 된 송금을 알리고, 보냈는데 확인이 없으면 1일·3일 뒤에 다시 묻는다.
+  // Firestore에서는 읽은 문서 수가 비용이라(#3) 끝난 송금(confirmed·superseded)은 읽지 않고, 방은 tick 한 번에 방마다 한 번만 읽는다.
+  // 처리할 송금은 고치기 전에 한꺼번에 받아 둔다(이번 tick에 due가 된 송금을 다시 보지 않게)
   async function tick() {
     const now = clock();
     let due = 0;
     let reminded = 0;
-    for (const t of await store.list('transfers')) {
-      const { room, name } = await load(t.roomId);
+    const rooms = new Map();
+    const roomOf = (roomId) => {
+      if (!rooms.has(roomId)) rooms.set(roomId, loadRoom(roomId));
+      return rooms.get(roomId);
+    };
+    const active = (await Promise.all(TICK_STATUSES.map((status) => store.list('transfers', { status })))).flat();
+    for (const t of active) {
+      const { room, name } = await roomOf(t.roomId);
       if (['scheduled', 'due', 'opened'].includes(t.status) && t.version !== room.version) {
         await store.put('transfers', { ...t, status: 'superseded' });
       } else if (t.status === 'scheduled' && new Date(t.remindAt) <= now) {
@@ -369,5 +407,5 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return { due, reminded };
   }
 
-  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers, setPayout, approveTransfer, qrFor, markSent, reportNotReceived, confirmReceipt, tick };
+  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, reject, createTransfers, setPayout, approveTransfer, qrFor, markSent, reportNotReceived, confirmReceipt, tick };
 }

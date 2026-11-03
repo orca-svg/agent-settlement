@@ -71,11 +71,14 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
  * @typedef {{ kind: 'left_at'|'not_present'|'text', time?: string, stayedUntil?: string, summary: string, locationId?: string, source?: 'timeline_export', uncertain?: boolean, requiresHumanApproval?: boolean }} Evidence */
 
 /**
+ * resolved는 양쪽이 동의해 지출을 다시 나눈 이의. withdrawn은 이의를 낸 사람이, dismissed는 지출을 낸 사람이 중재안을 거부해
+ * 지출을 그대로 둔 채 끝난 이의다(rejectedBy가 거부한 사람, rejectReason은 적었을 때만 있는 한 줄 사유).
+ * superseded는 지출의 배분이 바뀌거나 지출이 지워져 닫힌 이의다(src/agents/disputes.mjs).
  * @typedef {{
  *   id: string, roomId: string, expenseId: string, by: string, claim: string, evidence: Evidence[],
- *   status: 'open'|'proposed'|'resolved',
+ *   status: 'open'|'proposed'|'resolved'|'withdrawn'|'dismissed'|'superseded',
  *   proposal?: { summary: string, alloc: Record<string, LineAlloc>, source: string },
- *   agreedBy: string[],
+ *   agreedBy: string[], rejectedBy?: string, rejectReason?: string,
  * }} Dispute
  */
 

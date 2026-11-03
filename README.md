@@ -96,7 +96,7 @@ npm test           # 계산 sanity check
 
 - 키가 없거나 서버에 닿지 않으면 **규칙 모드**로 동작합니다. 이때 화면 상단에도 그렇게 표시합니다.
 - 모델은 `GEMINI_MODEL`로 고를 수 있습니다. 생략하면 이 키로 쓸 수 있는 최신 Flash 모델을 자동으로 고릅니다.
-- 받을 계좌는 저장소에 넣을 때 잠급니다(#8, #10). 열쇠는 `PAYOUT_ENC_KEY`(base64, 32바이트)입니다. 로컬에서는 없어도 개발용 열쇠로 잠그고 경고만 띄웁니다. 직접 정하려면 `.env`에 추가합니다(bash·Git Bash 기준. 앞의 줄바꿈은 `.env` 마지막 줄에 붙지 않게 하려는 것).
+- 받을 계좌와 이의에 붙인 위치 요약은 저장소에 넣을 때 잠급니다(#7, #8, #10). 열쇠는 `PAYOUT_ENC_KEY`(base64, 32바이트)입니다. 로컬에서는 없어도 개발용 열쇠로 잠그고 경고만 띄웁니다. 직접 정하려면 `.env`에 추가합니다(bash·Git Bash 기준. 앞의 줄바꿈은 `.env` 마지막 줄에 붙지 않게 하려는 것).
   ```bash
   printf '\nPAYOUT_ENC_KEY=%s\n' "$(node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64'))")" >> .env
   ```
@@ -108,6 +108,7 @@ DEV_SEED=1 npm start   # http://localhost:4500/room.html → '데모 방 만들�
 ```
 
 - 지출 남기기 → 줄마다 나누기 → 청구서 보내기 → 이의·중재 → 송금 → 보냈어요·받았어요까지 한 방에서 이어집니다. 사람을 바꿔 가며(나·철수·영희·민수) 각자의 할 일을 확인합니다.
+- 중재안이 나오면 이의의 당사자는 동의하거나 거부할 수 있습니다. 둘 다 동의하면 지출을 중재안대로 다시 나누고 청구서를 다시 보내고, 한쪽이라도 거부하면 이의가 끝나고 지금 배분 그대로 송금으로 넘어갑니다. 지출을 고치거나 지우면 그 지출의 열린 이의도 함께 닫힙니다. 진행 중인 이의와 끝난 이의는 방 화면의 '이의' 목록에서 다시 열 수 있습니다.
 - 보낼 때가 된 송금은 서버가 30초마다 확인해 알립니다. 배포에서는 Cloud Scheduler가 `x-cron-secret: $CRON_SECRET`을 붙여 `POST /api/cron/tick`을 부릅니다.
 - 휴대폰에서는 밀어서 보내기를 놓는 순간 토스 송금 화면(`supertoss://send?…`)을 엽니다. 앱이 없으면 1.5초 뒤 계좌번호를 복사했다고 안내합니다. 컴퓨터(마우스로 가리키는 기기)에서는 토스가 열리지 않으니 슬라이더 대신 QR만 보여 주고, 그 QR을 휴대폰으로 찍어 넘깁니다. 토스 링크가 없는 은행이면 컴퓨터에서도 계좌 복사 슬라이더를 남깁니다. 링크의 경로·파라미터는 실기기에서 확인했습니다(#8).
 
@@ -125,7 +126,7 @@ gcloud run deploy agent-settlement --source . --region asia-northeast1 \
   --set-env-vars NODE_ENV=production,CRON_SECRET=<임의의 긴 문자열>
 ```
 
-- 계좌 암호화 열쇠(`PAYOUT_ENC_KEY`)는 **위 배포 명령을 처음 실행하기 전에** 한 번만 Secret Manager에 만들고, Cloud Run 서비스 계정이 읽을 수 있게 합니다(bash·Git Bash 기준). 배포(`NODE_ENV=production`, `Dockerfile`이 넣어 줌)에서 이 열쇠가 없으면 서버가 시작하지 않고 이전 버전이 계속 동작합니다. **열쇠를 잃거나 바꾸면 이미 저장된 계좌를 풀 수 없으니**(#3 Firestore 이후 특히) 한 번 만든 열쇠는 그대로 둡니다. 그래서 배포 명령은 `latest` 대신 버전 `1`로 고정합니다.
+- 계좌·위치 요약 암호화 열쇠(`PAYOUT_ENC_KEY`)는 **위 배포 명령을 처음 실행하기 전에** 한 번만 Secret Manager에 만들고, Cloud Run 서비스 계정이 읽을 수 있게 합니다(bash·Git Bash 기준). 배포(`NODE_ENV=production`, `Dockerfile`이 넣어 줌)에서 이 열쇠가 없으면 서버가 시작하지 않고 이전 버전이 계속 동작합니다. **열쇠를 잃거나 바꾸면 이미 저장된 계좌와 위치 요약을 풀 수 없으니**(#3 Firestore 이후 특히) 한 번 만든 열쇠는 그대로 둡니다. 그래서 배포 명령은 `latest` 대신 버전 `1`로 고정합니다.
   ```bash
   # 0) 서비스 계정 확인: 비어 있거나 …-compute@developer.gserviceaccount.com이면 2)를 그대로, 다른 계정이면 2)의 --member를 그 계정으로 바꾼다
   gcloud run services describe agent-settlement --region asia-northeast1 --format='value(spec.template.spec.serviceAccountName)'

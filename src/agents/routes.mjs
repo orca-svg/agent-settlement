@@ -36,6 +36,12 @@ export function registerAgentRoutes(routes, { orchestrator, member, overLimit = 
     return orchestrator.agree(params.id, params.did, me.uid);
   });
 
+  // 중재안 거부: 이의가 끝나고 지금 배분 그대로 정산이 이어진다. { reason? }는 한 줄 사유
+  routes.post('/api/rooms/:id/disputes/:did/reject', async ({ req, params }) => {
+    const { me } = await member(req, params.id);
+    return orchestrator.reject(params.id, params.did, me.uid, await readJson(req));
+  });
+
   // 받을 계좌(#8이 설정 화면을 만든다). 계좌번호는 송금 당사자에게만 내려간다(GET room의 redactTransfer)
   routes.post('/api/rooms/:id/payout', async ({ req, params }) => {
     const { me } = await member(req, params.id);

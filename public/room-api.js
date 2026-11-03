@@ -1,7 +1,7 @@
 // 실제 방 화면이 서버와 이야기하는 곳. 팀원 확장 지점:
 //   #2 로그인: initAuth 이후 currentUid()는 Firebase uid. api()만 ID 토큰을 붙인다.
 //   setCurrentUid()는 명시적인 비운영 시드 모드에서만 동작한다.
-//   #3 Firestore: subscribeRoom()을 onSnapshot으로 바꾼다
+//   #3 Firestore: subscribeRoom()은 서버가 Firestore면 onSnapshot, 아니면 폴링(호출 방식은 같다)
 import { API_BASE } from './api.js';
 import { initAuth, currentUser, authOptions, token } from './auth.js';
 
@@ -40,24 +40,70 @@ export async function api(path, { method = 'GET', body, signal, keepalive = fals
   return json;
 }
 
-// 비서 기록을 2초마다 가져와 새 것만 onEvents에 넘긴다. 돌려준 함수를 부르면 멈춘다.
+// 비서 기록 중 새 것만 onEvents에 넘긴다. 돌려준 함수를 부르면 멈춘다.
+// 서버가 Firestore를 쓰고 로그인했으면 rooms/{roomId}/events를 onSnapshot으로 받고(#3), 아니면 2초마다 가져온다.
+// 실시간 연결이 막히면(규칙 미배포, 권한 없음 등) 받은 곳부터 폴링으로 이어 간다.
 export function subscribeRoom(roomId, onEvents, { intervalMs = 2000 } = {}) {
-  let after = 0;
   let stopped = false;
-  let timer = 0;
-  const tick = async () => {
-    try {
-      const { events } = await api(`/api/rooms/${encodeURIComponent(roomId)}/events?after=${after}`);
-      if (events.length && !stopped) {
-        after = events.at(-1).seq;
-        onEvents(events);
-      }
-    } catch {}
-    if (!stopped) timer = setTimeout(tick, intervalMs);
+  let stop = () => {};
+  let after = 0;
+  const deliver = (events) => {
+    const fresh = events.filter((e) => e.seq > after).sort((a, b) => a.seq - b.seq);
+    if (!fresh.length || stopped) return;
+    after = fresh.at(-1).seq;
+    onEvents(fresh);
   };
-  tick();
+  const poll = () => {
+    let timer = 0;
+    const tick = async () => {
+      try {
+        deliver((await api(`/api/rooms/${encodeURIComponent(roomId)}/events?after=${after}`)).events);
+      } catch {}
+      if (!stopped) timer = setTimeout(tick, intervalMs);
+    };
+    tick();
+    stop = () => clearTimeout(timer);
+  };
+  (async () => {
+    const db = await realtimeDb().catch(() => null);
+    if (stopped) return;
+    if (!db) return poll();
+    const { collection, query, orderBy, onSnapshot } = db.sdk;
+    stop = onSnapshot(
+      query(collection(db.instance, 'rooms', roomId, 'events'), orderBy('seq')),
+      (snap) => deliver(snap.docChanges().filter((c) => c.type === 'added').map((c) => c.doc.data())),
+      () => { if (!stopped) poll(); },
+    );
+  })();
   return () => {
     stopped = true;
-    clearTimeout(timer);
+    stop();
   };
+}
+
+const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/13.1.0';
+let realtimeStarting;
+// 로그인(#2)이 만든 Firebase 앱에 Firestore를 붙인다. 실시간을 못 쓰면 null.
+// 서버가 Firestore가 아니라는 답만 기억하고, 아직 로그인 전이거나 설정·SDK를 못 받았으면 다음 구독 때 다시 본다
+function realtimeDb() {
+  return realtimeStarting ??= (async () => {
+    await initAuth();
+    const config = await (await fetch(`${API_BASE}/api/config`)).json();
+    if (!config.realtime?.firestore) return null;
+    if (!currentUser()) {
+      realtimeStarting = undefined;
+      return null;
+    }
+    const [{ getApp }, sdk] = await Promise.all([import(`${FIREBASE_SDK}/firebase-app.js`), import(`${FIREBASE_SDK}/firebase-firestore.js`)]);
+    const instance = sdk.getFirestore(getApp());
+    const emulator = config.realtime.emulator;
+    if (emulator && ['localhost', '127.0.0.1'].includes(location.hostname)) {
+      const [host, port] = emulator.split(':');
+      sdk.connectFirestoreEmulator(instance, host, Number(port));
+    }
+    return { sdk, instance };
+  })().catch((error) => {
+    realtimeStarting = undefined; // 잠깐의 네트워크·CDN 실패가 다음 구독까지 막지 않게(auth.js initAuth와 같다)
+    throw error;
+  });
 }

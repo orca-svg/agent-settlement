@@ -30,6 +30,46 @@ export function allocLabel({ source, how, latencyMs }) {
 // 사람별 몫 아래 한 줄. 원 단위로 나누고 남은 돈이 있을 때만 보인다(core.js의 shares().rest).
 export const restNote = (rest) => (rest ? `<p class="group-note">나누고 남은 ${won(rest)}은 낸 사람 몫에 더했어요.</p>` : '');
 
+// 이의 당사자(지출을 낸 사람·이의를 낸 사람) 중 아직 중재안에 동의하지 않은 사람. 같은 사람이면 한 번만
+export const disputeWaiting = (d, exp) => [...new Set([exp.payer, d.by])].filter((u) => !d.agreedBy.includes(u));
+
+// 아직 열린 이의(중재 전·중재안이 나온 뒤). 열린 이의가 하나라도 있으면 송금이 만들어지지 않는다
+export const disputeLive = (d) => d.status === 'open' || d.status === 'proposed';
+
+// 중재안을 거부해서 끝난 이의(이의를 낸 사람이 거두면 withdrawn, 지출을 낸 사람이 거부하면 dismissed)
+export const disputeRejected = (d) => d.status === 'withdrawn' || d.status === 'dismissed';
+
+// 이의 시트에서 이 사람이 누를 수 있는 것. 중재안이 살아 있는(proposed) 동안 당사자만 동의·거부한다.
+// 비서가 근거 규칙으로 먼저 동의해 뒀어도 사람은 거부로 물러설 수 있어서, 동의했는지와 상관없이 거부는 열어 둔다
+export function disputeChoices(d, exp, uid) {
+  const live = d.status === 'proposed' && [exp.payer, d.by].includes(uid);
+  return { agree: live && !d.agreedBy.includes(uid), reject: live };
+}
+
+// 방 화면 '이의' 목록의 한 줄(글자만, 그리는 쪽에서 esc). 열린 이의는 누구를 기다리는지, 끝난 이의는 어떻게 끝났는지
+export function disputeStatus(d, exp, nameOf) {
+  if (d.status === 'open') return '아직 중재 전이에요';
+  if (d.status === 'proposed') {
+    const waiting = disputeWaiting(d, exp);
+    return `중재안이 나왔어요${waiting.length ? `. ${waiting.map(nameOf).join('·')}의 동의를 기다려요` : ''}`;
+  }
+  if (d.status === 'resolved') return '양쪽이 동의해서 다시 나눴어요';
+  if (d.status === 'withdrawn') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부하고 이의를 거뒀어요`;
+  if (d.status === 'dismissed') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부해서 끝났어요`;
+  return '지출이 바뀌어 닫혔어요';
+}
+
+// 동의·거부해서 시트를 닫은 뒤 방 화면에 남기는 한 줄(글자만, 그리는 쪽에서 esc).
+// 상대가 나중에 동의하거나 거부해도 맞도록 그 순간이 아니라 지금 이의 상태로 만든다
+export function disputeNote(d, exp, nameOf) {
+  if (d.status === 'resolved') return `양쪽이 동의해서 ${obj(`‘${exp.title}’`)} 중재안대로 다시 나눴어요. 청구서도 다시 보냈어요.`;
+  if (d.status === 'superseded') return `지출이 바뀌어 ‘${exp.title}’ 이의가 닫혔어요.`;
+  if (d.status === 'withdrawn') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부하고 ‘${exp.title}’ 이의를 거뒀어요. 지금 배분 그대로 정산해요.`;
+  if (d.status === 'dismissed') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부해서 ‘${exp.title}’ 이의가 끝났어요. 지금 배분 그대로 정산해요.`;
+  const waiting = disputeWaiting(d, exp);
+  return `중재안에 동의했어요.${waiting.length ? ` ${waiting.map(nameOf).join('·')}의 동의를 기다려요.` : ''}`;
+}
+
 // 영수증 사진을 넣는 버튼(#6). capture가 붙은 입력은 iOS·Android 모두 고르는 메뉴 없이 카메라로 바로 가고,
 // 없으면 운영체제가 정한다(iOS는 사진 보관함·사진 찍기 메뉴, Android 14 이상 Chrome은 카메라 없는 사진 선택기).
 // 그래서 휴대폰·태블릿(touch)에는 갈 곳이 정해진 버튼 둘을 같은 크기로 두고, 컴퓨터에는 capture 없는 하나만 둔다.
@@ -54,7 +94,8 @@ export const tile = (kind) => `<span class="tile ${ICONS[kind] ? kind : 'shop'}"
 export const CHEVRON = '<svg class="chev" width="8" height="14" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 export const CHECK = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 export const ALERT = '<svg class="alert-ico" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5l9 15.5H3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4.5M12 17.4v.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-export const ARROW ='<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+export const CROSS = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>';
+export const ARROW = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 // 데스크톱에서 휴대폰으로 넘길 때 보여줄 QR 이미지 주소(#8).
 // 외부 서비스(api.qrserver.com)를 쓴다. 오프라인 데모가 필요해지면 이 함수만 바꾸면 된다.
@@ -151,6 +192,16 @@ export function sendMode(t, { computer }) {
 }
 
 // 비서끼리 기록 한 줄
+// 밀어서 보낸 뒤 송금 화면에 띄울 안내. pending은 { id, left }(페이지가 한 번이라도 가려졌는지), event는 'timeout'·'hidden'·'visible'.
+// 시간이 지나도 페이지가 그대로면 앱이 없거나 iOS가 'Open in "Toss"?'를 묻는 중이라 실패로 단정하지 않는다:
+// 복사 안내만 띄우고 기다림은 남겨, 나중에 토스로 넘어갔다 돌아오면 '보냈나요?'(back)로 바꾼다
+export function sendFollowUp(pending, event) {
+  if (!pending) return { pending: null, note: null };
+  if (event === 'hidden') return { pending: { ...pending, left: true }, note: null };
+  if (event === 'visible') return pending.left ? { pending: null, note: 'back' } : { pending, note: null };
+  return { pending, note: pending.left ? null : 'fallback' }; // timeout
+}
+
 // 비서끼리 기록 한 줄. 시스템 로그가 아니라 비서들의 대화처럼 보이게 한다: 말은 말풍선에, 받는 사람은 '○○에게'로,
 // 근거(규칙·수치)는 말풍선 밖에 접어 두어 궁금한 사람만 연다. 같은 분에 이어진 말은 시각을 비워 한 번만 보인다
 export const logItemHtml = ({ avatar, who, to = '', time = '', text, meta = '', tagHtml = '', enter = false, unread = false, extraHtml = '' }) => `<li class="${enter ? 'enter' : ''}${unread ? ' unread' : ''}">

@@ -94,3 +94,143 @@ test('낸 사람이 중재를 맡기지 않았으면 열린 이의로 묻고, �
   const proposed = await orch.mediate('demo-t', d.id, 'me');
   assert.equal(proposed.status, 'proposed');
 });
+
+// ---------------------------------------------------------------- 중재안 거부: 이의를 끝내고 지금 배분 그대로 정산한다
+const transfersOf = (store) => store.list('transfers', { roomId: 'demo-t' });
+const eventsOf = async (store, kind) => (await store.listEvents('demo-t')).filter((e) => e.kind === kind);
+
+test('지출을 낸 사람이 거부하면 이의가 끝나고(기각) 배분은 그대로, 송금이 이어진다', async () => {
+  const { store, orch, dispute } = await setup();
+  assert.equal((await transfersOf(store)).length, 0); // 열린 이의가 있는 동안은 송금이 없다
+  const out = await orch.reject('demo-t', dispute.id, 'me', { reason: '술은 같이 마셨어요' });
+  assert.deepEqual([out.status, out.rejectedBy, out.rejectReason], ['dismissed', 'me', '술은 같이 마셨어요']);
+  assert.equal((await store.get('disputes', dispute.id)).status, 'dismissed');
+  assert.equal((await store.get('expenses', 'demo-t-bar')).split, 'equal'); // 중재안은 반영하지 않는다
+  assert.equal((await store.get('rooms', 'demo-t')).version, 1);
+  const transfers = await transfersOf(store);
+  assert.ok(transfers.length > 0 && transfers.every((t) => t.version === 1));
+  const [ev] = await eventsOf(store, 'dispute_dismissed');
+  assert.equal(ev.from, 'me');
+  assert.match(ev.text, /거부/);
+  assert.match(ev.meta, /술은 같이 마셨어요/); // 사유가 양쪽 비서끼리 기록에 남는다
+  assert.deepEqual((await actionsFor(store, 'me')).filter((a) => a.type === 'agree_dispute'), []);
+});
+
+test('이의를 낸 사람이 거부하면 철회. 이미 동의했어도 이의가 끝난다', async () => {
+  const { store, orch, dispute } = await setup();
+  assert.deepEqual(dispute.agreedBy, ['ms']); // 근거 규칙으로 먼저 동의해 둔 상태
+  const out = await orch.reject('demo-t', dispute.id, 'ms');
+  assert.deepEqual([out.status, out.rejectedBy, out.rejectReason], ['withdrawn', 'ms', undefined]);
+  const [ev] = await eventsOf(store, 'dispute_withdrawn');
+  assert.equal(ev.from, 'ms');
+  assert.ok(!ev.meta); // 사유를 안 적으면 사실만 남긴다
+  assert.ok((await transfersOf(store)).length > 0);
+});
+
+test('거부는 당사자만(403), 중재안이 있는 이의에만(409)', async () => {
+  const { store, orch, dispute } = await setup();
+  await assert.rejects(orch.reject('demo-t', dispute.id, 'yh'), (e) => e.status === 403);
+  await store.put('disputes', { ...dispute, status: 'open' });
+  await assert.rejects(orch.reject('demo-t', dispute.id, 'me'), (e) => e.status === 409);
+  await store.put('disputes', dispute);
+  await orch.agree('demo-t', dispute.id, 'me'); // 양쪽이 동의해 이미 끝난 이의
+  await assert.rejects(orch.reject('demo-t', dispute.id, 'me'), (e) => e.status === 409);
+});
+
+test('이미 거부로 끝난 이의에는 동의도, 다른 쪽의 거부도 409', async () => {
+  const { orch, dispute } = await setup();
+  await orch.reject('demo-t', dispute.id, 'me');
+  await assert.rejects(orch.agree('demo-t', dispute.id, 'ms'), (e) => e.status === 409);
+  await assert.rejects(orch.reject('demo-t', dispute.id, 'ms'), (e) => e.status === 409);
+});
+
+test('같은 거부를 두 번 보내도 기록·송금이 늘지 않는다', async () => {
+  const { store, orch, dispute } = await setup();
+  const first = await orch.reject('demo-t', dispute.id, 'me', { reason: '같이 마셨어요' });
+  const events = (await store.listEvents('demo-t')).length;
+  const transfers = (await transfersOf(store)).length;
+  const again = await orch.reject('demo-t', dispute.id, 'me', { reason: '다른 말' });
+  assert.deepEqual(again, first); // 처음 남긴 사유 그대로
+  assert.equal((await store.listEvents('demo-t')).length, events);
+  assert.equal((await transfersOf(store)).length, transfers);
+});
+
+test('거부 사유는 한 줄, 100자까지만 남긴다', async () => {
+  const { orch, dispute } = await setup();
+  const out = await orch.reject('demo-t', dispute.id, 'me', { reason: `  같이\n\n마셨어요   ${'가'.repeat(200)}` });
+  assert.ok(!/\s{2}|\n/.test(out.rejectReason));
+  assert.equal(out.rejectReason.length, 100);
+  assert.ok(out.rejectReason.startsWith('같이 마셨어요 가'));
+});
+
+test('거부로 끝난 이의는 다음 version 청구서에서 같은 근거로 다시 내지 않는다', async () => {
+  const { store, orch, dispute } = await setup();
+  await orch.reject('demo-t', dispute.id, 'me');
+  await store.put('rooms', { ...(await store.get('rooms', 'demo-t')), version: 2 }); // 지출이 바뀌어 다시 보내는 경우
+  await orch.sendInvoices('demo-t', 'me');
+  assert.equal((await store.list('disputes', { roomId: 'demo-t' })).length, 1);
+  assert.equal((await store.get('invoices', 'demo-t:v2:ms')).status, 'asked');
+});
+
+test('라우트: 거부는 당사자만, 두 번 보내도 같은 결과', async () => {
+  const { createApp } = await import('../src/app.mjs');
+  const server = createApp({ store: new MemoryStore(), env: { DEV_SEED: '1' } });
+  await new Promise((r) => server.listen(0, r));
+  const url = `http://localhost:${server.address().port}`;
+  const call = (path, uid, body) => fetch(url + path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-demo-user': uid }, body: JSON.stringify(body ?? {}) });
+  try {
+    const roomId = (await (await fetch(`${url}/api/dev/seed`, { method: 'POST' })).json()).roomId;
+    await call(`/api/rooms/${roomId}/invoices/send`, 'me');
+    const room = await (await fetch(`${url}/api/rooms/${roomId}`, { headers: { 'x-demo-user': 'me' } })).json();
+    const path = `/api/rooms/${roomId}/disputes/${encodeURIComponent(room.disputes[0].id)}/reject`;
+    assert.equal((await call(path, 'yh')).status, 403);
+    const ok = await call(path, 'me', { reason: '같이 마셨어요' });
+    assert.equal(ok.status, 200);
+    assert.equal((await ok.json()).status, 'dismissed');
+    assert.equal((await call(path, 'me', { reason: '같이 마셨어요' })).status, 200);
+    assert.equal((await call(path, 'ms')).status, 409);
+    const after = await (await fetch(`${url}/api/rooms/${roomId}`, { headers: { 'x-demo-user': 'me' } })).json();
+    assert.equal(after.disputes[0].status, 'dismissed');
+    assert.ok(!after.actions.some((a) => a.type === 'agree_dispute'));
+  } finally {
+    server.close();
+  }
+});
+
+// ---------------------------------------------------------------- 지출이 바뀌면 이의를 닫는다
+import { splitChanged, supersedeDisputes } from '../src/agents/disputes.mjs';
+
+test('splitChanged: 제목·종류·결제 시각·배분의 확인 표시만 바뀌면 그대로, 배분에 닿는 값이 바뀌면 바뀐 것', async () => {
+  const { store } = await setup();
+  const bar = await store.get('expenses', 'demo-t-bar');
+  const alloc = { 'b-whisky': { consumers: ['me', 'cs'], confidence: 0.9, reason: 'x' } };
+  const withAlloc = { ...bar, split: 'items', alloc };
+  assert.equal(splitChanged(bar, { ...bar, title: '다른 이름', kind: 'food', time: '23:59' }), false);
+  assert.equal(splitChanged(bar, { ...bar, split: 'items', items: bar.items.map((it) => ({ ...it, name: `${it.name}!` })) }), false); // 수정 API가 equal을 items로 바꿔 저장해도 몫은 같다
+  assert.equal(splitChanged(withAlloc, { ...withAlloc, alloc: { 'b-whisky': { consumers: ['cs', 'me'], confidence: 1, reason: 'y', confirmed: true } } }), false);
+  assert.equal(splitChanged(bar, { ...bar, items: bar.items.map((it, i) => (i ? it : { ...it, qty: it.qty + 1 })) }), true);
+  assert.equal(splitChanged(bar, { ...bar, present: bar.present.slice(1) }), true);
+  assert.equal(splitChanged(bar, { ...bar, date: '2026-11-09' }), true);
+  assert.equal(splitChanged(bar, { ...bar, payer: 'cs' }), true);
+  assert.equal(splitChanged(withAlloc, { ...withAlloc, alloc: { 'b-whisky': { ...alloc['b-whisky'], consumers: ['me'] } } }), true);
+  assert.equal(splitChanged(bar, null), true); // 지운 지출
+});
+
+test('supersedeDisputes: 그 지출의 열린 이의만 닫고, 두 번 불러도 기록이 늘지 않는다', async () => {
+  const { store, dispute } = await setup();
+  const bar = await store.get('expenses', 'demo-t-bar');
+  assert.deepEqual(await supersedeDisputes(store, 'demo-t', await store.get('expenses', 'demo-t-hotel'), null), []);
+  assert.equal((await store.get('disputes', dispute.id)).status, 'proposed');
+  assert.equal((await supersedeDisputes(store, 'demo-t', bar, { ...bar, present: bar.present.slice(1) })).length, 1);
+  assert.equal((await store.get('disputes', dispute.id)).status, 'superseded');
+  assert.deepEqual(await supersedeDisputes(store, 'demo-t', bar, null), []);
+  assert.equal((await eventsOf(store, 'dispute_superseded')).length, 1);
+});
+
+test('지출이 사라진 이의에 동의·거부·중재해도 TypeError가 아니라 409', async () => {
+  const { store, orch, dispute } = await setup();
+  await store.delete('expenses', 'demo-t-bar'); // 옛 데이터: 이의만 남은 경우
+  for (const act of [orch.agree('demo-t', dispute.id, 'me'), orch.reject('demo-t', dispute.id, 'me'), orch.mediate('demo-t', dispute.id, 'me')]) {
+    await assert.rejects(act, (e) => e.status === 409);
+  }
+});
