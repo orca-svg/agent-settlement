@@ -91,3 +91,19 @@ test('규칙: 목록 조회로도 남의 방을 못 본다(화면의 기록 구�
   assert.equal(await api.query('', { from: [{ collectionId: 'events', allDescendants: true }] }, 'alice'), 403, 'alice: 모든 방 기록 한 번에(컬렉션 그룹)');
   assert.equal(await api.query('', from('rooms', { where: contains('_memberUids', 'sam') }), 'alice'), 403, 'alice: sam이 있는 방 목록');
 });
+
+test('규칙: 규칙에 적히지 않은 컬렉션은 그 데이터의 주인도 화면에서 못 읽는다', { skip }, async () => {
+  const { api } = await setup();
+  // receipts는 Firestore가 아니라 Cloud Storage(receipts/{지출 id})에 있어서 여기 없다
+  const docs = ['agents/alice', 'disputes/ra-d', 'locationEvidence/ra-loc', 'locationConsents/ra-consent', 'deletedUsers/alice', 'invites/ra'];
+  for (const path of docs) assert.equal(await api.get(path, 'alice'), 403, `alice: ${path} 읽기`);
+  const lists = [
+    from('disputes', { where: eq('roomId', 'ra') }),
+    from('invites', { where: eq('roomId', 'ra') }),
+    from('locationEvidence', { where: eq('uid', 'alice') }),
+    from('locationConsents', { where: eq('uid', 'alice') }),
+    from('agents'),
+    from('deletedUsers'),
+  ];
+  for (const q of lists) assert.equal(await api.query('', q, 'alice'), 403, `alice: ${q.from[0].collectionId} 목록`);
+});
