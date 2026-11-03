@@ -1,7 +1,7 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh, receiptPickers, COMPUTER_QUERY } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh, receiptPickers, sendMode, COMPUTER_QUERY } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
@@ -770,7 +770,7 @@ async function refreshQr(tid) {
   renderSheet();
 }
 
-// 부르는 쪽에서 t.link && isComputer()일 때만 부른다(링크가 없으면 QR로 열 토스 화면이 없고, 휴대폰은 토스가 바로 열린다)
+// 부르는 쪽에서 컴퓨터이고 t.link가 있을 때만 부른다(링크가 없으면 QR로 열 토스 화면이 없고, 휴대폰은 토스가 바로 열린다)
 function qrBlock(t, { sentButton = true } = {}) {
   if (!qrIsFresh(state.qr, t.id)) refreshQr(t.id);
   const qr = state.qr?.id === t.id ? state.qr : null;
@@ -778,12 +778,14 @@ function qrBlock(t, { sentButton = true } = {}) {
   const img = qr?.token
     ? `<img src="${qrImageUrl(`${API_BASE || location.origin}/api/qr/${enc(qr.token)}`)}" width="220" height="220" alt="휴대폰으로 토스 송금 화면을 여는 QR 코드" referrerpolicy="no-referrer">`
     : `<div class="qr-wait">${qr?.failed ? 'QR을 만들지 못했어요.<br>위 계좌번호를 복사해 보내 주세요.' : 'QR을 만드는 중이에요'}</div>`;
-  // 휴대폰으로 보내고 돌아온 사람이 슬라이더(데스크톱에선 토스가 안 열림)를 거치지 않고 바로 끝낼 수 있게
-  return `<div class="qr-desktop"><p class="group-note">컴퓨터라면 휴대폰으로 QR을 찍어 토스를 열어요.</p>${img}
-    ${sentButton ? `<button class="btn secondary" style="width:100%;margin-top:12px" data-action="mark-sent" data-id="${esc(t.id)}">휴대폰으로 보냈어요</button>` : ''}</div>`;
+  // 컴퓨터에는 슬라이더가 없으니, 휴대폰으로 보내고 돌아온 사람이 여기서 바로 끝낸다.
+  // 보냈어요 버튼이 이미 있는 시트(보냈나요?)에서는 sentButton: false로 QR만 붙인다
+  return `<div class="qr-desktop"><p class="group-note">휴대폰 카메라로 QR을 찍으면 토스 송금 화면이 열려요.</p>${img}
+    ${sentButton ? `<button class="btn secondary" style="width:100%;margin-top:12px" data-action="mark-sent" data-id="${esc(t.id)}">보냈어요</button>` : ''}</div>`;
 }
 
-// 송금: 밀어서 보내면 그 제스처 안에서 토스를 연다. 앱이 안 열리면 계좌·금액을 복사해 둔다
+// 송금: 밀어서 보내면 그 제스처 안에서 토스를 연다. 앱이 안 열리면 계좌·금액을 복사해 둔다.
+// 컴퓨터에서는 토스가 열리지 않으니 슬라이더 대신 휴대폰으로 넘기는 QR만 보여 준다(sendMode)
 function transferSheet() {
   const t = byId('transfers', state.ref);
   if (!t) return notFound('송금');
@@ -797,13 +799,15 @@ function transferSheet() {
   }[state.transferNote];
   let actions = '';
   if (t.from === me && ['scheduled', 'due'].includes(t.status)) {
-    actions = t.link || t.fallback
-      ? `<div class="slider" data-commit="send" data-id="${esc(t.id)}"><span class="slider-fill"></span>
+    const mode = sendMode(t, { computer: isComputer() });
+    actions = mode === 'qr'
+      ? qrBlock(t)
+      : mode === 'slider'
+        ? `<div class="slider" data-commit="send" data-id="${esc(t.id)}"><span class="slider-fill"></span>
           <span class="slider-label">${t.link ? '밀어서 토스로 보내기' : '밀어서 계좌 복사하기'}</span>
           <button type="button" class="slider-thumb" aria-label="${t.link ? '밀어서 토스로 보내기' : '밀어서 계좌 복사하기'}. Enter 키로도 할 수 있어요">${ARROW}</button></div>
-        <p class="slider-hint">${t.link ? '토스가 열리지 않으면 계좌번호를 복사해 드려요' : '받는 사람의 계좌를 복사해 드려요'}</p>
-        ${t.link && isComputer() ? qrBlock(t) : ''}`
-      : `<p class="group-note">${esc(subj(toName))} 받을 계좌를 아직 알려 주지 않았어요. 알려 주면 바로 보낼 수 있어요.</p>`;
+        <p class="slider-hint">${t.link ? '토스가 열리지 않으면 계좌번호를 복사해 드려요' : '받는 사람의 계좌를 복사해 드려요'}</p>`
+        : `<p class="group-note">${esc(subj(toName))} 받을 계좌를 아직 알려 주지 않았어요. 알려 주면 바로 보낼 수 있어요.</p>`;
   } else if (t.from === me && (t.status === 'opened' || (t.status === 'sent' && t.notReceivedAt))) {
     // 받는 사람이 "아직 안 들어왔어요"라고 했으면(상태는 sent 그대로) 제목만 바꾸고 송금 내역부터 보게 한다(버튼은 같다)
     const head = t.notReceivedAt
@@ -1076,6 +1080,11 @@ addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 56),
 addEventListener('resize', () => {
   resetSegs();
   mountSegs(document);
+});
+// 송금 시트는 그릴 때 컴퓨터인지 보고 QR이나 슬라이더 중 하나만 둔다. 연 채로 포인터가 바뀌면
+// (iPad에서 키보드를 떼거나 붙일 때 등) 맞는 쪽으로 다시 그린다
+matchMedia(COMPUTER_QUERY).addEventListener('change', () => {
+  if (state.sheet === 'transfer') renderSheet();
 });
 
 async function loadConfig() {

@@ -15,3 +15,11 @@ test('style.css: vh로 정한 최대 높이마다 바로 뒤에 같은 dvh 값�
     assert.equal(next?.[1], m[1].replace(/(\d+)vh/g, '$1dvh'), `‘max-height: ${m[1]}’ 뒤에 dvh 값이 없어요`);
   }
 });
+
+// QR을 보일지는 room.js가 sendMode로 그릴 때 정한다. CSS가 따로 숨기면, 컴퓨터로 보고 QR만 그린 시트에서
+// 포인터가 터치로 바뀔 때(iPad에서 키보드를 뗄 때 등) QR까지 숨어 버튼이 하나도 없는 화면이 된다(#25 리뷰)
+test('style.css: QR 칸(.qr-desktop)을 CSS로 숨기지 않는다', () => {
+  const rules = [...css.matchAll(/\.qr-desktop\s*\{([^}]*)\}/g)].map((m) => m[1]);
+  assert.ok(rules.length > 0);
+  for (const body of rules) assert.doesNotMatch(body, /display:\s*none/);
+});
