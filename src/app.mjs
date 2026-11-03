@@ -131,7 +131,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       invoices,
       disputes,
       transfers: transfers.map((t) => redactTransfer(t, me.uid)),
-      myAgent: await agentSettings.summary(me.uid, room.id),
+      myAgent: await agentSettings.summary(me.uid),
       ledger: ledger(room, expenses, room.policy),
       actions: pendingActions({ room, expenses, invoices, disputes, transfers }).filter((x) => x.for === me.uid),
     };

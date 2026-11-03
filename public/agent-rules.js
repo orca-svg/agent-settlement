@@ -9,7 +9,7 @@ export const DEFAULT_RULES = { autoAccept: 0, sendWhen: 'now', onDispute: 'ask',
 export const MEMORY_LIMITS = { free: MEMORY_LIMIT };
 export const MEMORY_MAX_CHARS = 60;
 export const AUTO_ACCEPT_MAX = 10_000_000;
-export const AUTO_ACCEPT_PRESETS = [0, 10_000, 30_000, 50_000, 100_000];
+export const AUTO_ACCEPT_PRESETS = [0, 10_000, 30_000, 50_000];
 
 export const ON_DISPUTE = {
   ask: '나에게 묻기',

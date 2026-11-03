@@ -2,7 +2,6 @@
 // 판단은 rules.mjs가 맡는다. 바꾼 규칙은 다음 청구서부터 적용되고, 이미 만들어진 청구서·송금은 그대로 둔다.
 import { HttpError, readJson } from '../http.mjs';
 import { DEFAULT_RULES, MEMORY_LIMITS, MEMORY_MAX_CHARS, AUTO_ACCEPT_MAX, ON_DISPUTE, NOTIFY, RULE_FIELDS, ruleChangeText } from '../../public/agent-rules.js';
-import { sharedMemory } from './memory.mjs';
 
 const HISTORY_MAX = 50;
 
@@ -92,21 +91,16 @@ export function createAgentSettings({ store, clock = () => new Date() }) {
     get: async (uid) => view(await read(uid)),
 
     // 방 화면이 매번 부르는 요약. 계좌번호 없이 있는지만 알린다
-    async summary(uid, roomId) {
+    async summary(uid) {
       const doc = await read(uid);
-      const { autoAccept, sendWhen, onDispute, notify } = doc.rules;
-      return {
-        onboarded: Boolean(doc.onboardedAt), autoAccept, sendWhen, onDispute, notify,
-        memoryCount: doc.memory.length, sharedCount: sharedMemory(doc, roomId).length, memoryLimit: memoryLimit(doc), hasPayout: Boolean(doc.payout),
-      };
+      const { autoAccept, sendWhen, notify } = doc.rules;
+      return { onboarded: Boolean(doc.onboardedAt), autoAccept, sendWhen, notify, hasPayout: Boolean(doc.payout) };
     },
 
     updateRules: async (uid, input) => saved(withRules(await read(uid), input)),
 
-    async finishOnboarding(uid, { rules, memory } = {}) {
-      let doc = withRules(await read(uid), rules);
-      // 처음 설정의 기억 칸은 비워도 된다. 이미 있는 기억이면 그대로 둔다
-      if (memory != null && memory !== '' && !doc.memory.includes(cleanText(memory))) doc = withMemory(doc, memory);
+    async finishOnboarding(uid, { rules } = {}) {
+      const doc = withRules(await read(uid), rules);
       return saved({ ...doc, onboardedAt: doc.onboardedAt ?? clock().toISOString() });
     },
 

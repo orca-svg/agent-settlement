@@ -1059,6 +1059,7 @@ document.addEventListener('click', (e) => {
   act(el.dataset.action, el.dataset);
 });
 document.addEventListener('keydown', (e) => {
+  agentPanel.onKeydown(e);
   if (e.key === 'Escape') {
     if (logPop.isOpen) logPop.close();
     else if (!$('#photo-modal').hidden) closePhoto();

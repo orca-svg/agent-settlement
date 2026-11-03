@@ -11,7 +11,7 @@ import { evidenceFor } from '../src/agents/evidence.mjs';
 import { pendingActions } from '../src/actions.mjs';
 import { createApp } from '../src/app.mjs';
 import { notifies, DEFAULT_RULES, ruleChangeText } from '../public/agent-rules.js';
-import { draftFromRules, rulesFromDraft, memoryRowsHtml, historyHtml, limitHtml } from '../public/agent-panel.js';
+import { draftFromRules, rulesFromDraft, memoryRowsHtml, historyHtml, limitInputHtml, limitPresetsHtml, rowHtml } from '../public/agent-panel.js';
 
 const ROOM = 'demo-t';
 async function setup({ evidence = false, store = new MemoryStore() } = {}) {
@@ -284,7 +284,6 @@ test('방별 공유: 끈 기억은 그 방의 배분·중재 프롬프트에 가
     // 공유를 바꾸면 기억이 달라진 것이니 다시 나눌 수 있다
     const seen = async () => (await (await fetch(`${url}/api/rooms/room-a`, { headers: { 'x-demo-user': 'yh' } })).json());
     assert.equal((await seen()).expenses.find((e) => e.id === 'room-a-izakaya').allocFresh, true);
-    assert.deepEqual([(await seen()).myAgent.sharedCount, (await seen()).myAgent.memoryCount], [0, 1]);
     await call('/api/rooms/room-a/agent/shared', 'yh', { text: secret, shared: true });
     assert.equal((await seen()).expenses.find((e) => e.id === 'room-a-izakaya').allocFresh, false);
     assert.deepEqual((await store.get('agents', 'yh')).memoryHidden, {});
@@ -378,9 +377,8 @@ test('처음 설정: 기본값은 묻기 위주이고, 마치면 규칙·기억�
   assert.equal(await store.get('agents', 'new'), null, '읽기만 해서는 문서를 만들지 않는다');
   assert.equal((await settings.summary('new', ROOM)).onboarded, false);
 
-  const v = await settings.finishOnboarding('new', { rules: { autoAccept: 30_000, sendWhen: { payday: 10 }, onDispute: 'mediator', notify: 'all' }, memory: ' 고기를 먹지 않아요 ' });
+  const v = await settings.finishOnboarding('new', { rules: { autoAccept: 30_000, sendWhen: { payday: 10 }, onDispute: 'mediator', notify: 'all' } });
   assert.deepEqual(v.rules, { autoAccept: 30_000, sendWhen: { payday: 10 }, onDispute: 'mediator', notify: 'all' });
-  assert.deepEqual(v.memory, ['고기를 먹지 않아요']);
   assert.equal(v.onboardedAt, '2026-11-10T03:00:00.000Z');
   assert.equal(v.ruleHistory.length, 4);
 });
@@ -390,15 +388,14 @@ test('처음 설정: 기본값으로 시작할 수 있고, 다시 해도 처음 
   const v = await ctx.settings.finishOnboarding('new', {});
   assert.deepEqual([v.rules, v.memory, v.ruleHistory], [DEFAULT_RULES, [], []]);
   ctx.clock.now = new Date('2026-12-01T00:00:00Z');
-  const again = await ctx.settings.finishOnboarding('new', { rules: { autoAccept: 1000 }, memory: '' });
+  const again = await ctx.settings.finishOnboarding('new', { rules: { autoAccept: 1000 } });
   assert.equal(again.onboardedAt, v.onboardedAt);
   assert.equal(again.rules.autoAccept, 1000);
 });
 
-test('처음 설정: 잘못된 값이나 가득 찬 기억이면 아무것도 저장하지 않는다', async () => {
+test('처음 설정: 잘못된 값이면 아무것도 저장하지 않는다', async () => {
   const { settings, store } = await setup();
   await assert.rejects(settings.finishOnboarding('new', { rules: { autoAccept: -5 } }), (e) => e.status === 400);
-  await assert.rejects(settings.finishOnboarding('new', { rules: { autoAccept: 100 }, memory: '가'.repeat(61) }), (e) => e.status === 400);
   assert.equal(await store.get('agents', 'new'), null);
 });
 
@@ -439,7 +436,6 @@ test('API: 새 사용자의 처음 설정, 규칙, 기억, 계좌', async () => 
       assert.ok(res.status < 500, `${path}: 본문이 null이어도 500이 아니다(${res.status})`);
     }
     assert.equal((await req('/api/me/agent/memory', 'me', { text: { a: 1 } })).status, 400);
-    assert.equal((await req('/api/me/agent/onboarding', 'cs', { memory: ['x'] })).status, 400);
 
     assert.equal((await req('/api/me/agent')).status, 401);
     assert.equal((await req('/api/me/agent/rules', null, { autoAccept: 1 })).status, 401);
@@ -509,12 +505,30 @@ test('설정 화면: 기억과 규칙 기록의 글자를 이스케이프하고,
   const evil = '<img src=x onerror=alert(1)>';
   const html = memoryRowsHtml({ memory: [evil, '평범'], memoryHidden: { r1: ['평범'] } }, 'r1');
   assert.ok(!html.includes('<img') && html.includes('&lt;img'));
-  assert.match(html, /aria-pressed="true"[^>]*>이 방에 공유/);
+  assert.match(html, /aria-pressed="true"[^>]*>공유 중/);
   assert.match(html, /aria-pressed="false"[^>]*>공유 안 함/);
-  assert.match(memoryRowsHtml({ memory: ['평범'], memoryHidden: { r1: ['평범'] } }, 'r2'), /이 방에 공유/, '다른 방에서는 공유');
+  assert.match(memoryRowsHtml({ memory: ['평범'], memoryHidden: { r1: ['평범'] } }, 'r2'), /공유 중/, '다른 방에서는 공유');
   const log = historyHtml({ ruleHistory: [{ at: '2026-11-10T03:00:00Z', text: evil }] });
   assert.ok(!log.includes('<img'));
-  assert.ok(!limitHtml({ autoAccept: '"><script>' }).includes('<script>'));
+  assert.ok(!limitInputHtml({ autoAccept: '"><script>' }).includes('<script>'));
+  assert.equal(historyHtml({ ruleHistory: [] }), '', '기록이 없으면 칸도 없다');
+});
+
+test('설정 화면: 기억 한 줄에는 글과 공유만 있고, 고치기·지우기는 글을 눌렀을 때만 나온다', () => {
+  const view = { memory: ['기억'], memoryHidden: {} };
+  const rest = memoryRowsHtml(view, 'r1');
+  assert.match(rest, /data-action="mem-edit"/);
+  assert.ok(!rest.includes('mem-edit-save') && !rest.includes('mem-del'));
+  const editing = memoryRowsHtml(view, 'r1', { editing: '기억', editText: '기억' });
+  assert.ok(editing.includes('mem-edit-save') && editing.includes('mem-del') && !editing.includes('mem-share'));
+});
+
+test('처음 설정의 금액 버튼과 방 화면 요약은 필요한 값만 보여 준다', () => {
+  assert.equal((limitPresetsHtml({ autoAccept: '30000' }).match(/data-action="agent-preset"/g) ?? []).length, 4);
+  assert.match(limitPresetsHtml({ autoAccept: '30000' }), /aria-pressed="true"[^>]*>₩30,000/);
+  const row = rowHtml({ autoAccept: 50_000, sendWhen: { payday: 10 }, hasPayout: true });
+  assert.ok(row.includes('₩50,000까지 자동 수락 · 매달 10일에 보내기') && !row.includes('받을 계좌 없음'));
+  assert.ok(rowHtml({ autoAccept: 0, sendWhen: 'now', hasPayout: false }).includes('받을 계좌 없음'));
 });
 
 test('normalizeSettings: 빈 문서와 옛 문서(notify 없음)를 기본값으로 채우고 있던 값은 지킨다', () => {

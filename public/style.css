@@ -786,8 +786,10 @@ body.pop-open { overflow: hidden; }
 
 /* ---------- 내 비서 설정(#5) ---------- */
 .agent-presets { flex-wrap: wrap; }
-.agent-mem { flex-wrap: wrap; gap: 6px 8px; }
-.agent-mem .grow { flex-basis: 100%; }
+.agent-mem { gap: 8px; }
+.agent-mem-text { appearance: none; flex: 1; min-width: 0; border: 0; background: none; padding: 4px 0; font: inherit; color: var(--label); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.agent-mem-text:focus-visible { outline: 2px solid var(--tint); outline-offset: 2px; border-radius: 4px; }
+.agent-mem.editing { flex-wrap: wrap; }
 .agent-mem.editing input {
   flex: 1 1 100%;
   min-width: 0;
@@ -802,6 +804,9 @@ body.pop-open { overflow: hidden; }
 .agent-step { font-size: 0.8125rem; font-weight: 600; color: var(--tint); letter-spacing: 0; }
 .agent-q { font-size: 1.375rem; line-height: 1.25; font-weight: 700; letter-spacing: -0.02em; margin: 4px 0 16px; }
 .agent-nav { display: flex; gap: 8px; margin: 20px 0 8px; }
+.agent-save { margin-bottom: 22px; }
+.agent-save[hidden] { display: none; }
+.agent-status { color: var(--tint); }
 .agent-history summary { cursor: pointer; font-size: 0.9375rem; font-weight: 500; padding: 4px 0; }
 .agent-history ol { list-style: none; margin: 8px 0 0; padding: 0; }
 .agent-history li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 0.875rem; border-top: 0.5px solid var(--sep, rgba(127, 127, 127, 0.3)); letter-spacing: 0; }
