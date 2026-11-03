@@ -224,8 +224,9 @@ test('규칙 적용 근거: 직접 보내기, 이의 처리(근거 이의·중�
   await med.settings.updateRules('ms', { onDispute: 'evidence' });
   await med.settings.updateRules('me', { onDispute: 'mediator' });
   await med.orch.sendInvoices(ROOM, 'me');
-  assert.match((await med.metas('dispute_raised'))[0], /^규칙 · 근거가 있으면 이의 제기 · 근거:/);
-  assert.match((await med.metas('dispute_proposed'))[0], /^규칙 · 중재 비서에게 맡기기 · mediate/);
+  const applied = await med.metas('rule_applied');
+  assert.ok(applied.includes('규칙 · 근거가 있으면 이의 제기'));
+  assert.ok(applied.includes('규칙 · 중재 비서에게 맡기기'));
 
   const ask = await setup({ evidence: true });
   await ask.settings.updateRules('ms', { onDispute: 'evidence' });
@@ -278,7 +279,7 @@ function spyGemini() {
 test('방별 공유: 끈 기억은 그 방의 배분·중재 프롬프트에 가지 않고, 다른 방에는 그대로 간다', async () => {
   const store = new MemoryStore();
   const gemini = spyGemini();
-  const server = createApp({ store, gemini, env: {} });
+  const server = createApp({ store, gemini, env: { DEV_SEED: '1' } });
   await new Promise((r) => server.listen(0, r));
   const url = `http://localhost:${server.address().port}`;
   const call = async (path, uid, body) => {
@@ -447,7 +448,7 @@ test('API: 시드 fresh로 새 사용자를 만들고, 처음 설정부터 청�
     return { status: res.status, json: await res.json() };
   };
   try {
-    const { roomId } = (await req('/api/dev/seed', null, { freshUser: true })).json;
+    const { roomId } = (await req('/api/dev/seed/new-user', null, {})).json;
     assert.equal(await store.get('agents', 'me'), null);
     assert.ok(await store.get('agents', 'cs'), '다른 사람은 그대로');
     const first = (await req(`/api/rooms/${roomId}`, 'me')).json;
@@ -488,12 +489,22 @@ test('API: 시드 fresh로 새 사용자를 만들고, 처음 설정부터 청�
   }
 });
 
-test('시드: 새 사용자로 만들면 예전에 설정한 문서가 있어도 지운다', async () => {
+test('시드: 새 사용자 방을 만들면 예전에 설정한 문서가 있어도 지운다. 시드를 막으면 함께 막힌다', async () => {
   const store = new MemoryStore();
-  await seedDemoRoom(store, { id: 'a' });
-  assert.ok((await store.get('agents', 'me')).onboardedAt);
-  await seedDemoRoom(store, { id: 'b', freshUid: 'me' });
-  assert.equal(await store.get('agents', 'me'), null);
+  const open = createApp({ store, env: { DEV_SEED: '1' } });
+  const closed = createApp({ store: new MemoryStore(), env: {} });
+  await Promise.all([new Promise((r) => open.listen(0, r)), new Promise((r) => closed.listen(0, r))]);
+  try {
+    await fetch(`http://localhost:${open.address().port}/api/dev/seed`, { method: 'POST' });
+    assert.ok((await store.get('agents', 'me')).onboardedAt);
+    const res = await fetch(`http://localhost:${open.address().port}/api/dev/seed/new-user`, { method: 'POST' });
+    assert.ok((await res.json()).roomId);
+    assert.equal(await store.get('agents', 'me'), null);
+    assert.equal((await fetch(`http://localhost:${closed.address().port}/api/dev/seed/new-user`, { method: 'POST' })).status, 404);
+  } finally {
+    open.close();
+    closed.close();
+  }
 });
 
 test('없어진 방의 송금이 남아 있어도 규칙 저장과 계좌 저장은 끝까지 된다', async () => {

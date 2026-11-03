@@ -414,7 +414,7 @@ async function act(name, d) {
     watch();
   } else if (name === 'seed') {
     try {
-      const { roomId: id } = await api('/api/dev/seed', { method: 'POST', body: d.fresh ? { freshUser: true } : {} });
+      const { roomId: id } = await api(d.fresh ? '/api/dev/seed/new-user' : '/api/dev/seed', { method: 'POST' });
       location.search = `?room=${encodeURIComponent(id)}`;
     } catch {
       state.error = { status: 'seed' };

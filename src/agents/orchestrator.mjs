@@ -88,7 +88,8 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
           action: { type: 'answer_invoice', ref: invoice.id, for: m.uid },
         });
       } else {
-        await raiseDispute(roomId, { by: m.uid, expenseId: found.exp.id, claim: claimFrom(name(m.uid), found), evidence: found.evidence, byRule: true });
+        await say(roomId, { from: m.uid, to: m.uid, kind: 'rule_applied', text: '근거가 있어서 대신 이의를 낼게요', meta: `규칙 · ${ON_DISPUTE.evidence}` });
+        await raiseDispute(roomId, { by: m.uid, expenseId: found.exp.id, claim: claimFrom(name(m.uid), found), evidence: found.evidence });
       }
     }
     await settleIfReady(roomId);
@@ -112,7 +113,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
   }
 
   // 같은 사람이 같은 지출에 이미 낸 이의가 열려 있으면 그것을 쓴다(다시 보내도 중복 없음)
-  async function raiseDispute(roomId, { by, expenseId, claim, evidence = [], byRule = false }) {
+  async function raiseDispute(roomId, { by, expenseId, claim, evidence = [] }) {
     const { expenses } = await load(roomId);
     const exp = expenses.find((e) => e.id === expenseId);
     if (!exp) throw new HttpError(400, '이의를 제기할 지출을 골라 주세요');
@@ -123,10 +124,13 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     await store.put('disputes', dispute);
     await say(roomId, {
       from: by, to: exp.payer, kind: 'dispute_raised', text: `${obj(`‘${exp.title}’`)} 다시 나누자고 이의를 제기했어요`,
-      ...(evidence.length ? { meta: `${byRule ? `규칙 · ${ON_DISPUTE.evidence} · ` : ''}근거: ${evidence.map((e) => e.summary).join(' · ')}` } : {}),
+      ...(evidence.length ? { meta: `근거: ${evidence.map((e) => e.summary).join(' · ')}` } : {}),
     });
     // 지출을 낸 사람이 이의를 중재 비서에게 맡겨 두었으면 바로 중재한다. 아니면 낸 사람에게 묻는다(pendingActions)
-    if ((await settingsOf(exp.payer)).rules.onDispute === 'mediator') return mediate(roomId, dispute.id, exp.payer, { byRule: true });
+    if ((await settingsOf(exp.payer)).rules.onDispute === 'mediator') {
+      await say(roomId, { from: exp.payer, to: exp.payer, kind: 'rule_applied', text: '이의가 와서 중재 비서에게 맡겼어요', meta: `규칙 · ${ON_DISPUTE.mediator}` });
+      return mediate(roomId, dispute.id, exp.payer);
+    }
     await say(roomId, {
       from: exp.payer, to: exp.payer, kind: 'dispute_asked', text: `${obj(`‘${exp.title}’`)} 어떻게 할지 주인에게 물어요`, meta: '규칙 · 이의가 오면 주인에게 묻기',
       action: { type: 'agree_dispute', ref: dispute.id, for: exp.payer },
@@ -149,7 +153,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
   };
 
   // 중재 비서가 양쪽 주장·근거·영수증 주문 시각으로 나누는 법을 제안한다
-  async function mediate(roomId, disputeId, actorUid, { byRule = false } = {}) {
+  async function mediate(roomId, disputeId, actorUid) {
     const { dispute, room, exp, parties } = await disputeOf(roomId, disputeId);
     if (!parties.includes(actorUid)) throw new HttpError(403, '이의 당사자만 중재를 맡길 수 있어요');
     if (dispute.status !== 'open') throw new HttpError(409, '이미 중재안이 나왔어요');
@@ -161,7 +165,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     await store.put('disputes', proposed);
     await say(roomId, {
       from: 'mediator', to: 'all', kind: 'dispute_proposed', text: out.summary,
-      meta: `${byRule ? `규칙 · ${ON_DISPUTE.mediator} · ` : ''}mediate · ${out.source === 'rules' ? '규칙' : out.source} · ${((Date.now() - started) / 1000).toFixed(1)}초`,
+      meta: `mediate · ${out.source === 'rules' ? '규칙' : out.source} · ${((Date.now() - started) / 1000).toFixed(1)}초`,
     });
     // 이의를 낸 비서는 '근거가 있으면 이의'를 맡았으므로, 제안이 그 근거와 맞으면 스스로 동의한다
     if ((await settingsOf(dispute.by)).rules.onDispute === 'evidence' && matchesEvidence(exp, dispute, out.alloc)) {

@@ -9,9 +9,8 @@ const SEND_WHEN = { 바로: 'now', '25일 월급날': { payday: 25 } };
 const ON_DISPUTE = { '중재 비서에게 맡기기': 'mediator', '나에게 묻기': 'ask', '근거가 있으면 이의 제기': 'evidence' };
 const mapKeys = (obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [uid(k), v]));
 
-// 시연 전에 같은 시나리오로 돌아가도록 네 사람의 비서 문서를 시드 값으로 덮어쓴다(다른 데모 방에도 적용된다. 비서 설정은 사람마다 하나).
-// freshUid: 비서 문서를 지우는 멤버. 비서를 아직 설정하지 않은 새 사용자로 시작한다(#5 처음 설정 확인용)
-export async function seedDemoRoom(store, { id, freshUid = null }) {
+// 시연 전에 같은 시나리오로 돌아가도록 네 사람의 비서 문서를 시드 값으로 덮어쓴다(다른 데모 방에도 적용된다. 비서 설정은 사람마다 하나)
+export async function seedDemoRoom(store, { id }) {
   const room = {
     ...structuredClone(DEMO_ROOM),
     id,
@@ -37,10 +36,6 @@ export async function seedDemoRoom(store, { id, freshUid = null }) {
 
   // 가상 계좌다. 실제 계좌가 아니다.
   for (const [i, m] of DEMO_ROOM.members.entries()) {
-    if (uid(m.uid) === freshUid) {
-      await store.delete('agents', freshUid);
-      continue;
-    }
     const r = DEMO_RULES[m.uid];
     await store.put('agents', {
       id: uid(m.uid),

@@ -109,21 +109,19 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     return { room, me: { uid: me.uid, name: me.name } };
   }
 
-  // 방과 상관없이 내 설정을 다루는 요청의 신원 확인(#5)
-  async function whoAmI(req) {
-    const who = await identify(req, store);
-    if (!who) throw new HttpError(401, '누구인지 알려 주세요');
-    return who;
-  }
-
-  // 개발용: 데모 방 만들기. #4 방 만들기가 생기기 전까지 실제 방 화면을 열어 보는 용도.
-  // { freshUser: true }면 '나'를 비서 설정 전의 새 사용자로 둔다(처음 설정 흐름을 확인할 때)
-  routes.post('/api/dev/seed', async ({ req }) => {
+  // 개발용: 데모 방 만들기. #4 방 만들기가 생기기 전까지 실제 방 화면을 열어 보는 용도
+  routes.post('/api/dev/seed', async () => {
     if (env.DEV_SEED !== '1') throw new HttpError(404, 'not found');
     const id = `demo-${randomUUID().slice(0, 8)}`;
-    const { freshUser } = await readJson(req);
-    await seedDemoRoom(store, { id, freshUid: freshUser ? 'me' : null });
+    await seedDemoRoom(store, { id });
     return { roomId: id };
+  });
+
+  // 개발용: '나'를 비서 설정 전의 새 사용자로 둔 데모 방(처음 설정 흐름 확인용). 위 시드를 막는 조건을 그대로 따른다
+  routes.post('/api/dev/seed/new-user', async (ctx) => {
+    const out = await routes.match('POST', '/api/dev/seed').handler(ctx);
+    await store.delete('agents', 'me');
+    return out;
   });
 
   routes.get('/api/rooms/:id', async ({ req, params }) => {
@@ -154,6 +152,12 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   registerExpenseRoutes(routes, { ...ctx, member });
   const orchestrator = createOrchestrator({ store, gemini, clock, evidenceFor, counterFor });
   registerAgentRoutes(routes, { orchestrator, member, overLimit });
+  // 방과 상관없이 내 설정을 다루는 요청의 신원 확인(#5)
+  const whoAmI = async (req) => {
+    const who = await identify(req, store);
+    if (!who) throw new HttpError(401, '누구인지 알려 주세요');
+    return who;
+  };
   const agentSettings = createAgentSettings({ store, clock, orchestrator });
   registerAgentSettingsRoutes(routes, { settings: agentSettings, orchestrator, whoAmI, member });
 
