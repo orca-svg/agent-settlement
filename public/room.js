@@ -414,7 +414,7 @@ async function act(name, d) {
     watch();
   } else if (name === 'seed') {
     try {
-      const { roomId: id } = await api(d.fresh ? '/api/dev/seed/new-user' : '/api/dev/seed', { method: 'POST' });
+      const { roomId: id } = await api('/api/dev/seed', { method: 'POST' });
       location.search = `?room=${encodeURIComponent(id)}`;
     } catch {
       state.error = { status: 'seed' };
@@ -430,7 +430,7 @@ function noRoom() {
     <p class="sub">실제 방 만들기·참가하기는 #4에서 생겨요. 그전까지는 개발용 데모 방으로 확인해요.</p></section>
     <section class="next"><p class="eyebrow">개발용</p><h2>데모 방 만들기</h2>
       <p>${failed ? '서버가 개발용 시드를 막았어요. <code>DEV_SEED=1 npm start</code>로 서버를 다시 켜 주세요.' : '오사카 2박 3일 지출 7건과 4명의 비서 설정이 들어간 방을 만들어요.'}</p>
-      <div class="actions"><button class="btn" data-action="seed">데모 방 만들기</button><button class="btn secondary" data-action="seed" data-fresh="1">'나'를 새 사용자로</button></div></section>`;
+      <div class="actions"><button class="btn" data-action="seed">데모 방 만들기</button></div></section>`;
 }
 
 function whoPicker() {
@@ -1008,19 +1008,10 @@ async function agentAct(name, d) {
   } else if (name === 'open-payout') {
     openPayoutSheet();
   } else if (name === 'save-payout') {
-    if (state.payoutFromAgent) {
-      // 내 비서 설정에서 연 계좌는 방 없이 사람 단위로 저장하고 설정으로 돌아간다
-      try {
-        await api('/api/me/agent/payout', { method: 'POST', body: state.payoutDraft });
-        state.payoutFromAgent = false;
-        state.formError = '';
-        await load();
-        agentPanel.open();
-      } catch (e) {
-        state.formError = e.message;
-        renderSheet();
-      }
-    } else if (await post('/payout', state.payoutDraft)) sheet.close();
+    if (await post('/payout', state.payoutDraft)) {
+      if (state.payoutFromAgent) agentPanel.open(); // 내 비서 설정에서 왔으면 설정으로 돌아간다
+      else sheet.close();
+    }
   } else if (name === 'copy') {
     copyText(d.text, d.key);
   }

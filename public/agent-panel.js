@@ -71,7 +71,7 @@ export function memoryRowsHtml(view, roomId, ui = {}) {
     return `<div class="row agent-mem"><span class="grow">${esc(m)}</span>
       <button type="button" class="pick" aria-pressed="${shared}" data-action="mem-share" data-i="${i}" aria-label="이 방에 ‘${esc(m)}’ 공유">${shared ? '이 방에 공유' : '공유 안 함'}</button>
       <button type="button" class="text-btn" data-action="mem-edit" data-i="${i}" aria-label="‘${esc(m)}’ 고치기">고치기</button>
-      <button type="button" class="text-btn danger-text" data-action="mem-del" data-i="${i}" aria-label="‘${esc(m)}’ 지우기">${ui.armed === m ? '한 번 더' : '지우기'}</button></div>`;
+      <button type="button" class="text-btn danger-text" data-action="mem-del" data-i="${i}" aria-label="‘${esc(m)}’ 지우기">지우기</button></div>`;
   }).join('');
 }
 
@@ -93,7 +93,7 @@ const ACTIONS = new Set(['open-agent', 'open-agent-setup', 'agent-set', 'agent-p
 
 export function createAgentPanel({ api, roomId, summary, meName, rerender, openSheet, closeSheet, reload, openPayout }) {
   // errorAt: 오류를 누른 버튼 가까이에 보여 주려고 어느 구역의 오류인지 기억한다(시트가 길어서 맨 위에 두면 안 보인다)
-  const ui = { view: null, draft: null, memDraft: '', editing: null, editText: '', armed: null, error: '', errorAt: 'top', notice: '', busy: false, step: 0 };
+  const ui = { view: null, draft: null, memDraft: '', editing: null, editText: '', error: '', errorAt: 'top', notice: '', busy: false, step: 0 };
   const dirty = () => ui.view && ui.draft && JSON.stringify(rulesFromDraft(ui.draft)) !== JSON.stringify(rulesFromDraft(draftFromRules(ui.view.rules)));
   const errorHtml = (at) => (ui.error && ui.errorAt === at ? `<p class="form-error" role="alert" style="margin-top:10px">${esc(ui.error)}</p>` : '');
   const noticeHtml = () => (ui.notice ? `<p class="preview-note" role="status" style="margin-bottom:8px">${esc(ui.notice)}</p>` : '');
@@ -125,7 +125,6 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
     ui.notice = '';
     ui.errorAt = 'top';
     ui.editing = null;
-    ui.armed = null;
     ui.memDraft = '';
     ui.step = 0;
     try {
@@ -157,7 +156,7 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
           <p class="group-note">상단 종에 올릴 기록을 정해요. 비서끼리 기록은 어느 쪽이든 모두 남아요.</p></section>
  ${noticeHtml()}${errorHtml('rules')}
         <button class="btn" id="agent-save" style="width:100%;margin-bottom:6px" data-action="agent-save-rules" ${dirty() && !ui.busy ? '' : 'disabled'}>규칙 저장</button>
-        <p class="group-note" style="margin-bottom:22px">바꾼 규칙은 다음 청구서부터 적용돼요. 보낼 시기는 아직 보내지 않은 송금에도 바로 적용돼요.</p>
+        <p class="group-note" style="margin-bottom:22px">바꾼 규칙은 다음 청구서부터 적용돼요. 이미 만들어진 청구서와 송금은 그대로예요.</p>
         <section class="group"><h3 class="group-label"><span>비서의 기억 ${v.memory.length}/${v.memoryLimit}</span><span>무료 요금제</span></h3>
           <div class="list">${memoryRowsHtml(v, roomId, ui)}</div>
           <div class="mem-add"><input data-mem value="${esc(ui.memDraft)}" maxlength="${MEMORY_MAX_CHARS}" placeholder="${full ? '기억이 가득 찼어요' : '예: 술을 마시지 않아요'}" aria-label="새 기억" ${full ? 'disabled' : ''}>
@@ -166,8 +165,7 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
           <p class="group-note">공유한 기억만 이 방의 메뉴 배분과 중재에 쓰여요. 방의 다른 사람도 배분 이유에서 볼 수 있으니, 보이고 싶지 않으면 꺼 주세요. 공유를 꺼도 이미 나눈 지출의 이유는 그대로라서, 지우려면 그 지출을 다시 나눠 주세요.</p></section>
         <section class="group"><h3 class="group-label"><span>받을 계좌</span></h3><div class="list">${payout}</div>
           <p class="group-note">계좌는 하나예요. 바꾸면 내가 받을 모든 방의 대기 중 송금에 새 계좌가 들어가요.</p></section>
-        <section class="group">${historyHtml(v)}</section>
-        <button type="button" class="text-btn" data-action="open-agent-setup">처음 설정 다시 하기</button>`,
+        <section class="group">${historyHtml(v)}</section>`,
     };
   }
 
@@ -228,23 +226,7 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
       if (await send('/api/me/agent/memory/edit', { from: ui.editing, to: ui.editText })) ui.editing = null;
       return rerender();
     }
-    if (name === 'mem-del') {
-      const text = mem(d.i);
-      // 되돌릴 수 없어서 지출 지우기처럼 한 번 더 눌러야 지운다(3초 안에)
-      if (ui.armed !== text) {
-        ui.armed = text;
-        rerender();
-        setTimeout(() => {
-          if (ui.armed === text) {
-            ui.armed = null;
-            rerender();
-          }
-        }, 3000);
-        return undefined;
-      }
-      ui.armed = null;
-      return send('/api/me/agent/memory/delete', { text });
-    }
+    if (name === 'mem-del') return send('/api/me/agent/memory/delete', { text: mem(d.i) });
     if (name === 'mem-share') {
       const text = mem(d.i);
       const hidden = (ui.view.memoryHidden?.[roomId] ?? []).includes(text);
@@ -257,7 +239,6 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
       return rerender();
     }
     if (name === 'setup-skip' || name === 'setup-done') {
-      // 기본값으로 시작은 말 그대로 기본 규칙을 넣는다(처음 설정을 다시 하는 사람의 규칙도 기본값이 된다)
       const body = name === 'setup-done' ? { rules: rulesFromDraft(ui.draft), memory: ui.memDraft } : { rules: DEFAULT_RULES };
       if (await send('/api/me/agent/onboarding', body, { at: 'setup' })) {
         ui.memDraft = '';

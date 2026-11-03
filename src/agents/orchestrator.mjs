@@ -8,7 +8,7 @@ import { HttpError } from '../http.mjs';
 import { isFlagged, awaitsSender } from '../actions.mjs';
 import { evaluateInvoice, nextSendAt } from './rules.mjs';
 import { tossSendLink, payoutFallback } from '../payments/toss.mjs';
-import { signQrToken, revokeQrLink, QR_TTL_MS } from '../payments/qr.mjs';
+import { signQrToken, QR_TTL_MS } from '../payments/qr.mjs';
 import { mediateWithGemini } from './mediate.mjs';
 import { findBank } from '../../public/banks.js';
 import { ON_DISPUTE, sendWhenLabel } from '../../public/agent-rules.js';
@@ -255,41 +255,15 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return out;
   }
 
-  // 주인이 보낼 시기를 바꾸면 아직 보내지 않은 송금의 알림 시각을 옮긴다(모든 방).
-  // 이미 때가 되어 알린 송금(due)은 더 늦추는 쪽으로만 옮긴다. 송금 앱을 연 뒤(opened)로는 돈이 오갔을 수 있어 건드리지 않는다
-  async function applySendWhen(uid, sendWhen) {
-    const now = clock();
-    const remindAt = nextSendAt(now, sendWhen);
-    const later = !remindAt || new Date(remindAt) > now;
-    let moved = 0;
-    for (const t of await store.list('transfers', { from: uid })) {
-      if (t.status !== 'scheduled' && !(t.status === 'due' && later)) continue;
-      const room = await store.get('rooms', t.roomId);
-      if (!room || t.version !== room.version) continue; // 없어진 방 하나 때문에 규칙 저장이 실패하면 안 된다
-      const toName = room.members.find((m) => m.uid === t.to)?.name ?? t.to;
-      const { dueAt, ...rest } = t;
-      await store.put('transfers', { ...rest, status: 'scheduled', remindAt });
-      await say(t.roomId, {
-        from: uid, to: uid, kind: 'transfer_rescheduled',
-        text: `${toName}에게 보낼 ${won(t.amount)}, ${remindText(remindAt, now)}`,
-        meta: `규칙 변경 · ${sendWhenLabel(sendWhen)}`,
-      });
-      moved++;
-    }
-    return moved;
-  }
-
-  // 받을 계좌는 사람마다 하나다. 정하거나 바꾸면 그 사람이 받을 모든 방의 아직 끝나지 않은 송금에 링크를 다시 채운다.
-  // 방 안에서 부르면 그 방에도 알리고(roomId), 설정 화면에서 부르면 송금이 걸린 방에만 알린다(roomId null)
+  // 받을 계좌는 사람마다 하나다. 정하거나 바꾸면 그 사람이 받을 모든 방의 아직 끝나지 않은 송금에 링크를 다시 채운다
   async function setPayout(roomId, actorUid, { bank, accountNo, holder } = {}) {
     if (!String(bank ?? '').trim() || !/\d{6,}/.test(String(accountNo ?? '').replace(/\D/g, ''))) throw new HttpError(400, '은행과 계좌번호를 확인해 주세요');
     const agent = await settingsOf(actorUid);
     // 은행은 목록의 이름으로 통일해 저장한다('국민은행' → 'KB국민은행'). 목록에 없으면 쓴 그대로
     const payout = { bank: (findBank(bank)?.label ?? String(bank).trim()).slice(0, 30), accountNo: String(accountNo).replace(/[^\d-]/g, '').slice(0, 30), holder: String(holder ?? '').trim().slice(0, 30) };
     await store.put('agents', { ...agent, id: actorUid, uid: actorUid, payout });
-    const rooms = new Set(roomId ? [roomId] : []);
+    const rooms = new Set([roomId]);
     for (const t of (await store.list('transfers', { to: actorUid })).filter((x) => ['scheduled', 'due', 'opened'].includes(x.status))) {
-      if (t.link) revokeQrLink(t.link);
       await store.put('transfers', { ...t, ...paymentOf(payout, t.amount) });
       rooms.add(t.roomId);
     }
@@ -400,5 +374,5 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return { due, reminded };
   }
 
-  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers, applySendWhen, setPayout, approveTransfer, qrFor, markSent, reportNotReceived, confirmReceipt, tick };
+  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers, setPayout, approveTransfer, qrFor, markSent, reportNotReceived, confirmReceipt, tick };
 }

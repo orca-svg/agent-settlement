@@ -112,7 +112,6 @@ API 서버 (server.mjs → src/app.mjs)
 | GET | `/api/config` | Gemini 연결 상태 |
 | POST | `/api/allocate`, `/api/mediate` | 데모 화면용 메뉴 배분·중재 |
 | POST | `/api/dev/seed` | 개발용 데모 방 만들기(`DEV_SEED=1`일 때만) |
-| POST | `/api/dev/seed/new-user` | 같은 방을 만들고 `나`의 비서 설정을 지워 처음 설정 흐름을 볼 수 있게 함(막는 조건은 위와 같음) |
 | GET | `/api/rooms/:id` | 방, 지출, 청구서, 이의, 송금, 사람별 차액, 그리고 **내가 처리할 일(`actions`)** |
 | GET | `/api/rooms/:id/events?after=n` | 비서 기록 |
 | POST | `/api/rooms/:id/expenses` | 지출 남기기(직접 입력, 또는 확인을 마친 영수증 줄). 영수증 지출은 `receipt: { mimeType, data }`로 줄인 사진을 함께 저장해요. 방 `version`이 올라가요 |
@@ -130,10 +129,9 @@ API 서버 (server.mjs → src/app.mjs)
 | POST | `/api/rooms/:id/disputes/:did/agree` | 중재안에 동의. 양쪽이 동의하면 지출을 다시 나누고 version을 올려 청구서를 다시 보내요 |
 | POST | `/api/rooms/:id/payout` | 받을 계좌 `{ bank, accountNo, holder }`. 내가 받을 모든 방의 대기 중 송금에 토스 링크를 채워요 |
 | GET | `/api/me/agent` | 내 비서 설정 전체. 계좌번호는 끝 4자리(`payout.last4`)만 내려가요. 방 응답의 `myAgent`는 계좌 유무만 있는 요약이에요 |
-| POST | `/api/me/agent/rules` | 규칙 일부 `{ autoAccept?, sendWhen?, onDispute?, notify? }`. 바뀐 칸만 `ruleHistory`에 남고, 보낼 시기가 바뀌면 대기 중 송금의 알림 시각을 옮겨요 |
+| POST | `/api/me/agent/rules` | 규칙 일부 `{ autoAccept?, sendWhen?, onDispute?, notify? }`. 바뀐 칸만 `ruleHistory`에 남아요. 다음 청구서부터 적용되고, 이미 만들어진 청구서·송금은 그대로예요 |
 | POST | `/api/me/agent/onboarding` | 처음 설정 마치기 `{ rules?, memory? }` |
 | POST | `/api/me/agent/memory` · `memory/edit` · `memory/delete` | 기억 더하기 `{ text }`, 고치기 `{ from, to }`, 지우기 `{ text }`. 한도를 넘으면 409 |
-| POST | `/api/me/agent/payout` | 방 없이 받을 계좌 저장 |
 | POST | `/api/rooms/:id/agent/shared` | 이 방에 기억 하나 공유·끄기 `{ text, shared }`(방 멤버만) |
 | POST | `/api/rooms/:id/transfers/:tid/approve` · `sent` · `confirm` · `not-received` | 송금 화면 열기·보냈어요(보내는 사람), 받았어요·아직 안 들어왔어요(받는 사람). `not-received`는 `sent`일 때만 되고, 상태는 `sent` 그대로 두고 `notReceivedAt`만 붙여 보내는 사람에게 다시 물어요. 보냈다고 한 돈이라 지출이 바뀌어도 대체되지 않고, 받는 사람이 계좌를 바꿔도 링크가 바뀌지 않아요. 보내는 사람이 송금 내역을 보고 `sent`를 다시 부르면 표시를 내리고 `recheckedAt`을 남겨요(지출이 바뀐 뒤여도 돼요). 그 사이 돈이 들어왔으면 `confirm`도 돼요 |
 | POST | `/api/rooms/:id/transfers/:tid/qr` | 컴퓨터 송금 화면에 띄울 QR 토큰 받기(보내는 사람만). 응답 `{ qrToken, expiresAt }`, 15분 뒤 만료. 받을 계좌가 없거나 이미 보낸 송금이면 409(받는 사람이 안 들어왔다고 한 송금은 다시 보낼 수 있게 만들어 줘요) |
@@ -148,7 +146,7 @@ API 서버 (server.mjs → src/app.mjs)
 
 ```bash
 npm start                      # 데모 화면: http://localhost:4500
-DEV_SEED=1 npm start           # 실제 방 화면을 시드 데이터로 열어 볼 때('나를 새 사용자로'는 처음 설정 흐름 확인용)
+DEV_SEED=1 npm start           # 실제 방 화면을 시드 데이터로 열어 볼 때
 npm test                       # 계약·계산 테스트
 ```
 

@@ -117,13 +117,6 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     return { roomId: id };
   });
 
-  // 개발용: '나'를 비서 설정 전의 새 사용자로 둔 데모 방(처음 설정 흐름 확인용). 위 시드를 막는 조건을 그대로 따른다
-  routes.post('/api/dev/seed/new-user', async (ctx) => {
-    const out = await routes.match('POST', '/api/dev/seed').handler(ctx);
-    await store.delete('agents', 'me');
-    return out;
-  });
-
   routes.get('/api/rooms/:id', async ({ req, params }) => {
     const { room, me } = await member(req, params.id);
     const [expenses, invoices, disputes, transfers] = await Promise.all(
@@ -158,8 +151,8 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     if (!who) throw new HttpError(401, '누구인지 알려 주세요');
     return who;
   };
-  const agentSettings = createAgentSettings({ store, clock, orchestrator });
-  registerAgentSettingsRoutes(routes, { settings: agentSettings, orchestrator, whoAmI, member });
+  const agentSettings = createAgentSettings({ store, clock });
+  registerAgentSettingsRoutes(routes, { settings: agentSettings, whoAmI, member });
 
   // 때가 된 송금 알림. 배포에서는 Cloud Scheduler가 x-cron-secret을 붙여 부른다. 비밀값이 설정되지 않았으면 열지 않는다
   routes.post('/api/cron/tick', async ({ req }) => {

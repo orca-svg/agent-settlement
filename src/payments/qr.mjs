@@ -19,11 +19,6 @@ export function signQrToken(link, { now = Date.now } = {}) {
   return token;
 }
 
-// 받는 계좌가 바뀌면 옛 계좌를 가리키는 QR을 바로 죽인다(이미 찍어 둔 QR로 옛 계좌에 보내지 않게)
-export function revokeQrLink(link) {
-  for (const [token, entry] of tokens) if (entry.link === link) tokens.delete(token);
-}
-
 export function verifyQrToken(token, { now = Date.now } = {}) {
   const entry = tokens.get(String(token ?? ''));
   if (!entry) return null;

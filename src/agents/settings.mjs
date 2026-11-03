@@ -1,5 +1,5 @@
 // 개인 비서 설정(#5): 기억, 규칙, 규칙 변경 기록, 처음 설정. agents 문서를 읽고 쓰는 곳은 여기와 orchestrator.setPayout뿐이다.
-// 판단은 rules.mjs, 저장한 규칙이 이미 잡힌 송금에 미치는 영향은 orchestrator가 맡는다.
+// 판단은 rules.mjs가 맡는다. 바꾼 규칙은 다음 청구서부터 적용되고, 이미 만들어진 청구서·송금은 그대로 둔다.
 import { HttpError, readJson } from '../http.mjs';
 import { DEFAULT_RULES, MEMORY_LIMITS, MEMORY_MAX_CHARS, AUTO_ACCEPT_MAX, ON_DISPUTE, NOTIFY, RULE_FIELDS, ruleChangeText } from '../../public/agent-rules.js';
 import { sharedMemory } from './memory.mjs';
@@ -46,7 +46,7 @@ function cleanText(text) {
   return s;
 }
 
-export function createAgentSettings({ store, clock = () => new Date(), orchestrator }) {
+export function createAgentSettings({ store, clock = () => new Date() }) {
   const read = async (uid) => normalizeSettings(await store.get('agents', uid), uid);
   // 본인에게 내려가는 모양. 계좌번호 전체는 설정 화면에 필요 없으니 끝 4자리만 보낸다(바꿀 때는 새로 입력한다)
   const view = ({ payout, ...doc }) => ({
@@ -72,11 +72,6 @@ export function createAgentSettings({ store, clock = () => new Date(), orchestra
       rules[field] = to;
     }
     return { ...doc, rules, ruleHistory: history.slice(-HISTORY_MAX) };
-  }
-
-  // 보낼 시기가 바뀌면 아직 보내지 않은 송금의 알림 시각도 함께 옮긴다
-  async function afterRules(before, after) {
-    if (JSON.stringify(before.rules.sendWhen) !== JSON.stringify(after.rules.sendWhen)) await orchestrator.applySendWhen(after.uid, after.rules.sendWhen);
   }
 
   function withMemory(doc, text) {
@@ -106,21 +101,13 @@ export function createAgentSettings({ store, clock = () => new Date(), orchestra
       };
     },
 
-    async updateRules(uid, input) {
-      const before = await read(uid);
-      const out = await saved(withRules(before, input));
-      await afterRules(before, out);
-      return out;
-    },
+    updateRules: async (uid, input) => saved(withRules(await read(uid), input)),
 
     async finishOnboarding(uid, { rules, memory } = {}) {
-      const before = await read(uid);
-      let doc = withRules(before, rules);
+      let doc = withRules(await read(uid), rules);
       // 처음 설정의 기억 칸은 비워도 된다. 이미 있는 기억이면 그대로 둔다
       if (memory != null && memory !== '' && !doc.memory.includes(cleanText(memory))) doc = withMemory(doc, memory);
-      const out = await saved({ ...doc, onboardedAt: doc.onboardedAt ?? clock().toISOString() });
-      await afterRules(before, out);
-      return out;
+      return saved({ ...doc, onboardedAt: doc.onboardedAt ?? clock().toISOString() });
     },
 
     addMemory: async (uid, text) => saved(withMemory(await read(uid), text)),
@@ -160,7 +147,7 @@ export function createAgentSettings({ store, clock = () => new Date(), orchestra
   };
 }
 
-export function registerAgentSettingsRoutes(routes, { settings, orchestrator, whoAmI, member }) {
+export function registerAgentSettingsRoutes(routes, { settings, whoAmI, member }) {
   const body = async (req) => {
     const json = await readJson(req);
     return json && typeof json === 'object' ? json : {}; // 'null' 같은 본문도 500이 아니라 검증 오류로 끝나게
@@ -176,11 +163,6 @@ export function registerAgentSettingsRoutes(routes, { settings, orchestrator, wh
   mine('/memory', (uid, { text }) => settings.addMemory(uid, text));
   mine('/memory/edit', (uid, { from, to }) => settings.editMemory(uid, from, to));
   mine('/memory/delete', (uid, { text }) => settings.deleteMemory(uid, text));
-  // 받을 계좌는 사람마다 하나. 방 없이 바꿔도 내가 받을 모든 방의 대기 중 송금이 함께 바뀐다
-  mine('/payout', async (uid, input) => {
-    await orchestrator.setPayout(null, uid, input);
-    return settings.get(uid);
-  });
 
   routes.post('/api/rooms/:id/agent/shared', async ({ req, params }) => {
     const { me } = await member(req, params.id);

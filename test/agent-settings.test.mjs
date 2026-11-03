@@ -10,7 +10,6 @@ import { sharedMemory, roomMemory } from '../src/agents/memory.mjs';
 import { evidenceFor } from '../src/agents/evidence.mjs';
 import { pendingActions } from '../src/actions.mjs';
 import { createApp } from '../src/app.mjs';
-import { signQrToken, verifyQrToken } from '../src/payments/qr.mjs';
 import { notifies, DEFAULT_RULES, ruleChangeText } from '../public/agent-rules.js';
 import { draftFromRules, rulesFromDraft, memoryRowsHtml, historyHtml, limitHtml } from '../public/agent-panel.js';
 
@@ -24,7 +23,7 @@ async function setup({ evidence = false, store = new MemoryStore() } = {}) {
   }
   const clock = { now: new Date('2026-11-10T03:00:00Z') };
   const orch = createOrchestrator({ store, clock: () => clock.now, ...(evidence ? { evidenceFor } : {}) });
-  const settings = createAgentSettings({ store, clock: () => clock.now, orchestrator: orch });
+  const settings = createAgentSettings({ store, clock: () => clock.now });
   const invoiceOf = async (uid) => {
     const { version } = await store.get('rooms', ROOM);
     return (await store.list('invoices', { roomId: ROOM })).find((i) => i.to === uid && i.version === version);
@@ -131,42 +130,17 @@ test('직접 보내기: 알림 시각이 없고, 시간이 지나도 알리지 �
   assert.equal((await ctx.orch.markSent(ROOM, t.id, 'cs')).status, 'sent');
 });
 
-test('보낼 시기를 바꾸면 아직 보내지 않은 송금의 알림 시각이 함께 옮겨 간다', async () => {
+test('보낼 시기를 바꿔도 이미 만들어진 송금은 그대로고, 다음 청구서부터 적용된다', async () => {
   const ctx = await setup();
   await ctx.settings.updateRules('cs', { sendWhen: { payday: 25 } });
   await ctx.orch.sendInvoices(ROOM, 'me');
-  const id = pair(await ctx.transfers(), 'cs', 'me').id;
-  const other = pair(await ctx.transfers(), 'ms', 'me');
-
+  const before = pair(await ctx.transfers(), 'cs', 'me');
   await ctx.settings.updateRules('cs', { sendWhen: 'manual' });
-  assert.equal((await ctx.store.get('transfers', id)).remindAt, null);
-
-  await ctx.settings.updateRules('cs', { sendWhen: { payday: 12 } });
-  assert.equal((await ctx.store.get('transfers', id)).remindAt, '2026-11-12T00:00:00.000Z');
-
-  await ctx.settings.updateRules('cs', { sendWhen: 'now' });
-  await ctx.orch.tick();
-  assert.equal((await ctx.store.get('transfers', id)).status, 'due');
-
-  // 이미 알린 송금을 뒤로 미루면 할 일에서 빠지고 예약으로 돌아간다
-  await ctx.settings.updateRules('cs', { sendWhen: { payday: 25 } });
-  const moved = await ctx.store.get('transfers', id);
-  assert.deepEqual([moved.status, moved.remindAt, moved.dueAt], ['scheduled', '2026-11-25T00:00:00.000Z', undefined]);
-
-  // 다른 사람의 송금은 그대로다
-  assert.equal((await ctx.store.get('transfers', other.id)).remindAt, other.remindAt);
-  assert.match((await ctx.metas('transfer_rescheduled')).at(-1), /규칙 변경 · 매달 25일에 보내기/);
-});
-
-test('이미 송금 앱을 열었거나 보낸 송금, 대체된 송금은 보낼 시기를 바꿔도 그대로다', async () => {
-  const ctx = await setup();
+  assert.deepEqual(await ctx.store.get('transfers', before.id), before);
+  const room = await ctx.store.get('rooms', ROOM);
+  await ctx.store.put('rooms', { ...room, version: room.version + 1 });
   await ctx.orch.sendInvoices(ROOM, 'me');
-  const ts = await ctx.transfers();
-  const opened = await ctx.orch.approveTransfer(ROOM, pair(ts, 'cs', 'me').id, 'cs');
-  const sent = await ctx.orch.markSent(ROOM, pair(ts, 'cs', 'yh').id, 'cs');
-  await ctx.settings.updateRules('cs', { sendWhen: 'manual' });
-  assert.deepEqual(await ctx.store.get('transfers', opened.id), opened);
-  assert.deepEqual(await ctx.store.get('transfers', sent.id), sent);
+  assert.equal(pair((await ctx.transfers()).filter((t) => t.version === room.version + 1), 'cs', 'me').remindAt, null);
 });
 
 // ---------------------------------------------------------------- 규칙 저장과 변경 기록
@@ -351,7 +325,7 @@ test('계좌를 바꾸면 그 사람이 받을 모든 방의 대기 중 송금 �
   const ctx = await twoRooms();
   const list = async (id) => ctx.store.list('transfers', { roomId: id });
   const sent = await ctx.orch.markSent(ROOM, pair(await list(ROOM), 'cs', 'me').id, 'cs');
-  await ctx.orch.setPayout(null, 'me', NEW_ACCOUNT);
+  await ctx.orch.setPayout(ROOM, 'me', NEW_ACCOUNT);
   for (const id of [ROOM, 'demo-u']) {
     const t = pair(await list(id), 'ms', 'me');
     assert.match(t.link, /accountNo=123456789012/, id);
@@ -382,22 +356,13 @@ test('처음 계좌를 정하면 비어 있던 링크가 모든 방에서 채워
   assert.ok(!pendingActions({ room, transfers: await store.list('transfers', { roomId: 'demo-u' }) }).some((a) => a.type === 'set_payout'));
 });
 
-test('계좌를 바꾸면 옛 계좌를 가리키던 QR이 바로 무효가 된다', async () => {
-  const ctx = await twoRooms();
-  const t = pair(await ctx.transfers(), 'ms', 'me');
-  const token = signQrToken(t.link);
-  assert.equal(verifyQrToken(token), t.link);
-  await ctx.orch.setPayout(null, 'me', NEW_ACCOUNT);
-  assert.equal(verifyQrToken(token), null);
-});
-
 test('암호화 저장소: 여러 방을 고쳐도 저장소에는 잠긴 글자만 남고, 규칙·기억은 읽을 수 있다', async () => {
   const inner = new MemoryStore();
   const store = encryptedStore(inner, Buffer.alloc(32, 7));
   const ctx = await twoRooms(store);
   await ctx.settings.updateRules('me', { autoAccept: 12345 });
   await ctx.settings.addMemory('me', '새 기억');
-  await ctx.orch.setPayout(null, 'me', NEW_ACCOUNT);
+  await ctx.orch.setPayout(ROOM, 'me', NEW_ACCOUNT);
   const raw = JSON.stringify([await inner.get('agents', 'me'), await inner.list('transfers', { to: 'me' })]);
   assert.ok(!raw.includes('123456789012') && !raw.includes('123-456-789012'));
   assert.ok(raw.includes('새 기억') && raw.includes('12345'));
@@ -438,7 +403,7 @@ test('처음 설정: 잘못된 값이나 가득 찬 기억이면 아무것도 �
 });
 
 // ---------------------------------------------------------------- API
-test('API: 시드 fresh로 새 사용자를 만들고, 처음 설정부터 청구까지 이어진다', async () => {
+test('API: 새 사용자의 처음 설정, 규칙, 기억, 계좌', async () => {
   const store = new MemoryStore();
   const server = createApp({ store, env: { DEV_SEED: '1' } });
   await new Promise((r) => server.listen(0, r));
@@ -448,8 +413,8 @@ test('API: 시드 fresh로 새 사용자를 만들고, 처음 설정부터 청�
     return { status: res.status, json: await res.json() };
   };
   try {
-    const { roomId } = (await req('/api/dev/seed/new-user', null, {})).json;
-    assert.equal(await store.get('agents', 'me'), null);
+    const { roomId } = (await req('/api/dev/seed', null, {})).json;
+    await store.delete('agents', 'me'); // 비서를 아직 설정하지 않은 새 사용자
     assert.ok(await store.get('agents', 'cs'), '다른 사람은 그대로');
     const first = (await req(`/api/rooms/${roomId}`, 'me')).json;
     assert.deepEqual([first.myAgent.onboarded, first.myAgent.autoAccept, first.myAgent.hasPayout], [false, 0, false]);
@@ -460,17 +425,16 @@ test('API: 시드 fresh로 새 사용자를 만들고, 처음 설정부터 청�
     assert.equal((await req('/api/me/agent', 'me')).json.rules.sendWhen, 'manual');
     assert.equal((await req(`/api/rooms/${roomId}`, 'me')).json.myAgent.onboarded, true);
 
-    const paid = await req('/api/me/agent/payout', 'me', { bank: '토스뱅크', accountNo: '1000-1234-5678', holder: '나' });
-    assert.deepEqual(paid.json.payout, { bank: '토스뱅크', holder: '나', last4: '5678' });
+    assert.equal((await req(`/api/rooms/${roomId}/payout`, 'me', { bank: '토스뱅크', accountNo: '1000-1234-5678', holder: '나' })).status, 200);
+    assert.deepEqual((await req('/api/me/agent', 'me')).json.payout, { bank: '토스뱅크', holder: '나', last4: '5678' });
     assert.equal((await store.get('agents', 'me')).payout.accountNo, '1000-1234-5678', '저장은 전체 번호');
-    assert.equal((await req('/api/me/agent/payout', 'me', { bank: '', accountNo: '1' })).status, 400);
 
     // 방 응답에는 계좌번호가 없다. 설정 전체는 본인 신원으로만 읽는다
     const summary = JSON.stringify((await req(`/api/rooms/${roomId}`, 'me')).json.myAgent);
     assert.ok(!summary.includes('1234') && summary.includes('"hasPayout":true'));
     const full = JSON.stringify((await req('/api/me/agent', 'cs')).json);
     assert.ok(full.includes('"holder":"철수"') && !full.includes('accountNo') && !full.includes('100000000002'), '설정 응답에도 계좌번호 전체는 없다');
-    for (const path of ['/rules', '/memory', '/memory/edit', '/memory/delete', '/payout', '/onboarding']) {
+    for (const path of ['/rules', '/memory', '/memory/edit', '/memory/delete', '/onboarding']) {
       const res = await fetch(`${url}/api/me/agent${path}`, { method: 'POST', headers: { 'x-demo-user': 'cs', 'content-type': 'application/json' }, body: 'null' });
       assert.ok(res.status < 500, `${path}: 본문이 null이어도 500이 아니다(${res.status})`);
     }
@@ -489,44 +453,12 @@ test('API: 시드 fresh로 새 사용자를 만들고, 처음 설정부터 청�
   }
 });
 
-test('시드: 새 사용자 방을 만들면 예전에 설정한 문서가 있어도 지운다. 시드를 막으면 함께 막힌다', async () => {
-  const store = new MemoryStore();
-  const open = createApp({ store, env: { DEV_SEED: '1' } });
-  const closed = createApp({ store: new MemoryStore(), env: {} });
-  await Promise.all([new Promise((r) => open.listen(0, r)), new Promise((r) => closed.listen(0, r))]);
-  try {
-    await fetch(`http://localhost:${open.address().port}/api/dev/seed`, { method: 'POST' });
-    assert.ok((await store.get('agents', 'me')).onboardedAt);
-    const res = await fetch(`http://localhost:${open.address().port}/api/dev/seed/new-user`, { method: 'POST' });
-    assert.ok((await res.json()).roomId);
-    assert.equal(await store.get('agents', 'me'), null);
-    assert.equal((await fetch(`http://localhost:${closed.address().port}/api/dev/seed/new-user`, { method: 'POST' })).status, 404);
-  } finally {
-    open.close();
-    closed.close();
-  }
-});
-
-test('없어진 방의 송금이 남아 있어도 규칙 저장과 계좌 저장은 끝까지 된다', async () => {
+test('없어진 방의 송금이 남아 있어도 계좌 저장은 끝까지 되고, 그 방에는 기록을 만들지 않는다', async () => {
   const ctx = await setup();
-  await ctx.settings.updateRules('cs', { sendWhen: { payday: 25 } });
   await ctx.orch.sendInvoices(ROOM, 'me');
   await ctx.store.put('transfers', { id: 'ghost', roomId: 'gone', version: 1, from: 'cs', to: 'me', amount: 100, status: 'scheduled', remindAt: null, link: null, fallback: null });
-  await ctx.settings.updateRules('cs', { sendWhen: 'manual' });
-  assert.equal(pair(await ctx.transfers(), 'cs', 'me').remindAt, null);
-  await ctx.orch.setPayout(null, 'me', NEW_ACCOUNT);
-  assert.deepEqual(await ctx.store.listEvents('gone'), [], '없는 방에는 기록을 만들지 않는다');
-});
-
-test('지출이 바뀌어 대체될 예전 version의 송금은 보낼 시기를 바꿔도 건드리지 않는다', async () => {
-  const ctx = await setup();
-  await ctx.settings.updateRules('cs', { sendWhen: { payday: 25 } });
-  await ctx.orch.sendInvoices(ROOM, 'me');
-  const old = pair(await ctx.transfers(), 'cs', 'me');
-  const room = await ctx.store.get('rooms', ROOM);
-  await ctx.store.put('rooms', { ...room, version: room.version + 1 });
-  await ctx.settings.updateRules('cs', { sendWhen: 'manual' });
-  assert.equal((await ctx.store.get('transfers', old.id)).remindAt, old.remindAt);
+  await ctx.orch.setPayout(ROOM, 'me', NEW_ACCOUNT);
+  assert.deepEqual(await ctx.store.listEvents('gone'), []);
 });
 
 test('처음 설정: 기본값으로 시작을 다시 고르면 규칙이 기본값으로 돌아가고 기록에 남는다', async () => {
