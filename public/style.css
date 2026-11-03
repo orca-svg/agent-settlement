@@ -251,6 +251,8 @@ h1, h2, h3, p { margin: 0; }
   cursor: pointer;
   transition: transform 100ms ease-out, opacity 100ms ease-out;
 }
+/* 링크로 만든 버튼도 버튼과 똑같이 보이게(밑줄·방문 색 없이) */
+a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 .btn:active { transform: scale(0.97); opacity: 0.85; }
 .btn.secondary { background: var(--tint-soft); color: var(--tint); }
 .btn.plain { background: var(--fill); color: var(--label); }
