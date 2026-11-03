@@ -52,7 +52,8 @@ const ICONS = {
 export const tile = (kind) => `<span class="tile ${ICONS[kind] ? kind : 'shop'}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICONS[kind] || ICONS.shop}</svg></span>`;
 export const CHEVRON = '<svg class="chev" width="8" height="14" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 export const CHECK = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-export const ARROW = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+export const ALERT = '<svg class="alert-ico" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5l9 15.5H3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4.5M12 17.4v.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+export const ARROW ='<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 // 데스크톱에서 휴대폰으로 넘길 때 보여줄 QR 이미지 주소(#8).
 // 외부 서비스(api.qrserver.com)를 쓴다. 오프라인 데모가 필요해지면 이 함수만 바꾸면 된다.
@@ -76,6 +77,58 @@ export function allocButton({ allocated, fresh, flagged }) {
   if (!fresh) return { label: '비서에게 다시 나누기', disabled: false, hint: '' };
   if (flagged) return { label: '비서가 나누기를 마쳤어요', disabled: true, hint: `확인 필요한 ${flagged}줄만 확인하면 끝나요.` };
   return { label: '나누기를 모두 마쳤어요', disabled: true, hint: '지출을 고치거나 비서의 기억이 바뀌면 다시 나눌 수 있어요.' };
+}
+
+// 청구서를 막는 줄(비서가 근거 없이 짐작하지 않고 사람에게 물은 줄)을 지출별로 모은다.
+// 서버의 sendInvoices가 409로 막는 기준(src/actions.mjs의 isFlagged)을 받아 쓴다. 화면이 서버를 기다리지 않고 같은 판단을 하려는 것이다
+export function flaggedLines(expenses, isFlagged) {
+  return expenses.flatMap((e) => {
+    const lines = (e.items ?? []).filter((it) => isFlagged(e.alloc?.[it.id])).map((it) => ({ id: it.id, name: it.name }));
+    return lines.length ? [{ expId: e.id, title: e.title, owner: e.createdBy, lines }] : [];
+  });
+}
+
+// 청구서 보내기를 눌렀는데 막혔을 때 버튼 아래에 보일 안내: 몇 줄이 남았고, 어느 지출의 어느 줄을, 누가 확인해야 하는지, 어디로 가면 되는지.
+// 지출마다 한 줄이고, 그 지출의 첫 줄로 안내한다. 데모 방에는 이름이 '나'인 사람이 있어 내가 보는 사람이 아닐 때는 ‘나’로 따옴표를 쳐서 구분한다
+export function blockedNotice(groups, { me, nameOf }) {
+  if (!groups.length) return null;
+  const total = groups.reduce((n, g) => n + g.lines.length, 0);
+  const who = (uid) => (uid === me ? '내가' : nameOf(uid) === '나' ? '‘나’가' : subj(nameOf(uid)));
+  return {
+    title: '청구서를 아직 보낼 수 없어요',
+    lead: `비서가 짐작하지 않고 물어본 줄이 ${total}줄 남았어요.`,
+    rows: groups.map((g) => {
+      const [first] = g.lines;
+      const more = g.lines.length - 1;
+      return { expId: g.expId, lineId: first.id, what: `${g.title}의 ‘${first.name}’${more ? ` 외 ${more}줄` : ''}`, who: `${who(g.owner)} 확인해야 해요`, label: '확인하러 가기' };
+    }),
+  };
+}
+
+// 안 된다는 뜻으로 버튼을 좌우로 흔든다. 스프링에 처음 속도만 주고 제자리(0)를 목표로 두면 감쇠하며 두세 번 흔들리다 멈춘다.
+// 손으로 만지는 움직임과 같은 스프링이라, 흔들리는 중에 다시 눌러도 지금 위치에서 이어서 흔든다. 움직임 줄이기면 흔들지 않는다(false)
+const shakes = new WeakMap();
+export function shake(el, { velocity = 460, damping = 0.16, response = 0.18 } = {}) {
+  if (reduceMotion.matches) return false;
+  let spring = shakes.get(el);
+  if (!spring) {
+    spring = new Spring(0, (v) => {
+      // 움직이는 동안은 .btn의 CSS 전환(100ms)이 스프링을 둔하게 만들지 않도록 끈다
+      el.style.transition = v ? 'none' : '';
+      el.style.transform = v ? `translate3d(${v}px, 0, 0)` : '';
+    });
+    shakes.set(el, spring);
+  }
+  spring.to(0, { damping, response, velocity });
+  return true;
+}
+
+// 막혔다는 걸 누른 버튼 자리에서 알린다. 움직임 줄이기면 흔드는 대신 글자만 잠깐 밑줄로 강조한다(위치·색은 그대로. style.css의 [data-nudge])
+export function nudge(el, ms = 1600) {
+  if (!reduceMotion.matches) return shake(el);
+  el.setAttribute('data-nudge', '');
+  setTimeout(() => el.removeAttribute('data-nudge'), ms);
+  return false;
 }
 
 // 컴퓨터인지는 화면 너비가 아니라 마우스로 가리키는지로 본다(#8). 가로로 돌린 휴대폰은 넓어도 토스가 바로 열리기 때문이다

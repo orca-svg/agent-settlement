@@ -1,7 +1,8 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh, receiptPickers, sendMode, COMPUTER_QUERY } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, flaggedLines, blockedNotice, nudge, COMPUTER_QUERY } from './ui.js';
+import { reduceMotion } from './motion.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
@@ -9,7 +10,7 @@ import { BANKS } from './banks.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
-const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null };
+const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null, sendBlocked: false, announceBlocked: false, focusLine: null };
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
@@ -256,10 +257,13 @@ function linesHtml(exp) {
     const flag = isFlagged(a);
     const picks = exp.present.map((u) => `<button type="button" class="pick" aria-pressed="${chosen.includes(u)}" ${a ? '' : 'disabled'}
         data-action="pick" data-exp="${esc(exp.id)}" data-line="${esc(it.id)}" data-p="${esc(u)}">${avatar(u)}${esc(nameOf(u))}</button>`).join('');
+    // 확인이 필요한 줄이 내 것이 아니면 누구의 확인인지 함께 보인다(청구서 보내기가 막혀 여기로 왔을 때 길을 잃지 않게)
+    const owner = flag && exp.createdBy !== state.data.me.uid ? chip(`${nameOf(exp.createdBy)}의 확인 필요`, 'warn') : '';
     const confirmBtn = a && (flag || edited)
-      ? `<div><button class="btn sm ${flag ? 'secondary' : 'plain'}" data-action="confirm-line" data-exp="${esc(exp.id)}" data-line="${esc(it.id)}">${edited ? '이대로 확인' : '비서가 짐작한 대로 확인'}</button></div>`
+      ? `<div class="line-foot"><button class="btn sm ${flag ? 'secondary' : 'plain'}" data-action="confirm-line" data-exp="${esc(exp.id)}" data-line="${esc(it.id)}">${edited ? '이대로 확인' : '비서가 짐작한 대로 확인'}</button>${owner}</div>`
       : '';
-    return `<div class="line ${flag ? 'flag' : ''}">
+    const focus = state.focusLine?.exp === exp.id && state.focusLine.line === it.id;
+    return `<div class="line ${flag ? 'flag' : ''}${focus ? ' focus' : ''}" data-line-id="${esc(it.id)}"${focus ? ' aria-current="true"' : ''}>
       <div class="line-top"><span class="line-name">${it.time ? `<small style="margin:0 6px 0 0">${esc(it.time)}</small>` : ''}${esc(it.name)}<small>×${it.qty}</small></span><span class="num">${money(it.qty * it.unit, exp.currency)}</span></div>
       <div class="picks">${picks}</div>
       <p class="reason">${a ? esc(a.confirmed ? `${a.reason ? `${a.reason} ` : ''}(확인함)` : a.reason) : '아직 나누지 않았어요.'}</p>
@@ -380,6 +384,8 @@ async function act(name, d) {
     state.expId = d.id;
     state.formError = '';
     state.sheet = 'exp';
+    // 막힌 줄에서 왔으면 그 줄로 스크롤해 강조한다(renderSheet). 그냥 지출을 연 것이면 처음부터 보인다
+    state.focusLine = d.line ? { exp: d.id, line: d.line, pending: true } : null;
     sheet.open(renderSheet);
   } else if (name === 'allocate-exp') {
     if (!state.allocating) allocateExpense(d.id);
@@ -391,6 +397,7 @@ async function act(name, d) {
     if (set.size) edits[d.line] = exp.present.filter((u) => set.has(u));
     renderSheet();
   } else if (name === 'confirm-line') {
+    if (state.focusLine?.exp === d.exp && state.focusLine.line === d.line) state.focusLine = null; // 확인했으니 강조는 거둔다
     confirmLine(d.exp, d.line);
   } else if (name === 'add-mode') {
     state.addMode = d.id;
@@ -576,6 +583,23 @@ function renderSheet() {
   body.innerHTML = exp ? expSheetHtml(exp) : addSheetHtml();
   body.scrollTop = top;
   mountSegs(body);
+  if (exp && state.focusLine?.pending) revealLine(body);
+}
+
+// 막힌 줄이 시트 가운데에 오도록 스크롤하고, 강조 테두리가 안쪽으로 내려앉게 한다.
+// 시트가 아직 올라오는 중에 미리 맞춰 두므로 그 위에 움직임을 더하지 않는다. 움직임 줄이기면 테두리만 남는다(.line.focus)
+function revealLine(body) {
+  const f = state.focusLine;
+  f.pending = false; // 이벤트로 다시 그려도 스크롤을 되돌리지 않고 테두리만 남는다
+  const el = body.querySelector(`.line[data-line-id="${CSS.escape(f.line)}"]`);
+  if (!el) return;
+  const at = el.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+  body.scrollTop = Math.max(0, at - (body.clientHeight - el.offsetHeight) / 2);
+  if (reduceMotion.matches) return;
+  el.animate(
+    [{ boxShadow: 'inset 0 0 0 8px color-mix(in srgb, var(--orange) 28%, transparent)' }, { boxShadow: 'inset 0 0 0 2px var(--orange)' }],
+    { duration: 520, delay: 240, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)', fill: 'backwards' },
+  );
 }
 
 function renderChannel() {
@@ -608,7 +632,7 @@ function actionButtons(a, size = '') {
   const id = esc(a.ref);
   switch (a.type) {
     case 'confirm_line':
-      return `<button class="${cls}" data-action="open-exp" data-id="${esc(a.expenseId)}">확인하기</button>`;
+      return `<button class="${cls}" data-action="open-exp" data-id="${esc(a.expenseId)}" data-line="${esc(a.itemId)}">확인하기</button>`;
     case 'answer_invoice':
       return `<button class="${cls}" data-action="open-invoice" data-id="${id}">청구서 보기</button>`;
     case 'agree_dispute':
@@ -657,10 +681,15 @@ function settlingCard(addButtons) {
   const current = invoices.filter((i) => i.version === room.version);
   if (!current.length) {
     if (!expenses.length) return '';
+    // 확인이 필요한 줄이 있으면 서버가 막는다. 미리 알리지 않고, 버튼을 눌렀을 때 그 자리에서 까닭을 알린다(agentAct의 send-invoices)
+    const notice = blockedNotice(flaggedLines(expenses, isFlagged), { me: state.data.me.uid, nameOf });
+    if (!notice) state.sendBlocked = false; // 막던 줄을 모두 확인했으면 안내는 저절로 사라진다
+    const blocked = state.sendBlocked ? notice : null;
     return `<section class="next"><p class="eyebrow">다음에 할 일</p><h2>이대로 청구서를 보낼까요?</h2>
       <p>보내면 각자의 비서가 자기 규칙대로 확인해요. 단톡방에는 아무것도 올라가지 않아요.${invoices.length ? ' 지출이 바뀌어서 다시 보내야 해요.' : ''}</p>
       ${state.formError && !state.sheet ? `<p class="form-error" role="alert">${esc(state.formError)}</p>` : ''}
-      <div class="actions"><button class="btn" data-action="send-invoices">비서들에게 청구서 보내기</button>${addButtons}</div></section>`;
+      <div class="actions"><button class="btn" data-action="send-invoices"${blocked ? ' aria-describedby="send-blocked"' : ''}>비서들에게 청구서 보내기</button>${addButtons}</div>
+      ${blocked ? blockedHtml(blocked, state.announceBlocked) : ''}</section>`;
   }
   const live = transfers.filter((t) => t.version === room.version);
   const done = live.length ? live.every((t) => t.status === 'confirmed') : current.every((i) => i.status === 'accepted');
@@ -672,7 +701,26 @@ function settlingCard(addButtons) {
     <p>누가 무엇을 하고 있는지는 아래 '누가 누구에게'와 비서끼리 기록에서 볼 수 있어요. 내 차례가 되면 여기에 올려요.</p><div class="actions">${addButtons}</div></section>`;
 }
 
-const formError = () => (state.formError ? `<p class="form-error" role="alert">${esc(state.formError)}</p>` : '');
+// 청구서를 막는 줄 안내. 몇 줄인지, 어느 지출의 줄인지, 누가 확인할지를 글로 쓰고(색에만 기대지 않는다) 줄마다 그리로 가는 버튼을 둔다.
+// 스크린리더에는 눌렀을 때 한 번만 읽어 준다(announce). 이벤트로 다시 그릴 때마다 읽으면 시끄럽다
+function blockedHtml(n, announce) {
+  return `<div class="blocked" id="send-blocked"${announce ? ' role="alert"' : ''}>
+    <p class="blocked-title">${ALERT}${esc(n.title)}</p>
+    <p class="blocked-lead">${esc(n.lead)}</p>
+    <ul>${n.rows.map((r) => `<li><span class="blocked-what">${esc(r.what)}<small>${esc(r.who)}</small></span>
+      <button class="btn sm secondary" data-action="open-exp" data-id="${esc(r.expId)}" data-line="${esc(r.lineId)}" aria-label="${esc(`${r.what} ${r.label}`)}">${esc(r.label)}</button></li>`).join('')}</ul></div>`;
+}
+
+// 눌러서 막힌 버튼 자리에서 알린다. 그리는 사이 잃은 초점을 돌려주고, 안내가 화면 밖이면 보이게 한 뒤, 버튼을 흔든다
+function alertBlocked() {
+  const btn = $('[data-action="send-invoices"]');
+  if (!btn) return;
+  btn.focus({ preventScroll: true });
+  $('#send-blocked')?.scrollIntoView({ block: 'nearest', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+  nudge(btn);
+}
+
+const formError = () => (state.formError ?`<p class="form-error" role="alert">${esc(state.formError)}</p>` : '');
 const notFound = (title) => ({ title, html: '<p class="empty">찾을 수 없어요. 지출이 바뀌어 대체됐을 수 있어요.</p>' });
 
 // 한도를 넘어 비서가 물은 청구서: 이대로 받거나, 지출 하나를 골라 이의를 낸다
@@ -930,12 +978,22 @@ async function agentAct(name, d) {
     if (t?.fallback) navigator.clipboard?.writeText(t.fallback.accountNo).catch(() => {});
     if (t?.link) location.href = t.link;
   } else if (name === 'send-invoices') {
-    state.busy = 'send';
-    state.formError = '';
+    const blocked = () => flaggedLines(state.data.expenses, isFlagged).length > 0;
+    // 확인이 필요한 줄이 남았으면 서버도 409로 막는다. 같은 기준으로 먼저 알아 기다림 없이 그 자리에서 알린다.
+    // 그 사이 다른 사람이 줄을 만들어 서버가 먼저 막았어도 post가 방을 다시 불러온 뒤라 같은 안내로 이어진다
+    if (!blocked()) {
+      state.busy = 'send';
+      state.formError = '';
+      render();
+      await post('/invoices/send');
+      state.busy = null;
+    }
+    state.sendBlocked = blocked();
+    state.announceBlocked = state.sendBlocked;
+    if (state.sendBlocked) state.formError = ''; // 서버의 409 문구는 안내가 대신한다
     render();
-    await post('/invoices/send');
-    state.busy = null;
-    render();
+    state.announceBlocked = false;
+    if (state.sendBlocked) alertBlocked();
   } else if (name === 'open-invoice') {
     state.disputeDraft = null;
     openAgentSheet('invoice', d.id);
@@ -1066,6 +1124,7 @@ const sheet = createSheet($('#sheet-root'), {
   onClosed: () => {
     state.sheet = null;
     state.editing = null;
+    state.focusLine = null;
     state.ref = null;
     state.disputeDraft = null;
     state.transferNote = null;

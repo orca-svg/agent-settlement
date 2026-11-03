@@ -1,7 +1,8 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode } from '../public/ui.js';
+import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode, flaggedLines, blockedNotice, shake, nudge } from '../public/ui.js';
+import { reduceMotion } from '../public/motion.js';
 
 test('allocButton: 나눈 뒤 바뀐 게 없으면 막고, 남은 일을 알려 준다', () => {
   assert.deepEqual(allocButton({ allocated: false, fresh: false, flagged: 0 }), { label: '비서에게 나누기 맡기기', disabled: false, hint: '' });
@@ -100,4 +101,141 @@ test('receiptPickers: 휴대폰·태블릿은 카메라로 찍기와 앨범에�
 
 test('receiptPickers: 컴퓨터는 capture 없이 파일 고르기 하나만', () => {
   assert.deepEqual(pickers(receiptPickers(false)), [['사진 고르기', null]]);
+});
+
+// ---------------------------------------------------------------- 청구서를 막는 줄(확인이 필요한 줄) 안내
+const flagged = (a) => Boolean(a) && a.confidence < 0.7 && !a.confirmed; // src/actions.mjs의 isFlagged와 같은 기준
+const nameOf = (uid) => ({ me: '나', cs: '철수', yh: '영희', ms: '민수' })[uid] ?? uid;
+const izakaya = { id: 'e2', title: '이자카야 저녁', createdBy: 'cs', items: [{ id: 'i1', name: '오차즈케' }, { id: 'i2', name: '하이볼' }], alloc: { i1: { confidence: 0.4 }, i2: { confidence: 0.9 } } };
+const expenses = [
+  { id: 'e1', title: '난바 호텔 2박', createdBy: 'me', items: [{ id: 'i1', name: '숙박' }], alloc: { i1: { confidence: 0.9 } } },
+  izakaya,
+  { id: 'e3', title: '라멘', createdBy: 'yh' }, // 영수증 줄이 없다
+  { id: 'e4', title: '소바', createdBy: 'ms', items: [{ id: 'i1', name: '소바' }] }, // 아직 나누기 전
+];
+
+test('flaggedLines: 확인이 필요한 줄만 지출별로 모은다', () => {
+  assert.deepEqual(flaggedLines(expenses, flagged), [{ expId: 'e2', title: '이자카야 저녁', owner: 'cs', lines: [{ id: 'i1', name: '오차즈케' }] }]);
+  assert.deepEqual(flaggedLines([expenses[0], expenses[2], expenses[3]], flagged), []);
+  const confirmed = { ...izakaya, alloc: { ...izakaya.alloc, i1: { confidence: 0.4, confirmed: true } } };
+  assert.deepEqual(flaggedLines([confirmed], flagged), []); // 사람이 확인한 줄은 더 막지 않는다
+});
+
+test('blockedNotice: 몇 줄이 남았고 어느 지출의 줄이며 누가 확인할지, 어디로 가야 하는지 알린다', () => {
+  const groups = flaggedLines(expenses, flagged);
+  assert.deepEqual(blockedNotice(groups, { me: 'ms', nameOf }), {
+    title: '청구서를 아직 보낼 수 없어요',
+    lead: '비서가 짐작하지 않고 물어본 줄이 1줄 남았어요.',
+    rows: [{ expId: 'e2', lineId: 'i1', what: '이자카야 저녁의 ‘오차즈케’', who: '철수가 확인해야 해요', label: '확인하러 가기' }],
+  });
+  assert.equal(blockedNotice([], { me: 'ms', nameOf }), null); // 막는 줄이 없으면 안내도 없다
+});
+
+test('blockedNotice: 내 줄이면 내가, 줄이 여럿이면 지출마다 한 줄씩 보여 주고 첫 줄로 안내한다', () => {
+  const two = { ...izakaya, alloc: { i1: { confidence: 0.4 }, i2: { confidence: 0.5 } } };
+  const other = { id: 'e5', title: '난바 호텔 2박', createdBy: 'yh', items: [{ id: 'i9', name: '조식' }], alloc: { i9: { confidence: 0.2 } } };
+  const n = blockedNotice(flaggedLines([two, other], flagged), { me: 'cs', nameOf });
+  assert.equal(n.lead, '비서가 짐작하지 않고 물어본 줄이 3줄 남았어요.');
+  assert.deepEqual(n.rows.map((r) => [r.what, r.who, r.lineId]), [
+    ['이자카야 저녁의 ‘오차즈케’ 외 1줄', '내가 확인해야 해요', 'i1'],
+    ['난바 호텔 2박의 ‘조식’', '영희가 확인해야 해요', 'i9'],
+  ]);
+});
+
+test('blockedNotice: 데모 방의 이름 "나"는 보는 사람이 아닐 때 내가로 읽히지 않는다', () => {
+  const mine = flaggedLines([{ ...izakaya, createdBy: 'me' }], flagged);
+  assert.equal(blockedNotice(mine, { me: 'me', nameOf }).rows[0].who, '내가 확인해야 해요');
+  assert.equal(blockedNotice(mine, { me: 'yh', nameOf }).rows[0].who, '‘나’가 확인해야 해요');
+});
+
+// 가짜 프레임 시계: requestAnimationFrame을 1/60초씩 직접 돌려 스프링이 멈출 때까지 지켜본다
+function frames() {
+  const queue = new Map();
+  let id = 0;
+  let t = 0;
+  globalThis.requestAnimationFrame = (cb) => { queue.set(++id, cb); return id; };
+  globalThis.cancelAnimationFrame = (i) => queue.delete(i);
+  return {
+    run(each = () => {}, max = 240) {
+      t = Math.max(t, performance.now());
+      for (let n = 0; n < max && queue.size; n++) {
+        t += 1000 / 60;
+        const cbs = [...queue.values()];
+        queue.clear();
+        for (const cb of cbs) cb(t);
+        each();
+      }
+    },
+  };
+}
+const fakeEl = () => ({ style: { transform: '', transition: '' }, attrs: new Set(), setAttribute(k) { this.attrs.add(k); }, removeAttribute(k) { this.attrs.delete(k); } });
+const dx = (el) => Number(/translate3d\((-?[\d.e-]+)px/.exec(el.style.transform)?.[1] ?? 0);
+
+test('shake: 처음 속도만 줘서 좌우로 몇 번 흔들리다 제자리에 멈춘다', () => {
+  reduceMotion.matches = false;
+  const clock = frames();
+  const el = fakeEl();
+  assert.equal(shake(el), true);
+  const xs = [];
+  clock.run(() => {
+    xs.push(dx(el));
+    assert.equal(el.style.transition, xs.at(-1) ? 'none' : ''); // 움직이는 동안은 CSS 전환이 스프링을 느리게 만들지 않는다
+  });
+  const peak = Math.max(...xs.map(Math.abs));
+  assert.ok(peak >= 6 && peak <= 16, `흔들리는 폭 ${peak}px`); // 버튼이 튀어 나가지 않는 폭
+  const crossings = xs.filter((x, i) => i && x && xs[i - 1] && Math.sign(x) !== Math.sign(xs[i - 1])).length;
+  assert.ok(crossings >= 3, `좌우를 ${crossings}번 오갔다`);
+  assert.ok(xs.length <= 60, `${xs.length}프레임 걸렸다`); // 1초 안에 끝난다
+  assert.equal(el.style.transform, ''); // 다 흔들리면 원래 자리, 원래 스타일
+  assert.equal(el.style.transition, '');
+});
+
+test('shake: 흔들리는 중에 다시 누르면 그 자리에서 이어서 흔든다', () => {
+  reduceMotion.matches = false;
+  const clock = frames();
+  const el = fakeEl();
+  shake(el);
+  clock.run(() => {}, 3); // 3프레임 흔들린 뒤
+  const before = dx(el);
+  assert.ok(before !== 0);
+  shake(el);
+  clock.run(() => {}, 1);
+  assert.ok(Math.abs(dx(el) - before) < 10, `${before} → ${dx(el)}`); // 0으로 튀지 않는다
+  clock.run();
+  assert.equal(el.style.transform, '');
+});
+
+test('shake: 움직임 줄이기면 흔들지 않는다', () => {
+  const el = fakeEl();
+  reduceMotion.matches = true;
+  try {
+    assert.equal(shake(el), false);
+    assert.equal(el.style.transform, '');
+  } finally {
+    reduceMotion.matches = false;
+  }
+});
+
+test('nudge: 움직임이 허용되면 흔들고, 줄이면 위치·색 없이 글자만 잠깐 밑줄로 강조한다', () => {
+  reduceMotion.matches = false;
+  const clock = frames();
+  const a = fakeEl();
+  nudge(a);
+  clock.run(() => {}, 1);
+  assert.ok(dx(a) !== 0);
+  assert.equal(a.attrs.has('data-nudge'), false);
+
+  reduceMotion.matches = true;
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const b = fakeEl();
+    nudge(b);
+    assert.equal(b.style.transform, '');
+    assert.equal(b.attrs.has('data-nudge'), true);
+    mock.timers.tick(2000);
+    assert.equal(b.attrs.has('data-nudge'), false);
+  } finally {
+    mock.timers.reset();
+    reduceMotion.matches = false;
+  }
 });
