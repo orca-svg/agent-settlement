@@ -91,6 +91,16 @@ export function sendMode(t, { computer }) {
 }
 
 // 비서끼리 기록 한 줄
+// 밀어서 보낸 뒤 송금 화면에 띄울 안내. pending은 { id, left }(페이지가 한 번이라도 가려졌는지), event는 'timeout'·'hidden'·'visible'.
+// 시간이 지나도 페이지가 그대로면 앱이 없거나 iOS가 'Open in "Toss"?'를 묻는 중이라 실패로 단정하지 않는다:
+// 복사 안내만 띄우고 기다림은 남겨, 나중에 토스로 넘어갔다 돌아오면 '보냈나요?'(back)로 바꾼다
+export function sendFollowUp(pending, event) {
+  if (!pending) return { pending: null, note: null };
+  if (event === 'hidden') return { pending: { ...pending, left: true }, note: null };
+  if (event === 'visible') return pending.left ? { pending: null, note: 'back' } : { pending, note: null };
+  return { pending, note: pending.left ? null : 'fallback' }; // timeout
+}
+
 // 비서끼리 기록 한 줄. 시스템 로그가 아니라 비서들의 대화처럼 보이게 한다: 말은 말풍선에, 받는 사람은 '○○에게'로,
 // 근거(규칙·수치)는 말풍선 밖에 접어 두어 궁금한 사람만 연다. 같은 분에 이어진 말은 시각을 비워 한 번만 보인다
 export const logItemHtml = ({ avatar, who, to = '', time = '', text, meta = '', tagHtml = '', enter = false, unread = false, extraHtml = '' }) => `<li class="${enter ? 'enter' : ''}${unread ? ' unread' : ''}">

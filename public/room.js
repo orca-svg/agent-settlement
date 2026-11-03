@@ -1,7 +1,7 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh, receiptPickers, sendMode, COMPUTER_QUERY } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, COMPUTER_QUERY } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
@@ -924,7 +924,7 @@ function transferSheet() {
   const account = t.fallback ? `<section class="group"><h3 class="group-label"><span>${esc(toName)}의 계좌</span><span>${esc(t.fallback.bank)}</span></h3>
       <div class="list">${copyRow('계좌번호', t.fallback.accountNo, 'acct')}${copyRow('금액', String(t.amount), 'amt')}</div></section>` : '';
   const note = {
-    fallback: '송금 앱이 열리지 않았어요. 계좌번호를 복사해 두었으니 쓰시는 은행 앱에 붙여 넣어 보내 주세요.',
+    fallback: '토스가 열리지 않으면, 계좌번호를 복사해 두었으니 쓰시는 은행 앱에 붙여 넣어 보내 주세요.',
     back: '송금 앱에서 돌아왔어요. 보냈나요?',
   }[state.transferNote];
   let actions = '';
@@ -1015,27 +1015,20 @@ function sendGesture(tid) {
   api(`/api/rooms/${enc(roomId)}/transfers/${enc(tid)}/approve`, { method: 'POST', body: {}, keepalive: true }).catch(() => {});
   state.pendingSend = { id: tid, left: false };
   if (t.link) location.href = t.link;
-  // 1.5초 안에 페이지가 숨지 않으면 앱이 열리지 않은 것(앱 없음·데스크톱)으로 보고 복사 안내를 띄운다
-  setTimeout(() => {
-    if (state.pendingSend?.id !== tid || state.pendingSend.left) return;
-    state.pendingSend = null;
-    state.transferNote = 'fallback';
-    openAgentSheet('transfer', tid);
-    load();
-  }, 1500);
+  // 2초 안에 페이지가 가려지지 않으면(앱 없음·데스크톱, 또는 iPhone이 'Open in "Toss"?'를 묻는 중) 복사 안내를 띄운다.
+  // 실패로 단정하지 않아서, 나중에 토스로 넘어갔다 돌아오면 '보냈나요?'로 바뀐다(sendFollowUp)
+  setTimeout(() => { if (state.pendingSend?.id === tid) followUp('timeout'); }, 2000);
 }
-document.addEventListener('visibilitychange', () => {
-  if (!state.pendingSend) return;
-  if (document.hidden) {
-    state.pendingSend.left = true;
-  } else if (state.pendingSend.left) {
-    const id = state.pendingSend.id;
-    state.pendingSend = null;
-    state.transferNote = 'back';
-    openAgentSheet('transfer', id);
-    load();
-  }
-});
+function followUp(event) {
+  const id = state.pendingSend?.id;
+  const { pending, note } = sendFollowUp(state.pendingSend, event);
+  state.pendingSend = pending;
+  if (!note) return;
+  state.transferNote = note;
+  openAgentSheet('transfer', id);
+  load();
+}
+document.addEventListener('visibilitychange', () => followUp(document.hidden ? 'hidden' : 'visible'));
 
 const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'timeline-pick', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
 
@@ -1114,6 +1107,7 @@ async function agentAct(name, d) {
     openAgentSheet('transfer', d.id);
   } else if (name === 'mark-sent') {
     state.transferNote = null;
+    state.pendingSend = null;
     await post(`/transfers/${enc(d.id)}/sent`);
   } else if (name === 'confirm-receipt') {
     await post(`/transfers/${enc(d.id)}/confirm`);
@@ -1221,6 +1215,7 @@ const sheet = createSheet($('#sheet-root'), {
     state.ref = null;
     state.disputeDraft = null;
     state.transferNote = null;
+    state.pendingSend = null; // 시트를 닫으면 송금 앱에서 돌아왔는지 더는 묻지 않는다
     // QR 토큰은 버린다. 다시 열면 새로 받는다
     state.qr = null;
     clearTimeout(qrTimer);
