@@ -5,7 +5,7 @@
 export const TAGS = ['술', '무알코올 음료', '나눠 먹는 안주', '날생선', '1인 식사', '기타'];
 
 /** Store의 컬렉션 이름. Firestore 경로는 ARCHITECTURE.md의 표를 따른다. */
-export const COLLECTIONS = ['rooms', 'expenses', 'agents', 'invoices', 'disputes', 'transfers'];
+export const COLLECTIONS = ['rooms', 'expenses', 'agents', 'invoices', 'disputes', 'transfers', 'invites'];
 
 /** 사람이 처리해야 하는 일. 비서 기록(AgentEvent)의 action.type으로 쓴다. */
 export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 'approve_transfer', 'confirm_receipt', 'set_payout'];
@@ -28,11 +28,18 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
 
 /**
  * @typedef {{
- *   id: string, name: string, members: Member[],
+ *   id: string, name: string, dates?: string, members: Member[],
  *   currency: 'KRW', fx: Fx | null,
  *   policy: 'actual'|'payday'|'settle', policyAgreedBy: string[],
- *   version: number, createdBy: string,
+ *   status?: 'ready'|'settling', version: number, createdBy: string,
  * }} Room
+ * policyAgreedBy: 지금 policy에 동의한 uid. 정책을 바꾸면 바꾼 사람만 남는다. 전원이 있어야 청구서를 보낼 수 있다(#4).
+ * status: 청구서를 처음 보내면 'settling'. 그 뒤로는 초대·참가·정책 변경을 막는다. 없으면 'ready'로 본다.
+ */
+
+/**
+ * 초대 링크(#4). 방마다 하나(id = roomId)이고, 다시 만들면 덮어써서 이전 토큰은 무효가 된다. 서버만 읽고 쓴다.
+ * @typedef {{ id: string, roomId: string, token: string, expiresAt: string, createdBy: string }} Invite
  */
 
 /** @typedef {{ id: string, name: string, qty: number, unit: number, time?: string, tags: string[] }} Item */
