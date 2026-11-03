@@ -117,16 +117,31 @@ DEV_SEED=1 npm start   # http://localhost:4500/room.html → '데모 방 만들�
 - **화면:** `main`에 push하면 `.github/workflows/pages.yml`이 `public/`을 GitHub Pages에 올립니다. 올리기 전에 `scripts/stamp-version.mjs`가 화면 파일 주소에 커밋 버전(`?v=`)을 붙입니다. Pages는 파일을 10분 캐시해서, 버전이 없으면 배포 직후 새 파일과 캐시에 남은 옛 파일이 섞여 화면이 빌 수 있기 때문입니다.
 - **API 서버:** Cloud Run에 배포합니다. 키는 Secret Manager에 두고 환경변수로만 주입합니다.
 
-지금은 **데모용 배포**입니다. 저장소가 메모리(`MemoryStore`)라서 인스턴스를 최대 1대로 묶어야 방이 여러 서버에 흩어지지 않습니다. 따라서 가상의 데모 데이터만 넣습니다. 운영 모드에서는 개발용 신원과 시드 API를 막고, 실제 방은 Firebase 설정과 검증된 로그인 토큰이 있어야 접근할 수 있습니다. Firebase 환경변수·서비스 계정은 [설정 안내](docs/auth-location-setup.md)에 따라 연결합니다. #3 Firestore 전에는 영구 데이터 저장을 보장하지 않습니다.
+저장소는 환경변수 `STORE`로 고릅니다. `STORE=firestore`면 Firestore와 Cloud Storage에 두고([연결 안내](docs/firestore-setup.md)), 없으면 서버 메모리(`MemoryStore`)라 서버가 다시 뜨면 사라집니다. 어느 쪽이든 서버 안의 요청 줄·QR 토큰·AI 캐시가 인스턴스 하나를 전제로 하므로 인스턴스는 최대 1대로 묶습니다. 운영 모드에서는 개발용 신원과 시드 API를 막고, 실제 방은 Firebase 설정과 검증된 로그인 토큰이 있어야 접근할 수 있습니다. Firebase 설정값은 [설정 안내](docs/auth-location-setup.md)에 따라 연결합니다.
+
+처음 서비스를 만들 때는 설정을 모두 넣습니다. 이때 `--set-env-vars`·`--set-secrets`가 아니라 `--update-env-vars`·`--update-secrets`를 씁니다. `--set-…`은 목록 전체를 갈아 끼우므로, 명령에 빠진 값(예: Firebase 설정)이 서버에서 사라져 로그인이 꺼지기 때문입니다.
 
 ```bash
-gcloud run deploy agent-settlement --source . --region asia-northeast1 \
-  --allow-unauthenticated --min-instances 0 --max-instances 1 --memory 1Gi \
-  --set-secrets GEMINI_API_KEY=gemini-api-key:latest,PAYOUT_ENC_KEY=payout-enc-key:1 \
-  --set-env-vars NODE_ENV=production,CRON_SECRET=<임의의 긴 문자열>
+gcloud run deploy agent-settlement --source . --region asia-northeast1 --project gen-lang-client-0278064394 \
+  --allow-unauthenticated --min-instances 1 --max-instances 1 --memory 1Gi \
+  --update-secrets GEMINI_API_KEY=gemini-api-key:latest,PAYOUT_ENC_KEY=payout-enc-key:1 \
+  --update-env-vars CRON_SECRET=<임의의 긴 문자열>,FIREBASE_PROJECT_ID=<…>,FIREBASE_API_KEY=<…>,FIREBASE_AUTH_DOMAIN=<…>,FIREBASE_APP_ID=<…>
 ```
 
-- 계좌·위치 요약 암호화 열쇠(`PAYOUT_ENC_KEY`)는 **위 배포 명령을 처음 실행하기 전에** 한 번만 Secret Manager에 만들고, Cloud Run 서비스 계정이 읽을 수 있게 합니다(bash·Git Bash 기준). 배포(`NODE_ENV=production`, `Dockerfile`이 넣어 줌)에서 이 열쇠가 없으면 서버가 시작하지 않고 이전 버전이 계속 동작합니다. **열쇠를 잃거나 바꾸면 이미 저장된 계좌와 위치 요약을 풀 수 없으니**(#3 Firestore 이후 특히) 한 번 만든 열쇠는 그대로 둡니다. 그래서 배포 명령은 `latest` 대신 버전 `1`로 고정합니다.
+코드만 바꿔 다시 배포할 때는 설정을 다시 적지 않습니다. 환경변수·비밀·인스턴스 수·공개 접근은 이전 리비전 값을 그대로 이어받습니다.
+
+```bash
+gcloud run deploy agent-settlement --source . --region asia-northeast1 --project gen-lang-client-0278064394
+```
+
+Firestore로 바꿀 때는 [연결 안내](docs/firestore-setup.md)대로 데이터베이스·버킷·규칙을 먼저 준비합니다. 그다음 다시 빌드하지 않고 환경변수만 더합니다.
+
+```bash
+gcloud run services update agent-settlement --region asia-northeast1 --project gen-lang-client-0278064394 \
+  --update-env-vars STORE=firestore,FIREBASE_STORAGE_BUCKET=<버킷 이름>
+```
+
+- 계좌·위치 요약 암호화 열쇠(`PAYOUT_ENC_KEY`)는 **처음 배포하기 전에** 한 번만 Secret Manager에 만들고, Cloud Run 서비스 계정이 읽을 수 있게 합니다(bash·Git Bash 기준). 배포(`NODE_ENV=production`, `Dockerfile`이 넣어 줌)에서 이 열쇠가 없으면 서버가 시작하지 않고 이전 버전이 계속 동작합니다. **열쇠를 잃거나 바꾸면 이미 저장된 계좌와 위치 요약을 풀 수 없으니**(#3 Firestore 이후 특히) 한 번 만든 열쇠는 그대로 둡니다. 그래서 배포 명령은 `latest` 대신 버전 `1`로 고정합니다.
   ```bash
   # 0) 서비스 계정 확인: 비어 있거나 …-compute@developer.gserviceaccount.com이면 2)를 그대로, 다른 계정이면 2)의 --member를 그 계정으로 바꾼다
   gcloud run services describe agent-settlement --region asia-northeast1 --format='value(spec.template.spec.serviceAccountName)'
@@ -139,8 +154,8 @@ gcloud run deploy agent-settlement --source . --region asia-northeast1 \
     --role=roles/secretmanager.secretAccessor
   ```
 - 리전은 도쿄(`asia-northeast1`)입니다. Cloud Run 가격표에서 Tier 1이라 서울(`asia-northeast3`, Tier 2)보다 CPU·메모리 단가가 낮습니다. 화면이 부르는 서버 주소는 `public/api.js`에 있습니다.
-- 때가 된 송금 알림은 Cloud Scheduler 작업 `agent-settlement-tick`이 1분마다 `POST /api/cron/tick`을 `x-cron-secret` 헤더와 함께 부릅니다. Cloud Run은 요청이 없을 때 CPU를 거의 주지 않아 서버 안의 30초 타이머만으로는 부족하기 때문입니다.
-- 상시 인스턴스(`--min-instances 1`)는 두지 않습니다. 대신 1분마다 오는 스케줄러 요청이 인스턴스를 깨워 두어 메모리의 방이 대부분 유지되고, 요청 기반 과금이라 Cloud Run 무료 한도 안에 들어갑니다. 다만 Cloud Run이 인스턴스를 교체하면 방이 사라질 수 있으니, 시연 직전에는 데모 방을 새로 만듭니다.
+- 때가 된 송금 알림은 Cloud Scheduler 작업 `agent-settlement-tick`이 1분마다 `POST /api/cron/tick`을 `x-cron-secret` 헤더와 함께 부릅니다. Cloud Run은 요청이 없을 때 CPU를 거의 주지 않아 서버 안의 30초 타이머만으로는 부족하기 때문입니다. 이 작업은 서울(`asia-northeast3`) 리전에 있으니 `gcloud scheduler` 명령에는 `--location asia-northeast3`을 붙입니다.
+- 최소 인스턴스는 1입니다(`--min-instances 1`). 메모리 저장소에서는 인스턴스가 내려가면 방이 사라지므로, 상시 인스턴스로 그 횟수를 줄입니다. Firestore로 바꾼 뒤에도 데스크톱 QR 토큰은 메모리에 있고 콜드 스타트가 몇 초 지연을 만들 수 있어서, 시연 동안은 1을 유지합니다. 그 뒤에는 0으로 내려도 됩니다. 1분마다 오는 스케줄러 요청이 인스턴스를 깨워 두므로 차이는 크지 않고, 쉬는 인스턴스 요금만 줄어듭니다.
 - `.env`와 작업 기록(`.superpowers/`)은 `.gitignore`·`.gcloudignore`·`.dockerignore`에서 모두 제외되어 저장소와 이미지에 들어가지 않습니다.
 - 서버는 `https://orca-svg.github.io`에서 온 요청만 브라우저에 허용(CORS)합니다. 또 Gemini 호출은 IP당 10분에 30회로 제한하고, 요청 본문은 비서의 기억(사람당 5개, 60자)만 받습니다.
 
