@@ -592,23 +592,35 @@ button.row:active { background: var(--fill); }
   display: grid;
   grid-template-columns: 24px 1fr;
   gap: 10px;
-  padding: 10px 16px;
-  border-top: 0.5px solid var(--sep);
+  padding: 8px 16px;
 }
 .log li.enter { animation: rise 320ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
-.log .who { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0; display: flex; justify-content: space-between; gap: 8px; }
+/* 누가 누구에게: 이름은 굵게, 받는 사람은 흐리게. 시각은 분까지만 */
+.log .who { font-size: 0.75rem; font-weight: 600; color: var(--label-2); letter-spacing: 0; display: flex; justify-content: space-between; gap: 8px; margin-bottom: 3px; }
+.log .who .to { font-weight: 400; color: var(--label-3); }
 .log .who time { font-weight: 400; color: var(--label-3); font-variant-numeric: tabular-nums; }
-.log .text { font-size: 0.9375rem; margin-top: 1px; letter-spacing: -0.005em; }
-.log .meta {
-  margin-top: 4px;
-  font: 0.75rem/1.4 ui-monospace, "SF Mono", Menlo, monospace;
-  color: var(--label-2);
-  background: var(--card-2);
-  border-radius: 6px;
-  padding: 4px 6px;
+/* 비서가 한 말은 말풍선. 아바타 쪽 위 모서리만 덜 둥글게 해 누가 말했는지 잇는다 */
+.log .text {
+  display: inline-block;
+  max-width: 100%;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 16px 16px 16px 16px;
+  border-top-left-radius: 6px;
+  background: var(--fill);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  letter-spacing: -0.005em;
   overflow-wrap: anywhere;
 }
+/* 근거는 말풍선 밖에 접어 둔다. 펼치면 비서가 따른 규칙과 수치가 보인다 */
+.log details.why { margin-top: 4px; }
+.log details.why > summary { list-style: none; cursor: pointer; font-size: 0.75rem; color: var(--label-2); letter-spacing: 0; }
+.log details.why > summary::-webkit-details-marker { display: none; }
+.log details.why > summary::after { content: " ›"; }
+.log details.why[open] > summary::after { content: " ⌄"; }
+.log details.why > p { margin: 4px 0 0; padding: 6px 10px; border-radius: 10px; background: var(--card-2); font-size: 0.8125rem; line-height: 1.45; color: var(--label-2); letter-spacing: 0; overflow-wrap: anywhere; }
 .log .tag { margin-top: 5px; }
 .empty { padding: 14px 16px; color: var(--label-2); font-size: 0.9375rem; }
 .notif {
