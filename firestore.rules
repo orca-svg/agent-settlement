@@ -2,7 +2,8 @@ rules_version = '2';
 // #3 Firestore 보안 규칙. 쓰기는 모두 서버(Admin SDK, 규칙을 거치지 않음)만 한다.
 // 화면은 API로 읽고, 실시간 갱신(onSnapshot)에는 rooms/{roomId}/events만 쓴다.
 // 그 밖의 읽기는 방 멤버(_memberUids, 탈퇴하지 않은 멤버 uid를 FirestoreStore가 채움)에게만 연다.
-// 여기 없는 컬렉션(agents, receipts, deletedUsers, locationConsents, locationEvidence)은 화면에서 못 읽는다.
+// 여기 없는 컬렉션(agents, disputes, receipts, deletedUsers, locationConsents, locationEvidence)은 화면에서 못 읽는다.
+// disputes에는 위치 요약이 있고 API는 redactDispute로 가리므로 직접 읽기를 열지 않는다(#7).
 service cloud.firestore {
   match /databases/{database}/documents {
     function roomPath(roomId) {
@@ -25,9 +26,6 @@ service cloud.firestore {
       allow read: if memberOf(resource.data.roomId);
     }
     match /invoices/{id} {
-      allow read: if memberOf(resource.data.roomId);
-    }
-    match /disputes/{id} {
       allow read: if memberOf(resource.data.roomId);
     }
     // 송금 문서에는 (잠긴) 계좌 링크가 있어 당사자만 읽는다. API의 redactTransfer와 같은 범위

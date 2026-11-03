@@ -105,7 +105,7 @@ test('eraseUser: 메모리 구현과 같은 결과를 한 트랜잭션으로(금
   assert.equal(await snapshot(), once);
 });
 
-test('보안 규칙: 멤버만 방·기록을 읽고, 송금은 당사자만, 쓰기는 누구도 못 한다', { skip }, async () => {
+test('보안 규칙: 멤버만 방·기록을 읽고, 송금은 당사자만, 이의는 아무도 직접 못 읽고, 쓰기는 누구도 못 한다', { skip }, async () => {
   const fs = await import('node:fs');
   const { emulatorStore, mockIdToken, PROJECT } = await load();
   const host = process.env.FIRESTORE_EMULATOR_HOST;
@@ -117,6 +117,7 @@ test('보안 규칙: 멤버만 방·기록을 읽고, 송금은 당사자만, �
   assert.equal(rules.status, 200);
   await store.put('rooms', { id: 'rr', members: [{ uid: 'a' }, { uid: 'b' }, { uid: 'gone', deleted: true }] });
   await store.put('expenses', { id: 'rr-e', roomId: 'rr', amount: 1 });
+  await store.put('disputes', { id: 'rr-d', roomId: 'rr', expenseId: 'rr-e', by: 'a', evidence: [{ kind: 'text', summary: '체크아웃 · 지정 장소 밖', locationId: 'loc' }] });
   await store.put('transfers', { id: 'rr:t', roomId: 'rr', from: 'a', to: 'c', amount: 1 });
   await store.put('agents', { id: 'a', uid: 'a', memory: [] });
   await store.put('users', { id: 'a', name: 'A' });
@@ -137,6 +138,9 @@ test('보안 규칙: 멤버만 방·기록을 읽고, 송금은 당사자만, �
   assert.equal(await read('users/a', 'a'), 200);
   assert.equal(await read('users/a', 'b'), 403);
   assert.equal(await read('agents/a', 'a'), 403);
+  // 위치 요약은 API(redactDispute)로만 가려서 내려가므로 이의 당사자도 직접은 못 읽는다(#7)
+  assert.equal(await read('disputes/rr-d', 'b'), 403);
+  assert.equal(await read('disputes/rr-d', 'a'), 403);
   assert.equal(await read('rooms/rr/meta/events', 'a'), 403);
   for (const path of ['expenses/rr-e', 'rooms/rr', 'rooms/rr/events/2', 'invoices/new', 'users/a']) assert.equal(await write(path, 'a'), 403, `쓰기 ${path}`);
   assert.equal((await store.get('expenses', 'rr-e')).amount, 1);
