@@ -289,3 +289,43 @@ test('통합: 받을 계좌를 새로 정해도 저장소에는 잠긴 글자만
   const t = (await store.list('transfers', { roomId: 'demo-e' })).find((x) => x.to === 'yh');
   assert.equal(t.fallback.accountNo, '123456789012');
 });
+
+// #7·#10 통합: 로그인(가짜 ID 토큰)한 사용자가 타임라인 붙이기 → 이의 → 중재까지 가도
+// 진짜 저장소에는 시각·요약이 없고, 당사자 화면에는 평문이 내려간다
+test('통합: 위치 요약을 붙여 이의·중재까지 가도 저장소에는 시각·요약이 없고, 당사자 화면에는 평문', async (t) => {
+  const { inner, store } = make();
+  await seedDemoRoom(store, { id: 'room-one' });
+  const exp = await store.get('expenses', 'room-one-izakaya');
+  await store.put('expenses', { ...exp, date: '2026-11-01' }); // 결제 20:45(KST), 주문 시각이 없어 17:45부터
+  const auth = { verifyIdToken: async (token) => ({ uid: token, name: '테스트 사용자', auth_time: 0 }), deleteUser: async () => {} };
+  const server = createApp({ store, auth, clock: () => new Date('2026-11-01T12:00:00Z') });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const call = async (path, uid, body) => {
+    const res = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {
+      method: body ? 'POST' : 'GET',
+      headers: { authorization: `Bearer ${uid}` },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    assert.equal(res.status, 200, `${path} → ${res.status} ${await res.clone().text()}`);
+    return res.json();
+  };
+
+  await call('/api/rooms/room-one/location/timeline', 'me', { agree: true, expenseId: exp.id, leftAt: '20:15', nextAt: '20:28', nextHome: true });
+  const raised = await call('/api/rooms/room-one/disputes', 'me', { expenseId: exp.id, claim: '참석 근거를 확인해 주세요' });
+  const proposed = await call(`/api/rooms/room-one/disputes/${encodeURIComponent(raised.id)}/mediate`, 'me', {});
+  assert.equal(proposed.status, 'proposed');
+
+  // 위치 기록과 이의 문서 어디에도 시각·요약·중재안 문장이 평문으로 없다
+  const rawOf = (col) => JSON.stringify([...(inner.cols.get(col)?.values() ?? [])]);
+  const docs = rawOf('locationEvidence') + rawOf('disputes');
+  for (const s of ['20:15', '20:28', '떠났어요', '본인 제출', '이전 주문은']) assert.ok(!docs.includes(s), `저장소에 '${s}'가 평문으로 남음`);
+  // 비서 기록·청구서까지 포함한 저장소 전체에도 요약 문장은 없다
+  const dump = await rawDump(inner);
+  for (const s of ['떠났어요', '본인 제출', '이전 주문은']) assert.ok(!dump.includes(s), `저장소 어딘가에 '${s}'`);
+
+  // 이의를 낸 당사자 화면에는 평문
+  const view = (await call('/api/rooms/room-one', 'me')).disputes.find((d) => d.id === raised.id);
+  assert.match(view.evidence[0].summary, /20:15에 떠났어요/);
+  assert.match(view.proposal.summary, /20:15 이전 주문은/);
+});
