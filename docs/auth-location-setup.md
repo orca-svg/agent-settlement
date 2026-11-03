@@ -15,6 +15,7 @@
 - 리뷰어의 방 단위 처리 큐와 당사자 전용 위치 요약 가림을 유지.
 - `Evidence.requiresHumanApproval`, `LineAlloc.evidenceConflict`를 추가. 모델은 줄별 `evidenceConflict`를 반환하고, 서버는 그 줄만 0.49로 제한하며 나머지 확신도는 유지. 충돌 여부의 의미 판단은 모델에 맡기므로 완전한 충돌 검출 보장은 아님. 규칙 fallback은 충돌을 추정하지 않음.
 - 위치 근거는 양 당사자의 승인이 필요하고 자동 동의하지 않음. 예전 체크인·체크아웃 기록(`source` 없음)은 근거로 쓰지 않음.
+- 로그인 설정 요청이 일시적으로 실패해도 다음 요청에서 다시 초기화(동시 호출은 한 요청 공유). `test/auth-browser-init.test.mjs`.
 - #35 병합 시 `firestore.rules`의 `disputes` 직접 읽기를 차단해야 API 가림을 우회할 수 없음. 이 브랜치에는 Firestore 규칙 파일이 없으며 #35 담당 변경 사항임.
 
 1. **Firebase 프로젝트 연결 및 실제 Google OAuth 검증.** 아래 순서로 팀 프로젝트 설정 필요.

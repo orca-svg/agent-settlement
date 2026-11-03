@@ -130,6 +130,23 @@ test('a stay until payment is attached as plain text, not as a leaving time', as
   assert.match(e.summary, /결제.*까지 같은 곳에 있었어요/);
 });
 
+// 떠난 시각이 없는 기록(결제까지 머묾)도 빠지지 않고 상대에게 가고, 지우면 상대 화면에서도 사라진다
+test('a record without a leaving time still reaches the counterparty and revocation removes it', async t => {
+  const { request, exp, store } = await setup(t);
+  const { until } = expenseWindow(exp);
+  assert.equal((await attach(request, exp, { ...stay, stayedUntil: kst(until) })).status, 200);
+  assert.equal((await request('/api/rooms/room-one/disputes', { body: { expenseId: exp.id, claim: '참석 근거를 확인해 주세요' } })).status, 200);
+  const d = (await store.list('disputes'))[0];
+  assert.equal(d.evidence.length, 1);
+  assert.equal(d.evidence[0].requiresHumanApproval, true);
+  const seen = async uid => (await (await request('/api/rooms/room-one', { uid })).json()).disputes.find(x => x.id === d.id);
+  assert.equal((await seen(exp.payer)).evidence[0].summary, d.evidence[0].summary);
+  const outsider = (await store.get('rooms', 'room-one')).members.find(m => !['me', exp.payer].includes(m.uid));
+  assert.doesNotMatch(JSON.stringify(await seen(outsider.uid)), /머물|타임라인|결제/);
+  assert.equal((await request('/api/rooms/room-one/location/revoke', { body: {} })).status, 200);
+  assert.deepEqual((await seen(exp.payer)).evidence, []);
+});
+
 test('revocation removes attached summaries and reopens an unconfirmed proposal', async t => {
   const { request, exp, store } = await setup(t);
   await attach(request, exp);
