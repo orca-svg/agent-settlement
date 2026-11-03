@@ -1,4 +1,4 @@
-// 계좌 칸만 잠그는 Store 래퍼(#8, #10): 진짜 저장소에는 잠긴 글자만, 래퍼로 꺼내면 평문.
+// 계좌·위치 요약 칸만 잠그는 Store 래퍼(#8, #10): 진짜 저장소에는 잠긴 글자만, 래퍼로 꺼내면 평문.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MemoryStore } from '../src/store/memory.mjs';
