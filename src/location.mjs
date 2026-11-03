@@ -35,7 +35,12 @@ export function createLocationService({ store, clock }) {
   async function evidenceFor(uid, expense, room) {
     if (!await active(uid, room.id)) return [];
     const records = await store.list('locationEvidence', { uid, roomId: room.id });
-    return records.filter(e => e.expenseId === expense.id && e.action === 'checkout').map(e => ({ kind: 'text', summary: e.summary, locationId: e.id, source: 'browser_self_report', uncertain: true }));
+    return records.filter(e => e.expenseId === expense.id && e.action === 'checkout').map(e => ({
+      kind: 'text', summary: e.summary, locationId: e.id, source: 'browser_self_report',
+      // Older records have no structured result; do not infer it from prose.
+      relation: e.relation || 'uncertain', uncertain: !e.relation || e.relation === 'uncertain',
+      observedAt: e.observedAt, requiresHumanApproval: true,
+    }));
   }
   // 끝난 동의를 정리한다. roomId를 주면 그 방만(방 요청은 그 방의 줄 안에서 부른다), 없으면 모든 방(주기 작업)
   async function sweep(roomId) {
@@ -85,7 +90,7 @@ export function createLocationService({ store, clock }) {
       // One record per action/expense/person. Replacing invalidates any old proposal.
       const old = (await store.list('locationEvidence', { uid: me.uid, roomId: room.id })).find(e => e.expenseId === exp.id && e.action === input.action);
       if (old) throw new HttpError(409, '이미 기록했어요. 철회·삭제 후 다시 동의하면 새로 기록할 수 있어요');
-      const record = await store.put('locationEvidence', { id: randomUUID(), uid: me.uid, roomId: room.id, expenseId: exp.id, action: input.action, summary, observedAt: new Date(when).toISOString() });
+      const record = await store.put('locationEvidence', { id: randomUUID(), uid: me.uid, roomId: room.id, expenseId: exp.id, action: input.action, relation: input.relation, summary, observedAt: new Date(when).toISOString() });
       return { record };
     });
   }

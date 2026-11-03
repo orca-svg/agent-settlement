@@ -122,7 +122,10 @@ test('revocation removes attached summaries and reopens an unconfirmed proposal'
   const d = (await store.list('disputes'))[0];
   assert.equal(d.evidence.length, 1);
   assert.equal(d.evidence[0].kind, 'text');
-  assert.equal(d.evidence[0].uncertain, true);
+  assert.equal(d.evidence[0].uncertain, false);
+  assert.equal(d.evidence[0].relation, 'away');
+  assert.equal(d.evidence[0].observedAt, now().toISOString());
+  assert.equal(d.evidence[0].requiresHumanApproval, true);
   await store.put('disputes', { ...d, status: 'proposed', agreedBy: ['me'], proposal: { summary: d.evidence[0].summary } });
   await request(`${path}/revoke`, { body: {} });
   const after = await store.get('disputes', d.id);
@@ -160,13 +163,13 @@ test('location summary is visible only to the dispute parties; other members see
   assert.match((await store.get('disputes', d.id)).evidence[0].summary, /한국 시각/); // 저장본은 그대로
 });
 
-test('uncertain location cannot turn a model assertion into a confirmed allocation', async t => {
+test('clear location retains confidence but cannot turn a model assertion into a confirmed allocation', async t => {
   const { store, exp } = await setup(t);
   const room = await store.get('rooms', 'room-one');
-  const result = await mediateWithGemini({ model: 'fake', generate: async () => ({ summary: '확인', lines: exp.items.map(it => ({ id: it.id, consumers: ['me'], confidence: 1, reason: '추측' })) }) }, {
-    exp, room, dispute: { by: 'me', claim: '이의', evidence: [{ kind: 'text', uncertain: true, summary: '기기 보고' }] }, memoryByUid: {},
+  const result = await mediateWithGemini({ model: 'fake', generate: async () => ({ summary: '확인', lines: exp.items.map(it => ({ id: it.id, consumers: [room.members.find(m => m.uid === 'me').name], confidence: 1, reason: '추측', evidenceConflict: false })) }) }, {
+    exp, room, dispute: { by: 'me', claim: '이의', evidence: [{ kind: 'text', source: 'browser_self_report', relation: 'away', uncertain: false, summary: '기기 보고' }] }, memoryByUid: {},
   });
-  assert.ok(Object.values(result.alloc).every(a => a.confidence <= 0.49 && !a.confirmed));
+  assert.ok(Object.values(result.alloc).every(a => a.confidence === 1 && a.confirmed === false));
 });
 
 test('distance uses accuracy and never classifies poor GPS as definitive', () => {

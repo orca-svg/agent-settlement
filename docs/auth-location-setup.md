@@ -4,11 +4,19 @@
 
 - #2: Google 로그인·로그아웃 화면, 프로필 이름·색, 내 방 목록, ID 토큰 및 폐기 여부 검증, 방 멤버 접근 제어, 기존 사용자별 AI 호출 제한 유지. 비로그인 데모 API 유지.
 - #7: 브라우저 단발 위치 측정 → 기기 안에서 장소와 거리 비교 → 시각·결과 한 줄만 서버 전송. 동의는 최대 24시간이며 철회·만료 시 요약과 연결된 미확정 중재안을 삭제. 원본 좌표·이동 경로를 서버나 Gemini에 보내지 않음.
-- 체크아웃 요약은 수동 이의와 기존 `onDispute: evidence` 규칙에 연결. 기기 보고는 위변조 가능한 보조 근거여서 `left_at`으로 바꾸지 않음. 중재 확신도는 0.49 이하이고 자동 동의하지 않음. 양 당사자가 확인해야 금액이 바뀜.
+- 체크아웃 요약은 수동 이의와 기존 `onDispute: evidence` 규칙에 연결. 기기 보고는 위변조 가능한 보조 근거여서 `left_at`으로 바꾸지 않음. 측정 결과를 `relation`으로 보존하고 측정 판단 불가일 때만 `uncertain=true`. 중재가 근거 충돌을 보고한 줄만 확신도 0.49 이하로 제한. 사람 승인 필요는 별도이며 양 당사자가 확인해야 금액이 바뀜.
 - 탈퇴: 최근 재인증 후 프로필·비서 설정·위치 요약·본인 지출 영수증 원본을 삭제. 공동 정산 금액은 유지하고 방마다 독립된 익명 UID로 바꿔 계정 연결을 제거. 과거 문구에 복제된 개인정보와 송금 링크·QR·모델 캐시도 정리. 원 계정에 대한 접근 차단 표식은 삭제 재시도용으로만 유지.
 - 기준: [Epic #1의 팀 가이드](https://github.com/orca-svg/agent-settlement/issues/1#issuecomment-6557374656), `ARCHITECTURE.md`. Firebase/GCP 프로젝트 생성·실제 OAuth·배포는 수행하지 않음.
 
 ## 아직 완료되지 않은 항목
+
+### 11/3 리뷰 반영
+
+- 리뷰어의 방 단위 처리 큐와 당사자 전용 위치 요약 가림을 유지.
+- `LocationEvidence.relation`, `Evidence.relation/observedAt/requiresHumanApproval`, `LineAlloc.evidenceConflict`를 추가. 옛 위치 기록은 문장에서 near/away를 추측하지 않고 `uncertain`으로 읽음.
+- 모델은 줄별 `evidenceConflict`를 반환. 서버는 그 줄만 0.49로 제한하며 나머지 확신도는 유지. 충돌 여부의 의미 판단은 모델에 맡기므로 완전한 충돌 검출 보장은 아님. 규칙 fallback은 충돌을 추정하지 않음.
+- 브라우저 근거는 여전히 양 당사자의 승인이 필요. 다른 `left_at` 근거와 섞여도 자동 동의하지 않음. 체크아웃 시각을 떠난 시각으로 바꾸거나 연속 불참을 가정하지 않음.
+- #35 병합 시 `firestore.rules`의 `disputes` 직접 읽기를 차단해야 API 가림을 우회할 수 없음. 이 브랜치에는 Firestore 규칙 파일이 없으며 #35 담당 변경 사항임.
 
 1. **Firebase 프로젝트 연결 및 실제 Google OAuth 검증.** 아래 순서로 팀 프로젝트 설정 필요.
 2. **#3 영구 저장소 연결.** 현재 MemoryStore이므로 서버 재시작 시 프로필·방·요약이 사라짐. 새 컬렉션 `users`, `deletedUsers`, `locationConsents`, `locationEvidence`를 같은 Store 계약으로 지원해야 함. 운영에서는 TTL 삭제, 요청/삭제 경쟁에 대한 트랜잭션도 필요.

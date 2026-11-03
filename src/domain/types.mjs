@@ -37,7 +37,7 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
 
 /** @typedef {{ id: string, name: string, qty: number, unit: number, time?: string, tags: string[] }} Item */
 
-/** @typedef {{ consumers: string[], confidence: number, reason: string, confirmed?: boolean }} LineAlloc */
+/** @typedef {{ consumers: string[], confidence: number, reason: string, confirmed?: boolean, evidenceConflict?: boolean }} LineAlloc */
 
 /**
  * 금액은 정수. 날짜는 'YYYY-MM-DD', 시각은 'HH:MM'. items가 있으면 amount 대신 줄 합을 쓴다.
@@ -66,7 +66,8 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
  * }} Invoice
  */
 
-/** 위치 원본은 넣지 않는다. 브라우저 보고는 text+uncertain으로만 저장한다. @typedef {{ kind: 'left_at'|'not_present'|'text', time?: string, summary: string, locationId?: string, source?: 'browser_self_report', uncertain?: boolean }} Evidence */
+/** 위치 원본은 넣지 않는다. 브라우저 보고의 측정 불확실성과 사람 승인 필요를 구분한다. observedAt은 순간 측정이며 left_at이 아니다.
+ * @typedef {{ kind: 'left_at'|'not_present'|'text', time?: string, summary: string, locationId?: string, source?: 'browser_self_report', relation?: 'near'|'away'|'uncertain', observedAt?: string, uncertain?: boolean, requiresHumanApproval?: boolean }} Evidence */
 
 /**
  * @typedef {{
@@ -101,7 +102,7 @@ export {};
 /** Minimal deletion/retry gate, never returned in room data. @typedef {{ id: string }} DeletedUser */
 /** #7. Maximum 24-hour opt-in; id is JSON.stringify([roomId, uid]). @typedef {{ id: string, roomId: string, uid: string, expiresAt: string }} LocationConsent */
 /** Raw coordinates and movement paths are deliberately not part of this type.
- * @typedef {{ id: string, roomId: string, uid: string, expenseId: string, action: 'checkin'|'checkout', summary: string, observedAt: string }} LocationEvidence
+ * @typedef {{ id: string, roomId: string, uid: string, expenseId: string, action: 'checkin'|'checkout', relation?: 'near'|'away'|'uncertain', summary: string, observedAt: string }} LocationEvidence
  */
 /** Optional Store capability needed to enable account deletion. Atomically deletes
  * private records and unlinks shared financial records without changing amounts;
