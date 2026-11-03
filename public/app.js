@@ -2,7 +2,7 @@
 import { DEMO_ROOM as ROOM, POLICIES, DEMO_EXPENSES as EXPENSES, DEMO_MEMORY as MEMORY, MEMORY_LIMIT, DEMO_RULES as RULES, DEMO_DISPUTE as DISPUTE } from './data.js';
 import { won, yen, dayLabel, amountOf, toKrw, shares, ledger, settle, ruleAllocate, presentAfter } from './core.js';
 import { reduceMotion } from './motion.js';
-import { esc, chip, avatarHtml, topic, subj, tile, CHEVRON, CHECK, ARROW, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, whose, restNote, allocLabel } from './ui.js';
+import { esc, chip, avatarHtml, topic, subj, tile, CHEVRON, CHECK, ARROW, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, whose, restNote, allocLabel } from './ui.js';
 import { API_BASE } from './api.js';
 import { createLogPop } from './log-pop.js';
 
@@ -68,7 +68,7 @@ function logTodos() {
 }
 
 const logPop = createLogPop({
-  itemHtml: (l, opts) => logItemHtml({ avatar: avatar(l.from, 'agent'), who: `${agentOf(l.from)} → ${l.to}`, time: l.t, text: l.text, meta: l.meta, tagHtml: l.tag, ...opts }),
+  itemHtml: (l, opts) => logItemHtml({ avatar: avatar(l.from, 'agent'), who: agentOf(l.from), to: l.to, time: l.t, text: l.text, meta: l.meta, tagHtml: l.tag, ...opts }),
   timeOf: (l) => l.t,
   todosHtml: logTodos,
   seen: { get: () => logSeen, set: (n) => { logSeen = n; } },
@@ -87,7 +87,7 @@ const needsHuman = (t) => t.amount > RULES[t.from].autoAccept && !state.sent[tKe
 
 function log(from, to, text, { meta = '', tag = '' } = {}) {
   state.clock += 6000;
-  const t = new Date(state.clock + 9 * 3600_000).toISOString().slice(11, 19);
+  const t = new Date(state.clock + 9 * 3600_000).toISOString().slice(11, 16); // 분까지만(로그가 아니라 대화)
   state.log.push({ from, to, text, meta, tag, t });
   renderChannel();
 }
@@ -113,8 +113,8 @@ async function allocate() {
   state.stage = 'allocating';
   if (!state.log.length) {
     const kinds = EXPENSES.reduce((m, e) => ({ ...m, [e.source]: (m[e.source] || 0) + 1 }), {});
-    log('나', '모두의 비서', `오사카 여행 지출 ${EXPENSES.length}건을 모았어요. 메뉴가 달랐던 이자카야 영수증은 각자 공유한 기억으로 나눌게요.`, {
-      meta: Object.entries(kinds).map(([k, v]) => `${k} ${v}`).join(' · '),
+    log('나', '모두의 비서', `여러분, 오사카 여행 지출 ${EXPENSES.length}건을 모았어요. 메뉴가 달랐던 이자카야 영수증은 각자 공유해 준 기억으로 나눌게요.`, {
+      meta: `모은 지출: ${Object.entries(kinds).map(([k, v]) => `${k} ${v}`).join(' · ')}`,
     });
   }
   render();
@@ -135,10 +135,10 @@ async function allocate() {
   state.allocSource = allocLabel(out) + (out.fallback ? ' (서버 응답이 없어 규칙으로)' : '');
   state.memoryDirty = false;
   const used = PEOPLE.reduce((n, p) => n + state.memory[p].length, 0);
-  log('나', '모두의 비서', `이자카야 영수증 ${izakaya.items.length}줄을 비서들이 공유한 기억 ${used}개로 나눴어요.`, { meta: `allocate · ${state.allocSource}` });
+  log('나', '모두의 비서', `이자카야 영수증 ${izakaya.items.length}줄을 여러분이 공유해 준 기억 ${used}개로 나눠 봤어요.`, { meta: `나눈 방법: ${state.allocSource}` });
   const ask = flagged();
   if (ask.length) {
-    log('나', '나', `${topic(ask.map((it) => `‘${it.name}’`).join(', '))} 어떻게 나눌지 비서들의 기억에 근거가 없어요. 짐작하지 않고 물어볼게요.`, { tag: chip('사람 확인', 'warn') });
+    log('나', '나', `${topic(ask.map((it) => `‘${it.name}’`).join(', '))} 누가 먹었는지 기억에 근거가 없어요. 짐작하지 않을게요. 누구 몫인지 알려 주세요.`, { tag: chip('내 확인 필요', 'warn') });
   }
   state.stage = ask.length ? 'review' : 'ready';
   render();
@@ -147,7 +147,7 @@ async function allocate() {
 function maybeReady() {
   if (state.stage === 'review' && !flagged().length) {
     state.stage = 'ready';
-    log('나', '나', '확인이 필요한 줄을 모두 정했어요. 청구서를 보낼 준비가 됐어요.', { tag: chip('확인 완료', 'ok') });
+    log('나', '나', '확인해 줘서 고마워요. 이제 청구서를 보낼 수 있어요.');
   }
 }
 
@@ -158,20 +158,19 @@ async function sendInvoices() {
   const rows = agreedLedger();
   for (const p of PEOPLE.filter((x) => x !== '나')) {
     await sleep(450);
-    log('나', agentOf(p), `${p}의 몫을 담은 청구서를 보냈어요. 단톡방에는 아무것도 올리지 않아요.`, {
-      meta: `invoice{ owed: ${rows[p].owed}, paid: ${rows[p].paid}, policy: "${TRIP.agreedPolicy}", lines: ${EXPENSES.length} }`,
+    log('나', agentOf(p), `${p}의 몫을 담은 청구서예요. 단톡방에는 아무것도 올리지 않았어요.`, {
+      meta: `${p}의 몫 ${won(rows[p].owed)} · 이미 낸 돈 ${won(rows[p].paid)} · 환율은 ${policyLabel(TRIP.agreedPolicy)} · 지출 ${EXPENSES.length}건 기준`,
     });
   }
   await sleep(700);
-  log('철수', '나의 비서', `확인했어요. 철수가 함께 있던 일정이고, 자동 수락 한도 안이에요. ${PAYDAY}에 보낼게요.`, {
-    meta: `rule: 참여 일정 ✓ · ≤ ${won(RULES.철수.autoAccept)} ✓ → 수락, 송금 ${RULES.철수.sendWhen}`,
-    tag: chip('자동 수락', 'ok'),
+  log('철수', '나의 비서', `잘 받았어요. 철수도 함께 있던 일정이고 맡겨 둔 한도 안이라 그대로 받을게요. 돈은 ${PAYDAY}에 보낼게요.`, {
+    meta: `철수가 정해 둔 규칙: 함께 있던 일정이면 받기 · ${won(RULES.철수.autoAccept)}까지는 묻지 않고 받기 · 보내는 날은 ${RULES.철수.sendWhen}`,
   });
   await sleep(500);
-  log('영희', '나의 비서', '확인했어요. 영희는 받을 돈이 있어서 보낼 건 없어요.', { meta: 'rule: 참여 일정 ✓ → 수락', tag: chip('자동 수락', 'ok') });
+  log('영희', '나의 비서', '잘 받았어요. 영희는 오히려 받을 돈이 있어서 보낼 건 없어요.', { meta: '영희가 정해 둔 규칙: 함께 있던 일정이면 받기' });
   await sleep(700);
-  log('민수', '나의 비서', `‘2차 바’에 이의가 있어요. 민수는 ${DISPUTE.leftAt}에 먼저 숙소로 돌아갔어요.`, {
-    meta: `evidence: ${DISPUTE.evidence.join(' / ')} (원본 대신 요약만 공유)`,
+  log('민수', '나의 비서', `‘2차 바’는 다시 봐 주세요. 민수는 ${DISPUTE.leftAt}에 먼저 숙소로 돌아갔어요.`, {
+    meta: `민수가 낸 근거(원본 대신 요약만 보내요): ${DISPUTE.evidence.join(' / ')}`,
     tag: chip('이의 제기', 'warn'),
   });
   state.stage = 'disputed';
@@ -183,7 +182,7 @@ async function mediate() {
   const controller = new AbortController();
   busy = controller;
   state.stage = 'mediating';
-  log('나', '중재 비서', '내 규칙대로 이의를 중재 비서에게 맡겨요. 영수증의 주문 시각을 함께 보낼게요.', { meta: `rule: 이의 제기 → ${RULES.나.onDispute}` });
+  log('나', '중재 비서', '중재 비서님, 이 이의를 맡길게요. 영수증의 주문 시각도 함께 보내요.', { meta: `내가 정해 둔 규칙: 이의가 오면 ${RULES.나.onDispute}` });
   render();
   let out;
   try {
@@ -204,7 +203,7 @@ async function mediate() {
   }
   busy = null;
   state.proposal = { ...out, label: allocLabel(out) + (out.fallback ? ' (서버 응답이 없어 규칙으로)' : '') };
-  log('중재', '나·민수의 비서', out.summary, { meta: `mediate · ${state.proposal.label}` });
+  log('중재', '나·민수의 비서', out.summary, { meta: `중재한 방법: ${state.proposal.label}` });
   state.stage = 'proposal';
   render();
 }
@@ -216,15 +215,15 @@ async function acceptProposal() {
   state.stage = 'settling';
   closeSheet();
   const after = agreedLedger();
-  log('나', '중재 비서', '중재안에 동의했어요.', { tag: chip('동의', 'ok') });
+  log('나', '중재 비서', '좋아요, 이 중재안에 동의해요.');
   await sleep(500);
-  log('민수', '중재 비서', '민수의 근거가 반영돼서 규칙대로 동의했어요.', { meta: 'rule: 근거와 일치 → 동의', tag: chip('동의', 'ok') });
+  log('민수', '중재 비서', '제가 낸 근거가 반영됐네요. 민수가 정해 둔 대로 이 중재안에 동의할게요.', { meta: '민수가 정해 둔 규칙: 근거와 맞는 중재안이면 동의' });
   await sleep(500);
   const d = after.철수.owed - before.철수.owed;
-  log('철수', '나의 비서', `바뀐 몫(${d >= 0 ? '+' : '−'}${won(Math.abs(d))})도 한도 안이라 그대로 수락해요.`, { meta: `rule: ≤ ${won(RULES.철수.autoAccept)} ✓`, tag: chip('자동 수락', 'ok') });
+  log('철수', '나의 비서', `몫이 ${won(Math.abs(d))} ${d >= 0 ? '늘었지만' : '줄었고'} 여전히 맡겨 둔 한도 안이라 그대로 받을게요.`, { meta: `철수가 정해 둔 규칙: ${won(RULES.철수.autoAccept)}까지는 묻지 않고 받기` });
   for (const t of transfers().filter(needsHuman)) {
     await sleep(500);
-    log(t.from, t.from, `보낼 돈 ${won(t.amount)}이 자동 수락 한도(${won(RULES[t.from].autoAccept)})를 넘어서 ${t.from}에게 물었어요.`, { tag: chip('사람 확인', 'warn') });
+    log(t.from, t.from, `보낼 돈이 ${won(t.amount)}이라 제가 혼자 정할 수 있는 한도(${won(RULES[t.from].autoAccept)})를 넘었어요. 보내도 될까요?`, { tag: chip(`${t.from}의 확인 필요`, 'warn') });
   }
   if (!transfers().some(needsHuman)) state.stage = 'done';
   render();
@@ -237,13 +236,12 @@ async function pay(person) {
   const total = mine.reduce((s, t) => s + t.amount, 0);
   render();
   await sleep(400);
-  log(person, mine.map((t) => agentOf(t.to)).join(', '), now ? `${person}가 승인해서 ${won(total)}을 보냈어요.` : `${person}가 승인했어요. ${PAYDAY}에 ${won(total)}을 보낼게요.`, {
-    meta: `transfer{ amount: ${total}, when: "${state.payWhen}", mock: true }`,
-    tag: chip(now ? '송금' : '송금 예약', 'ok'),
+  log(person, mine.map((t) => agentOf(t.to)).join(', '), now ? `${person}가 확인해 줘서 ${won(total)}을 보냈어요.` : `${person}가 확인해 줘서 ${PAYDAY}에 ${won(total)}을 보낼게요.`, {
+    meta: `토스 송금 링크로 ${now ? '바로' : PAYDAY} 보내요. 데모라 실제 돈은 오가지 않아요.`,
   });
   if (!transfers().some(needsHuman)) {
     await sleep(500);
-    log('나', '나', '받을 돈을 모두 확인했어요. 오사카 정산이 끝났어요.', { tag: chip('정산 완료', 'ok') });
+    log('나', '나', '받을 돈이 모두 들어왔어요. 오사카 정산이 끝났어요.');
     state.stage = 'done';
   }
   render();
@@ -279,7 +277,7 @@ function act(name, d) {
       const a = state.allocs[d.exp][d.line];
       a.confirmed = true;
       const it = byId(d.exp).items.find((x) => x.id === d.line);
-      log('나', '모두의 비서', `${topic(`‘${it.name}’`)} ${whose(a.consumers.join('·'))} 몫으로 확인했어요.`, { meta: `human: 확인${a.edited ? ' (직접 고침)' : ''}` });
+      log('나', '모두의 비서', `${topic(`‘${it.name}’`)} ${whose(a.consumers.join('·'))} 몫이에요. 사람이 직접 확인했어요.`, { meta: a.edited ? '비서가 나눈 것을 사람이 고쳐서 정했어요' : '비서가 나눈 대로 사람이 확인했어요' });
       maybeReady();
       return render();
     }
@@ -487,8 +485,9 @@ function renderChannel() {
     ? `<button class="notif" style="display:block;width:calc(100% - 32px);text-align:left;cursor:pointer" data-action="open-payer" data-p="${waiting.from}">
         <b>${esc(waiting.from)}의 휴대폰 · ${esc(agentOf(waiting.from))}</b>오사카 여행 정산 ${won(waiting.amount)}. 확인하면 보낼게요.</button>`
     : '';
+  const times = minuteLabels(state.log.map((l) => l.t));
   const items = state.log.map((l, i) => logItemHtml({
-    avatar: avatar(l.from, 'agent'), who: `${agentOf(l.from)} → ${l.to}`, time: l.t,
+    avatar: avatar(l.from, 'agent'), who: agentOf(l.from), to: l.to, time: times[i],
     text: l.text, meta: l.meta, tagHtml: l.tag, enter: i >= renderedLog,
   })).join('');
   el.innerHTML = `<h2>비서끼리</h2><p class="lead">단톡방 대신 비서들이 주고받은 기록이에요. 사람에게는 확인할 일만 올라와요.</p>

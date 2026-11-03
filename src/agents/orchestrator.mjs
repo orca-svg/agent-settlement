@@ -64,7 +64,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
 
     const rows = ledger(room, expenses, room.policy);
     const resolved = new Set((await store.list('disputes', { roomId })).filter((d) => d.status === 'resolved').map((d) => `${d.by}:${d.expenseId}`));
-    await say(roomId, { from: actorUid, to: 'all', kind: 'invoices_sent', text: `지출 ${expenses.length}건으로 각자의 비서에게 청구서를 보냈어요`, meta: `version ${room.version}` });
+    await say(roomId, { from: actorUid, to: 'all', kind: 'invoices_sent', text: `지출 ${expenses.length}건으로 각자의 비서에게 청구서를 보냈어요`, meta: `지출이 바뀔 때마다 새로 보내는 청구서의 ${room.version}번째 묶음이에요` });
     const invoices = [];
     for (const m of room.members) {
       const r = rows[m.uid];
@@ -84,7 +84,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       await store.put('invoices', invoice);
       invoices.push(invoice);
       if (decision === 'accept') {
-        await say(roomId, { from: m.uid, to: actorUid, kind: 'invoice_accepted', text: acceptedText(r.net), meta: `규칙 · ${reasons.join(' · ')}` });
+        await say(roomId, { from: m.uid, to: actorUid, kind: 'invoice_accepted', text: acceptedText(r.net), meta: `정해 둔 규칙: ${reasons.join(' · ')}` });
       } else if (decision === 'ask') {
         await say(roomId, {
           from: m.uid, to: m.uid, kind: 'invoice_asked', text: `${won(-r.net)} 청구서가 왔어요. ${reasons[0]}`,
@@ -109,7 +109,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     if (decision === 'dispute') await raiseDispute(roomId, { by: actorUid, expenseId, claim, evidence: [] });
     const saved = { ...invoice, status: decision === 'accept' ? 'accepted' : 'disputed', decidedBy: 'human' };
     await store.put('invoices', saved);
-    if (decision === 'accept') await say(roomId, { from: actorUid, to: 'all', kind: 'invoice_accepted', text: acceptedText(invoice.net), meta: 'human: 확인' });
+    if (decision === 'accept') await say(roomId, { from: actorUid, to: 'all', kind: 'invoice_accepted', text: acceptedText(invoice.net), meta: '사람이 직접 확인했어요' });
     await settleIfReady(roomId);
     return { invoice: saved };
   }
@@ -167,7 +167,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     await store.put('disputes', proposed);
     await say(roomId, {
       from: 'mediator', to: 'all', kind: 'dispute_proposed', text: dispute.evidence.some(e => e.locationId) ? '위치 요약을 참고한 중재안이에요. 당사자가 확인해 주세요.' : out.summary,
-      meta: `mediate · ${out.source === 'rules' ? '규칙' : out.source} · ${((Date.now() - started) / 1000).toFixed(1)}초`,
+      meta: `중재한 방법: ${out.source === 'rules' ? '정해 둔 규칙' : out.source} · ${((Date.now() - started) / 1000).toFixed(1)}초 걸렸어요`,
     });
     // 이의를 낸 비서는 '근거가 있으면 이의'를 맡았으므로, 제안이 그 근거와 맞으면 스스로 동의한다
     if ((await settingsOf(dispute.by)).rules.onDispute === 'evidence' && matchesEvidence(exp, dispute, out.alloc)) {
@@ -183,7 +183,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     if (dispute.status !== 'proposed') throw new HttpError(409, dispute.status === 'open' ? '아직 중재안이 없어요' : '이미 끝난 이의예요');
     const saved = { ...dispute, agreedBy: [...new Set([...dispute.agreedBy, actorUid])] };
     await store.put('disputes', saved);
-    await say(roomId, { from: actorUid, to: 'all', kind: 'dispute_agreed', text: auto ? '근거와 맞는 중재안이라 동의했어요' : '중재안에 동의했어요', ...(auto ? { meta: '규칙 · 근거가 있으면 이의' } : {}) });
+    await say(roomId, { from: actorUid, to: 'all', kind: 'dispute_agreed', text: auto ? '근거와 맞는 중재안이라 동의했어요' : '중재안에 동의했어요', ...(auto ? { meta: '정해 둔 규칙: 근거와 맞는 중재안이면 동의' } : {}) });
     if (!parties.every((p) => saved.agreedBy.includes(p))) return saved;
 
     // 두 사람이 동의한 배분이므로 줄마다 확인된 것으로 둔다
@@ -241,7 +241,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       await say(roomId, {
         from: edge.from, to: edge.from, kind: 'transfer_scheduled',
         text: `${name(edge.to)}에게 ${won(edge.amount)}을 보내요. ${later ? `${whenText(transfer.remindAt)}에 알려 드릴게요` : '곧 알려 드릴게요'}`,
-        meta: later ? '규칙 · 월급날에 보내기' : '규칙 · 바로 보내기',
+        meta: later ? '정해 둔 규칙: 월급날에 보내기' : '정해 둔 규칙: 바로 보내기',
       });
       if (!transfer.link) {
         await say(roomId, {

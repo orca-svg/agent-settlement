@@ -1,7 +1,7 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh, receiptPickers, sendMode, COMPUTER_QUERY } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh, receiptPickers, sendMode, COMPUTER_QUERY } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
@@ -15,7 +15,7 @@ const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
-const nameOf = (uid) => ({ system: '시스템', mediator: '중재 비서', all: '모두' })[uid] ?? members().find((m) => m.uid === uid)?.name ?? uid;
+const nameOf = (uid) => ({ system: '정산방', mediator: '중재 비서', all: '모두' })[uid] ?? members().find((m) => m.uid === uid)?.name ?? uid;
 const agentName = (uid) => (uid === 'system' || uid === 'mediator' ? nameOf(uid) : `${nameOf(uid)}의 비서`);
 const colorOf = (uid) => {
   const profileColor = members().find(m => m.uid === uid)?.color;
@@ -24,14 +24,16 @@ const colorOf = (uid) => {
   return i < 0 ? '#8e8e93' : `var(--p${i % 4})`;
 };
 const avatar = (uid, cls = '') => avatarHtml(nameOf(uid)[0], colorOf(uid), cls);
-const timeOf = (iso) => new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Seoul' });
+// 기록 시각은 분까지만(로그가 아니라 대화)
+const timeOf = (iso) => new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Seoul' });
 
 // 좁은 화면에서 상단바 종으로 여는 비서끼리 기록. 마지막으로 본 기록은 방·사람마다 기억한다
 const seenKey = () => `agent-settlement.seen.${roomId}.${currentUid()}`;
 const logPop = createLogPop({
   itemHtml: (e, opts) => logItemHtml({
     avatar: avatar(e.from, 'agent'),
-    who: `${agentName(e.from)} → ${nameOf(e.to)}`,
+    who: agentName(e.from),
+    to: nameOf(e.to),
     time: timeOf(e.at),
     text: e.text,
     meta: e.meta,
@@ -611,10 +613,12 @@ function renderSheet() {
 }
 
 function renderChannel() {
+  const times = minuteLabels(state.events.map((e) => timeOf(e.at)));
   const items = state.events.map((e, i) => logItemHtml({
     avatar: avatar(e.from, 'agent'),
-    who: `${agentName(e.from)} → ${nameOf(e.to)}`,
-    time: timeOf(e.at),
+    who: agentName(e.from),
+    to: nameOf(e.to),
+    time: times[i],
     text: e.text,
     meta: e.meta,
     tagHtml: e.action ? chip(`${nameOf(e.action.for)}의 확인 필요`, 'warn') : '',

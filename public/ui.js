@@ -91,13 +91,18 @@ export function sendMode(t, { computer }) {
 }
 
 // 비서끼리 기록 한 줄
-export const logItemHtml = ({ avatar, who, time, text, meta = '', tagHtml = '', enter = false, unread = false, extraHtml = '' }) => `<li class="${enter ? 'enter' : ''}${unread ? ' unread' : ''}">
+// 비서끼리 기록 한 줄. 시스템 로그가 아니라 비서들의 대화처럼 보이게 한다: 말은 말풍선에, 받는 사람은 '○○에게'로,
+// 근거(규칙·수치)는 말풍선 밖에 접어 두어 궁금한 사람만 연다. 같은 분에 이어진 말은 시각을 비워 한 번만 보인다
+export const logItemHtml = ({ avatar, who, to = '', time = '', text, meta = '', tagHtml = '', enter = false, unread = false, extraHtml = '' }) => `<li class="${enter ? 'enter' : ''}${unread ? ' unread' : ''}">
     ${avatar}
-    <div><div class="who"><span>${esc(who)}</span><time>${esc(time)}</time></div>
+    <div><div class="who"><span>${esc(who)}${to ? ` <span class="to">${esc(to)}에게</span>` : ''}</span>${time ? `<time>${esc(time)}</time>` : ''}</div>
       <p class="text">${esc(text)}</p>
-      ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}
+      ${meta ? `<details class="why"><summary>왜 그렇게 했나요</summary><p>${esc(meta)}</p></details>` : ''}
       ${tagHtml ? `<div class="tag">${tagHtml}</div>` : ''}${extraHtml}</div>
   </li>`;
+
+/** 기록 시각을 분까지만. 바로 앞 기록과 같은 분이면 빈 글자를 돌려줘 한 번만 보이게 한다 */
+export const minuteLabels = (times) => times.map((t, i) => (i && times[i - 1] === t ? '' : t));
 
 // 이어진 같은 종류의 기록(같은 비서, 같은 kind, 할 일 없음)을 한 묶음으로. kind가 없는 기록은 묶지 않는다.
 export function groupRuns(list) {
