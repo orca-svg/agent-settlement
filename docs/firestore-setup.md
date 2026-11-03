@@ -2,7 +2,7 @@
 
 ## 지금 된 것
 
-- `src/store/firestore.mjs`의 `FirestoreStore`가 `MemoryStore`와 같은 Store 계약을 지켜요. 서버는 `STORE=firestore`일 때만 이걸 쓰고, 아니면 지금처럼 메모리에 둬요. 어느 쪽이든 `encryptedStore`로 계좌 칸을 잠가요.
+- `src/store/firestore.mjs`의 `FirestoreStore`가 `MemoryStore`와 같은 Store 계약을 지켜요. 서버는 `STORE=firestore`일 때만 이걸 쓰고, 아니면 지금처럼 메모리에 둬요. 어느 쪽이든 `encryptedStore`로 계좌·위치 요약 칸을 잠가요.
 - 비서 기록 `seq`는 방마다 트랜잭션으로 매기고, 탈퇴(`eraseUser`)도 한 트랜잭션으로 써요. 결과는 `MemoryStore`와 같아요(`eraseUserSnapshot`을 같이 씀).
 - 영수증 사진은 Firestore 문서 한도(1MiB)를 넘을 수 있어서 Cloud Storage `receipts/{지출 id}`에 둬요.
 - 보안 규칙: `firestore.rules`(방 멤버만 읽기, 송금은 당사자만, 쓰기는 모두 서버만), `storage.rules`(전부 서버만).
@@ -15,10 +15,10 @@
 
 #2 안내(`docs/auth-location-setup.md`)대로 프로젝트와 로그인을 먼저 준비한 뒤:
 
-1. **Firestore 만들기.** Console → Firestore Database → 데이터베이스 만들기 → Native 모드. 위치는 Cloud Run과 같은 `asia-northeast1`(도쿄)을 권장해요. 위치는 나중에 못 바꿔요.
-2. **Storage 만들기.** Console → Storage. 2026-02-03부터 Cloud Storage for Firebase는 **Blaze 요금제**가 필요해요(무료 사용량은 그대로 있어요). 버킷 이름(`<project>.firebasestorage.app` 또는 예전 `<project>.appspot.com`)을 적어 둬요.
+1. **Firestore 만들기.** Console → Firestore Database → 데이터베이스 만들기 → Standard 버전, Native 모드. 데이터베이스 ID는 `(default)`로 둬요(코드가 기본 DB만 열어요). 위치는 Cloud Run과 같은 `asia-northeast1`(도쿄)을 권장해요. 위치는 나중에 못 바꿔요. 시작 규칙은 **프로덕션 모드**(전부 거부)로 골라요. 테스트 모드는 30일 동안 누구나 읽고 쓰게 열리고, 어차피 3번에서 우리 규칙으로 덮어요.
+2. **Storage 만들기.** Console → Storage. 2026-02-03부터 Cloud Storage for Firebase는 **Blaze 요금제**가 필요해요(무료 사용량은 그대로 있어요). 버킷 이름(`<project>.firebasestorage.app` 또는 예전 `<project>.appspot.com`)을 적어 둬요. Blaze는 쓴 만큼 과금되니 Cloud Console → 결제 → 예산 및 알림에서 예산 알림도 함께 걸어요. 예산은 알림만 보내고 과금을 멈추지는 않아요.
 3. **규칙 배포.** `firebase deploy --only firestore:rules,storage --project <project>`. 서버를 `STORE=firestore`로 바꾸기(5번) 전에 해요. 규칙이 없으면 화면의 실시간 구독이 거부돼 2초 폴링으로 돌아가는데, 폴링은 2초마다 최소 4읽기(탈퇴 표식·위치 동의·방·기록)라 방을 연 탭 하나가 시간당 약 7,200읽기를 써요(하루 무료 5만 읽기).
-4. **서버 권한.** Cloud Run 서비스 계정에 `Cloud Datastore 사용자`(roles/datastore.user)와 버킷의 `Storage 개체 관리자`(roles/storage.objectAdmin)를 줘요. 로컬은 `gcloud auth application-default login`.
+4. **서버 권한.** Cloud Run 서비스 계정에 `Cloud Datastore 사용자`(roles/datastore.user)와 버킷의 `Storage 개체 관리자`(roles/storage.objectAdmin)를 줘요. 기본 compute 서비스 계정이 프로젝트 `편집자`(roles/editor)면 두 권한이 이미 들어 있어서 따로 줄 필요가 없어요. 로컬 서버는 실제 Firestore에 붙이지 말고 아래 에뮬레이터로 확인해요. 로컬에는 운영 `PAYOUT_ENC_KEY`가 없어서 개발용 열쇠로 잠그는데, 그렇게 잠긴 문서가 실제 DB에 섞이면 배포 서버의 `tick()`이 풀지 못해 멈춰요(7번).
 5. **환경변수.** #2의 Firebase 값 네 개에 더해:
 
    ```dotenv
@@ -26,7 +26,13 @@
    FIREBASE_STORAGE_BUCKET=<버킷 이름>
    ```
 
-6. **배포.** `--max-instances 1`은 그대로 둬요. 서버 안의 요청 줄(`src/state-locks.mjs`), QR 토큰, AI 캐시가 인스턴스 하나를 전제로 해요(`ARCHITECTURE.md` 참고).
+6. **배포.** 이미 배포된 서비스라면 다시 빌드하지 않고 환경변수만 더해요. `--set-env-vars`는 목록 전체를 갈아 끼워 Firebase 값이 빠지니 `--update-env-vars`를 써요.
+
+   ```bash
+   gcloud run services update agent-settlement --region asia-northeast1 --project <project> --update-env-vars STORE=firestore,FIREBASE_STORAGE_BUCKET=<버킷 이름>
+   ```
+
+   `--max-instances 1`은 그대로 둬요. 서버 안의 요청 줄(`src/state-locks.mjs`), QR 토큰, AI 캐시가 인스턴스 하나를 전제로 해요(`ARCHITECTURE.md` 참고). 문제가 생기면 `gcloud run services update-traffic agent-settlement --region asia-northeast1 --project <project> --to-revisions <전환 전 리비전>=100`으로 메모리 저장소 리비전에 되돌려요. 되돌려도 Firestore 데이터는 그대로 남고, 다시 앞으로 갈 때는 `--to-revisions` 대신 `--to-latest`를 써요.
 7. **`PAYOUT_ENC_KEY`는 Firestore에 계좌가 들어간 뒤로 절대 바꾸지 않아요.** 바뀌면 잠긴 계좌를 못 풀어서 `tick()`이 멈추고, 모든 방의 송금 알림이 멈춰요.
 
 ## 프로젝트 없이 에뮬레이터로
