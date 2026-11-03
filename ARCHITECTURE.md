@@ -61,7 +61,7 @@ API 서버 (server.mjs → src/app.mjs)
 | `listEvents(roomId, afterSeq = 0)` | `seq > afterSeq`인 기록 |
 | `eraseUser(uid)` (선택 확장) | 탈퇴 기능을 제공하는 저장소에서 구현. 개인정보 삭제·방별 무작위 익명 UID 치환을 원자적으로 수행하고 `{ removedLinks }` 반환. 없으면 탈퇴 API는 데이터 변경 없이 503. 래퍼를 거치지 않고 쓰므로 잠그는 칸(`SEALED_FIELDS`)에는 `null`·빈 목록 `[]`·칸 삭제만 쓴다(그 밖의 평문은 읽을 때 오류) |
 
-계약 테스트는 `test/store.test.mjs`예요. `FirestoreStore`도 에뮬레이터가 있으면 같은 테스트를 돌려요(`npm run test:emulators`). Firestore에서만 생기는 일(동시 seq, 영수증 사진, 탈퇴 트랜잭션, 보안 규칙)은 `test/firestore.test.mjs`가 봐요.
+계약 테스트는 `test/store.test.mjs`예요. `FirestoreStore`도 에뮬레이터가 있으면 같은 테스트를 돌려요(`npm run test:emulators`). Firestore에서만 생기는 일(동시 seq, 영수증 사진, 탈퇴 트랜잭션, 보안 규칙)은 `test/firestore.test.mjs`가 봐요. 화면 쪽 요청으로 다른 방의 데이터를 못 보고 못 바꾸는지(목록 조회, 다른 방 멤버, 지우기, 규칙에 적히지 않은 컬렉션)는 `test/firestore-rules.test.mjs`가 봐요(#10).
 
 `FirestoreStore`만의 약속:
 
