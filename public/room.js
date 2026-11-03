@@ -7,7 +7,7 @@ import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
 import { initAuth, authOptions, onSessionChange } from './auth.js';
 import { BANKS } from './banks.js';
-import { readVisits, departure, timelineSummary, expenseWindow, kstTime } from './timeline.js';
+import { readVisits, departure, timelineSummary, expenseWindow, kstTime, keepForSettlement } from './timeline.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
@@ -92,6 +92,32 @@ function lastUsed() {
 function remember(d) {
   try {
     localStorage.setItem(LAST_KEY, JSON.stringify({ currency: d.currency, payer: d.payer, method: d.method, present: d.present }));
+  } catch {}
+}
+// 정산당 한 번 올린 타임라인(#7). 이 정산 지출 시간대의 방문 시각만 이 브라우저에 7일 두고 서버로는 보내지 않는다.
+// 저장이 막힌 브라우저에서도 지금 화면에서는 쓰도록 메모리에도 둔다. 로그아웃하면 지운다(auth.js)
+const TIMELINE_DAYS = 7;
+const timelineKey = () => `agent-settlement.timeline.${roomId}.${state.data?.me.uid}`;
+const visitsInMemory = {};
+function savedVisits() {
+  const key = timelineKey();
+  try {
+    const saved = JSON.parse(localStorage.getItem(key));
+    if (saved && Date.now() - saved.savedAt < TIMELINE_DAYS * 86400_000) return saved.visits;
+    localStorage.removeItem(key);
+  } catch {}
+  return visitsInMemory[key] ?? null;
+}
+function saveVisits(visits) {
+  visitsInMemory[timelineKey()] = visits;
+  try {
+    localStorage.setItem(timelineKey(), JSON.stringify({ savedAt: Date.now(), visits }));
+  } catch {}
+}
+function forgetVisits() {
+  delete visitsInMemory[timelineKey()];
+  try {
+    localStorage.removeItem(timelineKey());
   } catch {}
 }
 // 외화는 환율이 있는 날짜만 고를 수 있다
@@ -702,50 +728,84 @@ function invoiceSheet() {
   };
 }
 
-// #7 위치 근거: 이의를 낼 때 고른 지출의 시간대(첫 주문~결제)만 Google 지도 타임라인 파일에서 찾아 본다.
-// 파일은 이 화면에서만 읽고 올리지 않는다. 찾은 결과는 사용자가 스위치를 켜야만 이의 상대와 중재 비서에게 간다(public/timeline.js)
+const rowText = (title, meta = '', end = '') => `<span class="grow"><span class="title">${esc(title)}</span>${meta ? `<span class="meta" style="display:block">${esc(meta)}</span>` : ''}</span>${end}`;
+
+// #7 정산당 한 번: 여행이 끝난 뒤 Google 지도 타임라인 파일을 한 번 고르면, 이의를 낼 때마다 그 지출 시간대를 여기 남긴 방문에서 찾는다
+function locationSection() {
+  const { expenses, me } = state.data;
+  if (!expenses.some((e) => e.present.includes(me.uid))) return '';
+  const visits = savedVisits();
+  const body = state.timelineReading
+    ? `<div class="list" aria-busy="true"><div class="row">${tile('pin')}${rowText('파일에서 이 정산 기간만 찾는 중…')}</div></div>`
+    : visits
+    ? `<div class="list"><div class="row">${tile('pin')}${rowText('Google 지도 타임라인을 올렸어요', visits.length ? `이 정산 기간 방문 ${visits.length}곳 · 이의를 낼 때 자동으로 찾아요` : '이 정산 기간의 기록이 없어요')}
+        <button type="button" class="text-btn" data-action="timeline-forget">지우기</button></div></div>`
+    : `<div class="list"><button type="button" class="row" data-action="timeline-pick">${tile('pin')}${rowText('Google 지도 타임라인 올리기', '여행이 끝난 뒤 한 번만 올리면 돼요', CHEVRON)}</button></div>`;
+  return `<section class="group"><h2 class="group-label"><span>내 위치 기록</span><span>선택</span></h2>${body}
+    ${state.timelineError ? `<p class="form-error" role="alert">${esc(state.timelineError)}</p>` : ''}
+    <p class="group-note">파일은 이 기기에서만 읽어요. 이 정산 기간의 방문 시각만 이 브라우저에 ${TIMELINE_DAYS}일 두고, 이의를 낼 때 내가 켠 한 줄만 상대에게 가요.</p></section>`;
+}
+
+// 이의를 낼 때 고른 지출의 시간대(첫 주문~결제). 올려 둔 타임라인이 있으면 바로 찾아 채우고, 없으면 여기서 올린다.
+// 찾은 결과는 사용자가 스위치를 켜야만 이의 상대와 중재 비서에게 간다(public/timeline.js)
 function timelineSection(exp, tl) {
   const { from, until } = expenseWindow(exp);
-  const row = (title, meta, end = '') => `<span class="grow"><span class="title">${esc(title)}</span>${meta ? `<span class="meta" style="display:block">${esc(meta)}</span>` : ''}</span>${end}`;
   const r = tl?.result;
   const found = r && (r.stayedUntil
-    ? row(`결제(${r.stayedUntil})까지 머물렀어요`, `첫 주문 ${kstTime(from)}부터 같은 곳`)
-    : row(`${r.leftAt}에 떠났어요`, `첫 주문 ${kstTime(from)} 때 있던 곳 · ${r.nextAt ? `${r.nextAt} ${r.nextHome ? '집' : '다른 장소'} 도착` : '도착 기록 없음'}`));
+    ? rowText(`결제(${r.stayedUntil})까지 머물렀어요`, `첫 주문 ${kstTime(from)}부터 같은 곳`)
+    : rowText(`${r.leftAt}에 떠났어요`, `첫 주문 ${kstTime(from)} 때 있던 곳 · ${r.nextAt ? `${r.nextAt} ${r.nextHome ? '집' : '다른 장소'} 도착` : '도착 기록 없음'}`));
   const body = !tl
-    ? `<div class="list"><button type="button" class="row" data-action="timeline-pick">${tile('pin')}${row('Google 지도 타임라인에서 찾기', `이 지출 시간대(${kstTime(from)}~${kstTime(until)})만 읽어요`, CHEVRON)}</button></div>
-      <p class="group-note">휴대폰 Google 지도에서 내보낸 타임라인 파일(JSON)을 골라요. 파일은 이 기기에서만 읽고 올리지 않아요.</p>`
-    : tl.state === 'reading' ? `<div class="list" aria-busy="true"><div class="row">${tile('pin')}${row('이 시간대만 찾는 중…', '')}</div></div>`
-    : tl.state === 'none' ? `<div class="list"><div class="row">${tile('pin')}${row('이 시간대 기록이 없어요', '위치 요약 없이 이의를 보내요')}</div></div>`
+    ? `<div class="list"><button type="button" class="row" data-action="timeline-pick">${tile('pin')}${rowText('Google 지도 타임라인 올리기', `이 지출 시간대(${kstTime(from)}~${kstTime(until)})를 찾아요`, CHEVRON)}</button></div>
+      <p class="group-note">휴대폰 Google 지도에서 내보낸 타임라인 파일(JSON)을 골라요. 한 번 올리면 이 정산의 다른 이의에도 다시 고르지 않고 써요.</p>`
+    : tl.state === 'reading' ? `<div class="list" aria-busy="true"><div class="row">${tile('pin')}${rowText('이 시간대만 찾는 중…')}</div></div>`
+    : tl.state === 'none' ? `<div class="list"><div class="row">${tile('pin')}${rowText('이 시간대 기록이 없어요', '위치 요약 없이 이의를 보내요')}</div></div>`
     : tl.state === 'error' ? `<p class="form-error" role="alert">${esc(tl.message)}</p>`
     : `<div class="list"><div class="row">${tile('pin')}${found}</div>
-        <label class="row" style="--inset:16px;cursor:pointer">${row('이의에 붙이기', '이의 상대와 중재 비서만 봐요')}<input type="checkbox" role="switch" class="switch" data-timeline-agree ${tl.agree ? 'checked' : ''}></label></div>
-      <p class="group-note">시각만 보내고 파일·좌표·장소 이름은 보내지 않아요. 7일 뒤 지워지고, 그 전에도 지울 수 있어요.</p>`;
+        <label class="row" style="--inset:16px;cursor:pointer">${rowText('이의에 붙이기', '이의 상대와 중재 비서만 봐요')}<input type="checkbox" role="switch" class="switch" data-timeline-agree ${tl.agree ? 'checked' : ''}></label></div>
+      <p class="group-note">${tl.saved ? '올려 둔 타임라인에서 찾았어요. ' : ''}시각만 보내고 파일·좌표·장소 이름은 보내지 않아요. 7일 뒤 지워지고, 그 전에도 지울 수 있어요.</p>`;
   const again = tl && tl.state !== 'reading' ? '<button type="button" class="text-btn" data-action="timeline-pick">다른 파일 고르기</button>' : '';
   const sample = authOptions().dev && tl?.state !== 'reading' ? '<button type="button" class="text-btn" data-action="timeline-sample">개발용 가짜 기록</button>' : '';
   return `<section class="group"><h3 class="group-label"><span>위치 기록</span><span>선택</span></h3>${body}
-    <input type="file" accept=".json,application/json" data-timeline hidden>
     ${again || sample ? `<div class="group-actions">${again}${sample}</div>` : ''}</section>`;
 }
 
-function applyTimeline(visits, exp) {
+function applyTimeline(visits, exp, saved = false) {
   const result = departure(visits, exp);
-  state.disputeDraft.timeline = result ? { state: 'found', result, summary: timelineSummary(result, exp), agree: false } : { state: 'none' };
+  state.disputeDraft.timeline = result ? { state: 'found', result, summary: timelineSummary(result, exp), agree: false, saved } : { state: 'none', saved };
 }
 
+// 파일 고르기. 문서에 붙인 입력은 다시 그릴 때 사라지므로 고를 때마다 만든다
+function pickTimeline() {
+  const input = Object.assign(document.createElement('input'), { type: 'file', accept: '.json,application/json', hidden: true });
+  input.addEventListener('change', () => {
+    if (input.files?.[0]) readTimeline(input.files[0]);
+    input.remove();
+  });
+  document.body.append(input);
+  input.click();
+}
+
+// 파일은 여기서만 읽는다. 이 정산 지출 시간대의 방문만 남기고, 이의를 쓰는 중이면 고른 지출 시간대를 바로 찾는다
 async function readTimeline(file) {
   const dd = state.disputeDraft;
   const exp = dd?.expenseId && byId('expenses', dd.expenseId);
-  if (!exp) return;
-  dd.timeline = { state: 'reading' };
-  renderSheet();
+  const redraw = () => { render(); if (dd) renderSheet(); };
+  state.timelineReading = true;
+  state.timelineError = '';
+  if (exp) dd.timeline = { state: 'reading' };
+  redraw();
   try {
-    const visits = readVisits(JSON.parse(await file.text()));
-    if (state.disputeDraft !== dd || dd.expenseId !== exp.id) return; // 읽는 사이 다른 지출을 골랐으면 버린다
-    applyTimeline(visits, exp);
+    const mine = state.data.expenses.filter((e) => e.present.includes(state.data.me.uid));
+    const visits = keepForSettlement(readVisits(JSON.parse(await file.text())), mine);
+    saveVisits(visits);
+    if (exp && state.disputeDraft === dd && dd.expenseId === exp.id) applyTimeline(visits, exp, true); // 읽는 사이 다른 지출을 골랐으면 그 지출은 dispute-pick이 찾는다
   } catch (e) {
-    dd.timeline = { state: 'error', message: e instanceof SyntaxError ? 'JSON 파일이 아니에요. 휴대폰 Google 지도에서 내보낸 타임라인 파일을 골라 주세요.' : e.message };
+    const message = e instanceof SyntaxError ? 'JSON 파일이 아니에요. 휴대폰 Google 지도에서 내보낸 타임라인 파일을 골라 주세요.' : e.message;
+    if (exp) dd.timeline = { state: 'error', message };
+    else state.timelineError = message;
   }
-  renderSheet();
+  state.timelineReading = false;
+  redraw();
 }
 
 // 개발용: 고른 지출에 맞춘 가짜 타임라인. 첫 주문 20분 전부터 머물다 결제 전에 떠나 13분 뒤 다른 곳에 도착한다
@@ -951,7 +1011,7 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'timeline-pick', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'open-payout', 'save-payout', 'copy']);
+const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'timeline-pick', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'open-payout', 'save-payout', 'copy']);
 
 async function agentAct(name, d) {
   const base = `/api/rooms/${enc(roomId)}`;
@@ -989,9 +1049,14 @@ async function agentAct(name, d) {
   } else if (name === 'dispute-pick') {
     state.disputeDraft.expenseId = d.id;
     state.disputeDraft.timeline = null; // 다른 지출이면 시간대가 달라서 다시 찾는다
+    const visits = savedVisits();
+    if (visits) applyTimeline(visits, byId('expenses', d.id), true);
     renderSheet();
   } else if (name === 'timeline-pick') {
-    document.querySelector('input[data-timeline]')?.click();
+    pickTimeline();
+  } else if (name === 'timeline-forget') {
+    forgetVisits();
+    render();
   } else if (name === 'timeline-sample') {
     const exp = byId('expenses', state.disputeDraft?.expenseId);
     if (exp) applyTimeline(readVisits(sampleTimeline(exp)), exp);
@@ -1066,7 +1131,7 @@ function render() {
   $('#nav-add').hidden = false;
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
-  main.innerHTML = [hero(), whoPicker(), nextCard(), expensesSection(), transfersSection()].join('');
+  main.innerHTML = [hero(), whoPicker(), nextCard(), expensesSection(), transfersSection(), locationSection()].join('');
   mountSegs(main);
   if (['exp', 'dispute', 'transfer'].includes(state.sheet) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
 }
@@ -1108,7 +1173,6 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', (e) => {
   if (e.target.matches?.('input[data-receipt]') && e.target.files?.[0]) readReceipt(e.target.files[0]);
-  if (e.target.matches?.('input[data-timeline]') && e.target.files?.[0]) readTimeline(e.target.files[0]);
   // 체크만 기억한다(다시 그리면 초점을 잃는다)
   if (e.target.matches?.('input[data-timeline-agree]') && state.disputeDraft?.timeline) state.disputeDraft.timeline.agree = e.target.checked;
 });

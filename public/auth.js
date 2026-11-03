@@ -40,6 +40,8 @@ export async function reauthenticate() {
 export async function logout() {
   if (instance) await sdk.signOut(instance);
   localStorage.removeItem('agent-settlement.uid');
+  // 정산당 한 번 올린 타임라인 방문 시각도 이 기기에서 지운다(room.js)
+  for (const key of Object.keys(localStorage)) if (key.startsWith('agent-settlement.timeline.')) localStorage.removeItem(key);
   location.href = './';
 }
 export function onSessionChange(callback) {

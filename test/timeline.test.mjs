@@ -1,7 +1,7 @@
 // Google 지도 타임라인 내보내기 파일에서 정산 시간대의 방문만 읽는다(#7). 좌표·장소 이름은 꺼내지 않는다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readVisits, expenseWindow, departure, timelineSummary } from '../public/timeline.js';
+import { readVisits, expenseWindow, departure, timelineSummary, keepForSettlement } from '../public/timeline.js';
 
 const seg = (start, end, extra = {}) => ({ startTime: start, endTime: end, startTimeTimezoneUtcOffsetMinutes: 540, endTimeTimezoneUtcOffsetMinutes: 540, ...extra });
 const visit = (start, end, { placeId = 'ChIJbar', probability = 0.9, semanticType = 'UNKNOWN', level = 0 } = {}) =>
@@ -85,4 +85,16 @@ test('timelineSummary: 첫 주문 때 머물던 곳 기준으로 한 줄을 만�
   assert.equal(timelineSummary({ leftAt: '22:55', nextAt: null, nextHome: false }, bar), '첫 주문(22:30) 때 머물던 곳을 22:55에 떠났어요 · Google 지도 타임라인(본인 제출)');
   assert.equal(timelineSummary({ leftAt: '22:55', nextAt: '23:08', nextHome: true }, bar), '첫 주문(22:30) 때 머물던 곳을 22:55에 떠났어요 · 23:08 집에 도착 · Google 지도 타임라인(본인 제출)');
   assert.equal(timelineSummary({ stayedUntil: '23:40' }, bar), '첫 주문(22:30)부터 결제(23:40)까지 같은 곳에 있었어요 · Google 지도 타임라인(본인 제출)');
+});
+
+// 정산당 한 번 올리기: 파일 전체가 아니라 이 정산의 지출 시간대 근처 방문만 이 기기에 남긴다
+test('keepForSettlement: 지출 시간대 근처 방문만 남기고, 남긴 것으로도 같은 답을 낸다', () => {
+  const lunch = { date: '2026-11-08', time: '13:30', items: [] };
+  const far = [visit('2026-10-01T10:00:00.000+09:00', '2026-10-01T12:00:00.000+09:00'), visit('2026-11-20T10:00:00.000+09:00', '2026-11-20T12:00:00.000+09:00')];
+  const all = [...readVisits({ semanticSegments: [...far, ...minsu.semanticSegments] })];
+  const kept = keepForSettlement(all, [bar, lunch]);
+  assert.equal(kept.length, 2);
+  assert.ok(kept.every((v) => Object.keys(v).sort().join() === 'end,home,probability,start'));
+  assert.deepEqual(departure(kept, bar), departure(all, bar));
+  assert.deepEqual(keepForSettlement(all, []), []);
 });

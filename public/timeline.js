@@ -70,6 +70,15 @@ export function departure(visits, expense) {
   return { leftAt: hhmm(there.end), nextAt: next ? hhmm(next.start) : null, nextHome: Boolean(next?.home) };
 }
 
+/** 정산당 한 번 올린 파일에서 이 기기에 남길 방문. 지출 시간대(첫 주문~결제 3시간 뒤)에 걸친 방문의 시각만 남긴다 */
+export function keepForSettlement(visits, expenses) {
+  if (!expenses.length) return [];
+  const windows = expenses.map(expenseWindow);
+  const lo = Math.min(...windows.map((w) => w.from));
+  const hi = Math.max(...windows.map((w) => w.until)) + 3 * 60 * MIN;
+  return visits.filter((v) => v.end > lo && v.start < hi).map(({ start, end, probability, home }) => ({ start, end, probability, home }));
+}
+
 /** 이의 상대와 중재 비서에게 보내는 한 줄. 화면 미리보기와 서버 저장이 같은 글을 쓴다 */
 export function timelineSummary(result, expense) {
   const { from, until } = expenseWindow(expense);
