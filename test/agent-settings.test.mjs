@@ -11,7 +11,7 @@ import { evidenceFor } from '../src/agents/evidence.mjs';
 import { pendingActions } from '../src/actions.mjs';
 import { createApp } from '../src/app.mjs';
 import { notifies, DEFAULT_RULES, ruleChangeText } from '../public/agent-rules.js';
-import { draftFromRules, rulesFromDraft, memoryRowsHtml, historyHtml, limitInputHtml, limitPresetsHtml, rowHtml } from '../public/agent-panel.js';
+import { draftFromRules, rulesFromDraft, memoryRowsHtml, historyHtml, limitInputHtml, limitPresetsHtml, meChipHtml } from '../public/agent-panel.js';
 
 const ROOM = 'demo-t';
 async function setup({ evidence = false, store = new MemoryStore() } = {}) {
@@ -550,12 +550,21 @@ test('설정 화면: 기억 한 줄에는 글과 이 방에 쓰는지만 있고,
   assert.ok(editing.includes('mem-edit-save') && editing.includes('mem-del') && !editing.includes('mem-share'));
 });
 
-test('처음 설정의 금액 버튼과 방 화면 요약은 필요한 값만 보여 준다', () => {
+test('처음 설정의 금액 버튼은 네 개이고 고른 금액이 눌려 있다', () => {
   assert.equal((limitPresetsHtml({ autoAccept: '30000' }).match(/data-action="agent-preset"/g) ?? []).length, 4);
   assert.match(limitPresetsHtml({ autoAccept: '30000' }), /aria-pressed="true"[^>]*>₩30,000/);
-  const row = rowHtml({ autoAccept: 50_000, sendWhen: { payday: 10 }, hasPayout: true });
-  assert.ok(row.includes('₩50,000까지 자동 수락 · 매달 10일에 보내기') && !row.includes('받을 계좌 없음'));
-  assert.ok(rowHtml({ autoAccept: 0, sendWhen: 'now', hasPayout: false }).includes('받을 계좌 없음'));
+});
+
+test('방 머리의 내 칩이 내 비서 입구를 겸한다: 누르면 설정이 열리고, 할 일이 있으면 글자로 알린다', () => {
+  const me = { name: '나', avatar: '<span class="avatar">나</span>' };
+  const ok = meChipHtml(me, { onboarded: true, autoAccept: 50_000, sendWhen: { payday: 10 }, hasPayout: true });
+  assert.match(ok, /^<button type="button" class="person me" data-action="open-agent"/);
+  assert.match(ok, />내 비서</);
+  assert.ok(ok.includes('₩50,000까지 자동 수락 · 매달 10일에 보내기'), '요약은 툴팁과 읽어 주기 글로 남는다');
+  assert.ok(!ok.includes('계좌 없음') && !ok.includes('설정 전'));
+  assert.match(meChipHtml(me, { onboarded: true, autoAccept: 0, sendWhen: 'now', hasPayout: false }), /class="person-agent warn">내 비서 · 계좌 없음</);
+  assert.match(meChipHtml(me, { onboarded: false, autoAccept: 0, sendWhen: 'now', hasPayout: false }), /class="person-agent warn">내 비서 · 설정 전</);
+  assert.equal(meChipHtml({ name: '<b>', avatar: '' }, null), '<span class="person">&lt;b&gt;</span>', '서버가 요약을 주지 않으면 그냥 칩이다');
 });
 
 test('normalizeSettings: 빈 문서와 옛 문서(notify 없음)를 기본값으로 채우고 있던 값은 지킨다', () => {

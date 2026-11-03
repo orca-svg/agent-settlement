@@ -979,3 +979,52 @@ body.pop-open { overflow: hidden; }
 .agent-history ol { list-style: none; margin: 8px 0 0; padding: 0; }
 .agent-history li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 0.875rem; border-top: 0.5px solid var(--sep, rgba(127, 127, 127, 0.3)); letter-spacing: 0; }
 .agent-history time { flex: none; color: var(--label-2); font-size: 0.8125rem; }
+
+/* ---------- 내 비서 입구(#5) ---------- */
+/* 방 머리의 내 칩은 '내 비서' 입구를 겸한다. 누를 수 있다는 것을 테두리·화살표·호버·커서로 알린다 */
+button.person { appearance: none; border: 0; font: inherit; color: inherit; cursor: pointer; }
+.person.me { padding-right: 10px; box-shadow: inset 0 0 0 1px var(--tint-soft); transition: transform 100ms ease-out, background 100ms ease-out; }
+.person.me:hover { background: var(--tint-soft); }
+.person.me:active { transform: scale(0.97); }
+.person-agent { color: var(--tint); font-weight: 600; }
+.person-agent.warn { color: var(--orange); }
+.person.me .chev { width: 6px; height: 10px; color: var(--label-3); }
+
+/* 우측 상단 내 프로필 메뉴: 내 계정과 이 방의 내 비서 */
+.me-menu-wrap { position: relative; }
+.nav-btn.nav-me { padding: 0 12px 0 4px; }
+.nav-btn.nav-me .avatar { width: 28px; height: 28px; font-size: 0.8125rem; }
+/* 아바타 오른쪽에 종·지출 남기기가 있어 아바타 끝에 맞추면 화면 밖으로 나간다. 기록 팝업처럼 화면 오른쪽에 붙인다 */
+.me-menu {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 52px);
+  right: 12px;
+  z-index: 40;
+  display: grid;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+}
+.me-menu[hidden] { display: none; }
+.me-menu [role="menuitem"] {
+  appearance: none;
+  border: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  font-size: 0.9375rem;
+  color: var(--label);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.me-menu [role="menuitem"]:hover, .me-menu [role="menuitem"]:focus-visible { background: var(--tint-soft); }
+.me-menu [role="menuitem"][hidden] { display: none; }
+/* 좁은 화면에서도 얼굴만 남겨 둔다(주 버튼만 남기는 규칙의 예외) */
+@media (max-width: 520px) {
+  .nav-actions .nav-btn.nav-me { display: inline-flex; padding: 0 4px; }
+  .nav-me-label { display: none; }
+}

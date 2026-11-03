@@ -63,6 +63,33 @@ const logPop = createLogPop({
   },
 });
 
+// 우측 상단 내 프로필 메뉴(#5). 내 계정으로 가는 길이면서, 방 안에서는 '이 방의 내 비서'로 가는 길을 겸한다(주 입구는 방 머리의 내 칩)
+const meMenu = {
+  get isOpen() {
+    return !$('#me-menu').hidden;
+  },
+  toggle() {
+    if (this.isOpen) this.close();
+    else this.open();
+  },
+  open() {
+    $('#me-menu').hidden = false;
+    $('#nav-me').setAttribute('aria-expanded', 'true');
+    $('#me-menu [role="menuitem"]:not([hidden])')?.focus();
+  },
+  close(focus = true) {
+    $('#me-menu').hidden = true;
+    $('#nav-me').setAttribute('aria-expanded', 'false');
+    if (focus) $('#nav-me').focus();
+  },
+  // 방을 읽은 뒤 내 얼굴과 '이 방의 내 비서'를 채운다. 방 밖이거나 서버가 요약을 주지 않으면 내 계정만 남는다
+  update() {
+    const me = state.data?.me;
+    $('#nav-me-avatar').innerHTML = me ? avatar(me.uid) : '';
+    $('#me-menu-agent').hidden = !state.data?.myAgent;
+  },
+};
+
 // ---------------------------------------------------------------- 데이터
 async function load() {
   try {
@@ -316,7 +343,7 @@ function expSheetHtml(exp) {
     ? `<section class="group"><h3 class="group-label"><span>영수증 ${exp.items.length}줄 · 어떻게 나눌까요</span><span>${esc(state.allocSource[exp.id] ?? (exp.alloc ? '' : '나누기 전'))}</span></h3>
         ${busy ? '<div class="next" aria-busy="true" style="margin:0 0 12px"><h2 style="font-size:1.0625rem">비서들이 기억으로 나누는 중이에요</h2><div class="progress"><i></i></div></div>' : ''}
         <div class="list">${linesHtml(exp)}</div>
-        <p class="group-note">${exp.alloc ? '이름을 눌러 고친 뒤 확인하면 그 줄은 더 묻지 않아요.' : '각자의 비서가 공유한 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄은 짐작하지 않고 물어봐요.'}</p>
+        <p class="group-note">${exp.alloc ? '이름을 눌러 고친 뒤 확인하면 그 줄은 더 묻지 않아요.' : '각자의 비서가 이 방에 쓰기로 고른 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄은 짐작하지 않고 물어봐요.'}</p>
         <button class="btn ${exp.alloc ? 'secondary' : ''}" style="width:100%;margin-top:10px" data-action="allocate-exp" data-id="${esc(exp.id)}" ${busy || ab.disabled ? 'disabled' : ''}>${ab.label}</button>
         ${ab.hint ? `<p class="group-note" style="margin-top:8px">${esc(ab.hint)}</p>` : ''}</section>`
     : `<p class="how">영수증 줄이 없어서 함께 있던 ${exp.present.length}명이 똑같이 나눠요.</p>`;
@@ -484,10 +511,12 @@ function whoPicker() {
 }
 
 function hero() {
-  const { room } = state.data;
+  const { room, me } = state.data;
+  // 내 칩은 '내 비서' 입구를 겸한다(#5). 다른 사람 칩은 그대로 이름표다
+  const person = (m) => (m.uid === me.uid ? agentPanel.chipHtml(m, avatar(m.uid)) : `<span class="person">${avatar(m.uid)}${esc(m.name)}</span>`);
   return `<section class="hero"><h1>${esc(room.name)}</h1>
     <p class="sub">${esc(room.dates || '')}${room.dates ? ' · ' : ''}${room.members.length}명 · 돈 얘기는 각자의 비서끼리 해요</p>
-    <div class="people">${room.members.map((m) => `<span class="person">${avatar(m.uid)}${esc(m.name)}</span>`).join('')}</div></section>`;
+    <div class="people">${room.members.map(person).join('')}</div></section>`;
 }
 
 function nextCard() {
@@ -498,7 +527,7 @@ function nextCard() {
     const unsplit = state.data.expenses.find((e) => e.split === 'items' && e.items?.length && !e.alloc);
     if (unsplit) {
       return `<section class="next"><p class="eyebrow">다음에 할 일</p><h2>${esc(topic(`‘${unsplit.title}’`))} 아직 메뉴별로 나누지 않았어요</h2>
-        <p>각자의 비서가 공유한 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄만 사람에게 물어봐요.</p>
+        <p>각자의 비서가 이 방에 쓰기로 고른 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄만 사람에게 물어봐요.</p>
         <div class="actions"><button class="btn" data-action="open-exp" data-id="${esc(unsplit.id)}">나누러 가기</button>${add.replace('class="btn"', 'class="btn plain"')}</div></section>`;
     }
     const settling = settlingCard(add.replace(/class="btn( secondary)?"/g, 'class="btn plain"'));
@@ -1337,7 +1366,8 @@ function render() {
   $('#nav-add').hidden = false;
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
-  main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), nextCard(), disputesSection(), agentPanel.rowHtml(), expensesSection(), transfersSection(), locationSection()].join('');
+  meMenu.update();
+  main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), nextCard(), disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
   mountSegs(main);
   // 이의·청구서 시트는 글을 쓰는 중이면 다시 그리지 않는다(타이핑 중 초점을 잃지 않게)
   if (['exp', 'transfer'].includes(state.sheet) || (state.sheet === 'dispute' && !state.rejectDraft) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
@@ -1346,7 +1376,10 @@ function render() {
 // ---------------------------------------------------------------- 이벤트
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
+  if (meMenu.isOpen && !e.target.closest('#me-menu-wrap')) meMenu.close(false); // 메뉴 밖을 누르면 닫는다
   if (!el || el.disabled) return;
+  if (el.dataset.action === 'toggle-me-menu') return meMenu.toggle();
+  if (meMenu.isOpen) meMenu.close(false); // 메뉴 안의 항목(내 비서)은 메뉴를 닫고 진행한다
   if (el.dataset.action === 'toggle-log') return logPop.toggle();
   if (el.dataset.action === 'close-log') return logPop.close();
   if (logPop.isOpen) logPop.close(false); // 기록 패널 안의 버튼(확인하기)은 패널을 닫고 진행한다
@@ -1355,7 +1388,8 @@ document.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
   agentPanel.onKeydown(e);
   if (e.key === 'Escape') {
-    if (logPop.isOpen) logPop.close();
+    if (meMenu.isOpen) meMenu.close();
+    else if (logPop.isOpen) logPop.close();
     else if (!$('#photo-modal').hidden) closePhoto();
     else sheet.close();
   }

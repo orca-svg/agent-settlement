@@ -1,7 +1,7 @@
 // 내 비서 설정 화면(#5): 규칙, 기억, 받을 계좌, 규칙 변경 기록, 처음 설정 흐름. 방 화면의 시트로 열린다.
 // 판단과 저장은 서버(src/agents/settings.mjs)가 하고, 여기서는 그리고 고른 값만 보낸다. import할 때 DOM을 건드리지 않는다.
 // 화면 원칙: 항상 보이는 버튼은 꼭 필요한 것만 둔다. 저장은 바꿨을 때만, 기억 고치기·지우기는 기억을 눌렀을 때만 나온다.
-import { esc, chip, CHEVRON } from './ui.js';
+import { esc, CHEVRON } from './ui.js';
 import { won } from './core.js';
 import { AUTO_ACCEPT_PRESETS, AUTO_ACCEPT_MAX, MEMORY_MAX_CHARS, MANUAL_WAIT_DAYS, NOTIFY, DEFAULT_RULES, sendWhenLabel, autoAcceptLabel } from './agent-rules.js';
 
@@ -85,11 +85,14 @@ export function historyHtml(view) {
     <ol>${[...view.ruleHistory].reverse().map((h) => `<li><span>${esc(h.text)}</span><time>${esc(clockText(h.at))}</time></li>`).join('')}</ol></details></section>`;
 }
 
-export function rowHtml(s) {
-  if (!s) return '';
-  return `<section class="group"><div class="list"><button class="row" data-action="open-agent"><span class="grow"><span class="title">내 비서</span>
-      <span class="meta" style="display:block">${esc(autoAcceptLabel(s.autoAccept))} · ${esc(sendWhenLabel(s.sendWhen))}</span></span>
-      ${s.hasPayout ? '' : chip('받을 계좌 없음', 'warn')}${CHEVRON}</button></div></section>`;
+// 방 머리의 멤버 칩 중 내 칩이 '내 비서' 입구를 겸한다. 화면 맨 위 시선 경로에 있고, 방마다 정하는 기억 사용과도 맥락이 맞는다.
+// 처음 설정 전이거나 받을 계좌가 없으면 색만이 아니라 글자로도 알린다. 규칙 요약은 툴팁과 읽어 주기 글로 둔다
+export function meChipHtml({ name, avatar }, s) {
+  if (!s) return `<span class="person">${avatar}${esc(name)}</span>`;
+  const flag = !s.onboarded ? '설정 전' : !s.hasPayout ? '계좌 없음' : '';
+  const rules = `${autoAcceptLabel(s.autoAccept)} · ${sendWhenLabel(s.sendWhen)}`;
+  return `<button type="button" class="person me" data-action="open-agent" title="${esc(rules)}" aria-label="내 비서 열기. ${esc(rules)}${flag ? `. ${esc(flag)}` : ''}">${avatar}${esc(name)}`
+    + `<span class="person-agent${flag ? ' warn' : ''}">내 비서${flag ? ` · ${flag}` : ''}</span>${CHEVRON}</button>`;
 }
 
 const ACTIONS = new Set(['open-agent', 'open-agent-setup', 'agent-set', 'agent-preset', 'agent-save-rules', 'mem-add', 'mem-edit', 'mem-edit-save', 'mem-del', 'mem-share', 'agent-payout', 'setup-next', 'setup-back', 'setup-skip', 'setup-done']);
@@ -254,7 +257,7 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
     handles: (name) => ACTIONS.has(name),
     act,
     open: () => open('agent'),
-    rowHtml: () => rowHtml(summary()),
+    chipHtml: (member, avatar) => meChipHtml({ name: member.name, avatar }, summary()),
     nudgeHtml: () => (summary() && !summary().onboarded
       ? `<section class="next"><p class="eyebrow">처음 설정</p><h2>내 비서가 어디까지 할지 정해 주세요</h2>
         <p>정하기 전에는 모든 청구서를 먼저 나에게 물어봐요.</p>
