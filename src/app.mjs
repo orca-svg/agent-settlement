@@ -82,7 +82,9 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     if (overLimit(key)) throw new HttpError(429, '요청이 너무 많아요. 10분 뒤에 다시 시도해 주세요.');
   };
 
-  routes.get('/api/config', async () => ({ mode: gemini ? 'gemini' : 'rules', model: gemini?.model ?? null, auth: { firebase: auth ? firebaseConfig(env) : null, dev, emulator: env.NODE_ENV !== 'production' ? env.FIREBASE_AUTH_EMULATOR_HOST || null : null } }));
+  routes.get('/api/config', async () => ({ mode: gemini ? 'gemini' : 'rules', model: gemini?.model ?? null, auth: { firebase: auth ? firebaseConfig(env) : null, dev, emulator: env.NODE_ENV !== 'production' ? env.FIREBASE_AUTH_EMULATOR_HOST || null : null },
+    // #3: 저장소가 Firestore이고 로그인이 켜져 있으면 화면이 비서 기록을 onSnapshot으로 받는다(아니면 2초 폴링)
+    ...(env.STORE === 'firestore' && auth ? { realtime: { firestore: true, emulator: env.NODE_ENV !== 'production' ? env.FIRESTORE_EMULATOR_HOST || null : null } } : {}) }));
   async function authenticate(req, { allowDeleting = false } = {}) {
     const who = await identify(req, store);
     if (!who || (!allowDeleting && await store.get('deletedUsers', who.uid))) throw new HttpError(401, '로그인이 필요해요');
