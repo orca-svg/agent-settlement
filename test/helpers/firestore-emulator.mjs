@@ -41,6 +41,20 @@ export function rulesClient(host = process.env.FIRESTORE_EMULATOR_HOST) {
       if (res.status !== 200) throw new Error(`규칙을 올리지 못했어요: ${res.status} ${await res.text()}`);
     },
     get: async (path, uid) => status(await fetch(`${docs}/${path}`, { headers: headers(uid) })),
+    // fields는 평범한 객체. mask를 주면 그 칸만 고친다(updateMask)
+    async write(path, uid, fields, mask) {
+      const qs = mask ? `?${mask.map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`).join('&')}` : '';
+      return status(await fetch(`${docs}/${path}${qs}`, { method: 'PATCH', headers: headers(uid), body: JSON.stringify({ fields: toFields(fields) }) }));
+    },
     remove: async (path, uid) => status(await fetch(`${docs}/${path}`, { method: 'DELETE', headers: headers(uid) })),
   };
 }
+
+// rulesClient.write용: 평범한 값 → Firestore REST 값. 테스트에 필요한 것(문자열, 정수, 문자열 배열)만 받는다
+function toValue(v) {
+  if (typeof v === 'string') return { stringValue: v };
+  if (Number.isInteger(v)) return { integerValue: String(v) };
+  if (Array.isArray(v) && v.every((x) => typeof x === 'string')) return { arrayValue: { values: v.map(toValue) } };
+  throw new Error(`rulesClient.write가 모르는 값이에요: ${JSON.stringify(v)}`);
+}
+const toFields = (obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, toValue(v)]));

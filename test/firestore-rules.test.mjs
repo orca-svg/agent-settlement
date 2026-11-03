@@ -50,3 +50,23 @@ test('규칙: 청구서는 그 방 멤버만 읽고, 멤버라도 화면에서 �
   for (const path of roomDocs) assert.equal(await api.remove(path, 'alice'), 403, `멤버 alice: ${path} 지우기`);
   for (const path of roomDocs) assert.ok((await store.db.doc(path).get()).exists, `지우기 뒤에도 남아 있어야 해요: ${path}`);
 });
+
+test('규칙: 다른 방 멤버는 이 방의 문서를 읽지도, 쓰지도, 지우지도 못한다(멤버 목록에 끼어들기 포함)', { skip }, async () => {
+  const { store, api } = await setup();
+  // 대조군: sam의 토큰이 멀쩡하다는 증거(자기 방은 열린다)
+  for (const path of ['rooms/rb', 'expenses/rb-e']) assert.equal(await api.get(path, 'sam'), 200, `대조군 sam: 자기 방 ${path} 읽기`);
+  for (const path of ['rooms/ra', 'rooms/ra/events/1', 'expenses/ra-e', 'invoices/ra-i', 'transfers/ra:t']) {
+    assert.equal(await api.get(path, 'sam'), 403, `방 B의 sam: ${path} 읽기`);
+  }
+  assert.equal(await api.write('expenses/ra-e', 'sam', { roomId: 'ra', amount: 999 }), 403, 'sam: 방 A 지출 고치기');
+  assert.equal(await api.write('expenses/ra-new', 'sam', { roomId: 'ra', amount: 999 }), 403, 'sam: 방 A에 지출 만들기');
+  assert.equal(await api.write('rooms/ra/events/2', 'sam', { roomId: 'ra', text: '가짜 기록' }), 403, 'sam: 방 A에 기록 만들기');
+  assert.equal(await api.write('rooms/ra', 'sam', { _memberUids: ['alice', 'bob', 'sam'] }, ['_memberUids']), 403, 'sam: 방 A 멤버 목록에 자기를 끼워 넣기');
+  assert.equal(await api.remove('expenses/ra-e', 'sam'), 403, 'sam: 방 A 지출 지우기');
+
+  // 서버 길로 다시 읽어 아무것도 바뀌지 않았는지
+  assert.deepEqual((await store.db.doc('rooms/ra').get()).get('_memberUids'), ['alice', 'bob']);
+  assert.equal((await store.db.doc('expenses/ra-e').get()).get('amount'), 100);
+  assert.equal((await store.db.doc('expenses/ra-new').get()).exists, false);
+  assert.equal((await store.db.doc('rooms/ra/events/2').get()).exists, false);
+});
