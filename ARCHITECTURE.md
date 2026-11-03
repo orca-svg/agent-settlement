@@ -37,7 +37,7 @@ API 서버 (server.mjs → src/app.mjs)
 | #2 로그인 | `public/room-api.js`의 `currentUid()` | localStorage에 고른 uid | 로그인한 사용자 |
 | #3 Firestore | `src/store/`의 Store | `MemoryStore` | 같은 메서드를 가진 `FirestoreStore` |
 | #3 Firestore | `public/room-api.js`의 `subscribeRoom()` | 2초 폴링 | `onSnapshot` |
-| #4 방 | `rooms` 문서와 방 API | 개발용 시드 `POST /api/dev/seed` | 방 만들기·참가하기(환율 표 입력 포함) |
+| #4 방 | `src/rooms/`, `public/room-setup.js` | 방 만들기, 초대 링크(7일), 참가하기, 환율 정책 동의·변경, 전원 동의 전 청구서 잠금. 원화(KRW) 방만 | 환율 표 입력(외화 방), 초대 코드, 나가기·내보내기, 방에 공유할 기억 고르기(#5) |
 | #5 비서 설정 | `agents` 문서의 `memory`·`rules` | 시드 기본값 | 설정 화면과 저장 |
 | #7 위치 | `src/agents/evidence.mjs`의 `evidenceFor()`·`counterFor()` | 빈 배열(개발용 데모 방의 '2차 바'만 고정 근거) | 위치 요약 → `Evidence` |
 | #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs`, `public/banks.js` | 받는 계좌 설정 화면(은행 선택 목록), `supertoss://send?…` 링크(실기기 검증 완료, 은행은 실기기로 확인한 표기로 바꿔 넣음), 데스크톱 QR 핸드오프(`src/payments/qr.mjs`), 계좌 칸 암호화 저장(`src/store/encrypted.mjs`) | 송금 확인 문구·다시 알림 횟수, iPhone 은행 표기 확인 |
@@ -85,6 +85,7 @@ API 서버 (server.mjs → src/app.mjs)
 | `invoices` | `Invoice` | `rooms/{roomId}/invoices/{invoiceId}` |
 | `disputes` | `Dispute` | `rooms/{roomId}/disputes/{disputeId}` |
 | `transfers` | `Transfer` | `rooms/{roomId}/transfers/{transferId}` |
+| `invites` | `Invite` (방마다 하나, id = roomId) | `invites/{roomId}`. 클라이언트 읽기·쓰기 모두 막고 서버만 |
 | `receipts` | 영수증 사진 `{ id(=지출 id), roomId, mimeType, data }` | Firebase Storage `receipts/{roomId}/{expenseId}.jpg` 권장 |
 | 비서 기록 | `AgentEvent` | `rooms/{roomId}/events/{seq}` |
 
@@ -111,6 +112,13 @@ API 서버 (server.mjs → src/app.mjs)
 | GET | `/api/config` | Gemini 연결 상태 |
 | POST | `/api/allocate`, `/api/mediate` | 데모 화면용 메뉴 배분·중재 |
 | POST | `/api/dev/seed` | 개발용 데모 방 만들기(`DEV_SEED=1`일 때만) |
+| POST | `/api/rooms` | 방 만들기 `{ name, dates?, myName?, policy? }`. 만든 사람이 첫 멤버이고 고른 정책에 동의한 상태, `status: 'ready'` |
+| POST | `/api/rooms/:id/invite` | 초대 링크 토큰 만들기·다시 만들기(멤버). 방마다 하나라 다시 만들면 이전 링크는 무효. 7일 뒤 만료. 응답 `{ token, expiresAt }` |
+| GET | `/api/rooms/:id/invite` | 지금 살아 있는 초대 토큰(멤버). 없으면 `{ invite: null }` |
+| GET | `/api/invites/:token` | 참가 화면용 방 정보(이름·기간·정책·멤버 이름만). **신원 없이** 열려요(토큰이 곧 열쇠). 잘못됐거나 만료되면 404 |
+| POST | `/api/invites/:token/join` | 참가하기 `{ agree: true, name? }`. 이미 멤버면 그대로 `{ roomId }`. 정산 중인 방이면 409 |
+| POST | `/api/rooms/:id/policy` | 환율 정책 바꾸기 `{ policy }`. 바꾸면 `policyAgreedBy`가 바꾼 사람만 남아요. 정산 중이면 409 |
+| POST | `/api/rooms/:id/policy/agree` | 지금 정책에 동의하기(두 번 눌러도 한 번) |
 | GET | `/api/rooms/:id` | 방, 지출, 청구서, 이의, 송금, 사람별 차액, 그리고 **내가 처리할 일(`actions`)** |
 | GET | `/api/rooms/:id/events?after=n` | 비서 기록 |
 | POST | `/api/rooms/:id/expenses` | 지출 남기기(직접 입력, 또는 확인을 마친 영수증 줄). 영수증 지출은 `receipt: { mimeType, data }`로 줄인 사진을 함께 저장해요. 방 `version`이 올라가요 |
@@ -121,7 +129,7 @@ API 서버 (server.mjs → src/app.mjs)
 | POST | `/api/rooms/:id/expenses/:eid/allocate` | 비서들이 공유한 기억으로 영수증 줄 배분. 근거 없는 줄은 지출을 남긴 사람에게 물어요. 응답 `{ expense, source, how, latencyMs }` |
 | POST | `/api/rooms/:id/expenses/:eid/lines/:itemId` | 줄 하나를 사람이 확정(`{ consumers }`) |
 
-| POST | `/api/rooms/:id/invoices/send` | 지금 방 `version`으로 청구서 보내기. 같은 version이면 다시 만들지 않아요(멱등). 각자의 비서가 규칙대로 수락·질문·이의를 정해요 |
+| POST | `/api/rooms/:id/invoices/send` | 지금 방 `version`으로 청구서 보내기. **전원이 환율 정책에 동의해야 열려요**(아니면 409, #4). 처음 보내면 방이 `status: 'settling'`이 되어 초대·참가·정책 변경을 막아요. 같은 version이면 다시 만들지 않아요(멱등). 각자의 비서가 규칙대로 수락·질문·이의를 정해요 |
 | POST | `/api/rooms/:id/invoices/:iid/answer` | 주인에게 물은 청구서에 답하기 `{ decision: 'accept'|'dispute', expenseId?, claim? }` |
 | POST | `/api/rooms/:id/disputes` | 이의 제기 `{ expenseId, claim }` |
 | POST | `/api/rooms/:id/disputes/:did/mediate` | 중재 비서에게 맡기기(당사자만) |
