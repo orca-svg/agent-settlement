@@ -768,7 +768,7 @@ body.pop-open { overflow: hidden; }
 .pop-todo { margin: 0 12px 10px; background: var(--orange-soft); border-radius: 12px; padding: 10px 12px; }
 .pop-todo b { display: block; font-size: 0.75rem; color: var(--orange); font-weight: 600; letter-spacing: 0; }
 .pop-todo p { margin: 2px 0 8px; font-size: 0.9375rem; font-weight: 600; }
-.pop-todo .actions { display: flex; gap: 8px; }
+.pop-todo .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .log details.more { margin-top: 4px; }
 .log details.more > summary { list-style: none; cursor: pointer; font-size: 0.8125rem; color: var(--tint); font-weight: 600; letter-spacing: 0; }
 .log details.more > summary::-webkit-details-marker { display: none; }
