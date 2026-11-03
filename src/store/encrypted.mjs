@@ -4,8 +4,14 @@
 // 주의: 잠긴 값은 '컬렉션/문서id/칸' 이름표에 묶인다. 잠긴 문서의 id를 바꾸는 코드는 이 래퍼로 풀었다가 다시 넣어야 한다.
 import { seal, unseal } from '../security/seal.mjs';
 
-// 컬렉션별로 잠그는 칸: 받는 계좌 원본과, 송금 건마다 복사되는 토스 링크·복사용 계좌 정보
-export const SEALED_FIELDS = { agents: ['payout'], transfers: ['link', 'fallback'] };
+// 컬렉션별로 잠그는 칸
+// - 받는 계좌 원본과, 송금 건마다 복사되는 토스 링크·복사용 계좌 정보(#8)
+// - 위치 근거(#7): 본인 제출 시각과 그것으로 만든 요약 문장. 찾는 데 쓰는 uid·roomId·expenseId는 평문
+export const SEALED_FIELDS = {
+  agents: ['payout'],
+  transfers: ['link', 'fallback'],
+  locationEvidence: ['summary', 'leftAt', 'stayedUntil', 'nextAt', 'nextHome'],
+};
 
 export function encryptedStore(inner, key) {
   if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error('암호화 열쇠는 32바이트여야 해요');

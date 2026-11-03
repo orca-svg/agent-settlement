@@ -43,6 +43,44 @@ test('transfers.link·fallback: 잠그고, get·list 모두 풀어서 돌려준�
   assert.deepEqual(await store.list('transfers', { roomId: 'r1' }), [t]);
 });
 
+// #7 위치 근거(#10): 본인 제출 시각과 그것으로 만든 문장. 찾을 때 쓰는 uid·roomId는 잠그지 않는다
+const LEFT = {
+  id: 'loc-1', uid: 'me', roomId: 'r1', expenseId: 'e1', source: 'timeline_export', createdAt: '2026-11-01T12:00:00.000Z',
+  leftAt: '20:15', nextAt: '20:28', nextHome: true,
+  summary: '첫 주문(17:45) 때 머물던 곳을 20:15에 떠났어요 · 20:28 집에 도착 · Google 지도 타임라인(본인 제출)',
+};
+
+test('locationEvidence: 시각·요약 5칸은 잠기고, 찾는 데 쓰는 칸은 평문', async () => {
+  const { inner, store } = make();
+  const stay = {
+    id: 'loc-2', uid: 'me', roomId: 'r1', expenseId: 'e2', source: 'timeline_export', createdAt: LEFT.createdAt,
+    stayedUntil: '20:45', summary: '첫 주문(17:45)부터 결제(20:45)까지 같은 곳에 있었어요 · Google 지도 타임라인(본인 제출)',
+  };
+  await store.put('locationEvidence', LEFT);
+  await store.put('locationEvidence', stay);
+  const raw = await inner.get('locationEvidence', 'loc-1');
+  for (const f of ['summary', 'leftAt', 'nextAt', 'nextHome']) assert.ok(isSealed(raw[f]), `${f}가 잠기지 않음`);
+  assert.ok(isSealed((await inner.get('locationEvidence', 'loc-2')).stayedUntil));
+  assert.deepEqual([raw.uid, raw.roomId, raw.expenseId, raw.source], ['me', 'r1', 'e1', 'timeline_export']);
+  assert.doesNotMatch(JSON.stringify(await inner.list('locationEvidence')), /20:15|20:28|20:45|떠났어요|있었어요/);
+  assert.deepEqual(await store.list('locationEvidence', { uid: 'me', roomId: 'r1' }), [LEFT, stay]);
+});
+
+test('locationEvidence: 도착 시각이 없으면 null 그대로, false도 잠갔다가 false로 푼다', async () => {
+  const { inner, store } = make();
+  const doc = { ...LEFT, nextAt: null, nextHome: false };
+  await store.put('locationEvidence', doc);
+  const raw = await inner.get('locationEvidence', doc.id);
+  assert.equal(raw.nextAt, null);
+  assert.ok(isSealed(raw.nextHome));
+  assert.deepEqual(await store.get('locationEvidence', doc.id), doc);
+});
+
+test('locationEvidence: 잠긴 시각으로는 찾을 수 없다', async () => {
+  const { store } = make();
+  await assert.rejects(store.list('locationEvidence', { leftAt: '20:15' }), /잠긴 칸/);
+});
+
 test('null·없는 칸은 잠그지 않고 그대로', async () => {
   const { inner, store } = make();
   await store.put('agents', { id: 'yh', uid: 'yh', payout: null });
