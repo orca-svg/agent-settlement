@@ -16,7 +16,7 @@
         ▼
 API 서버 (server.mjs → src/app.mjs)
   ├─ src/identity.mjs     Firebase 신원 검증 (#2)
-  ├─ src/store/           Store 인터페이스, 지금은 MemoryStore (#3이 교체). encryptedStore가 계좌 칸을 잠가 저장
+  ├─ src/store/           Store 인터페이스. MemoryStore(기본) 또는 FirestoreStore(STORE=firestore, #3). encryptedStore가 계좌 칸을 잠가 저장
   ├─ src/gemini.mjs       Gemini 호출 (키는 Secret Manager·로컬 .env에만)
   ├─ src/agents/          메뉴 배분·중재, 이후 규칙 판단·청구·송금 안내
   └─ public/core.js       돈 계산(환율·몫·차액·송금 경로). 화면·서버·테스트가 같은 코드를 씀
@@ -37,8 +37,8 @@ API 서버 (server.mjs → src/app.mjs)
 | --- | --- | --- | --- |
 | #2 로그인 | `src/identity.mjs`의 `identify(req, store, roomId)` | Firebase ID 토큰·폐기 확인, 서버가 넣은 `req.identityContext` 사용. 방 조회는 멤버일 때만 통과 | 프로젝트 자격 증명 연결 |
 | #2 로그인 | `public/room-api.js`의 `currentUid()`·`api()` | Firebase 사용자·Bearer ID 토큰. 신원 헤더는 이 모듈 한 곳에서만 설정 | `initAuth()` 완료 후 사용 |
-| #3 Firestore | `src/store/`의 Store | `MemoryStore` | 같은 메서드를 가진 `FirestoreStore` |
-| #3 Firestore | `public/room-api.js`의 `subscribeRoom()` | 2초 폴링 | `onSnapshot` |
+| #3 Firestore | `src/store/`의 Store | `STORE=firestore`면 `FirestoreStore`(`src/store/firestore.mjs`), 아니면 `MemoryStore`. 연결은 [Firestore 안내](docs/firestore-setup.md) | 팀 프로젝트 연결 |
+| #3 Firestore | `public/room-api.js`의 `subscribeRoom()` | 서버가 Firestore이고 로그인했으면 `rooms/{roomId}/events`를 `onSnapshot`, 아니면 2초 폴링. 호출 방식은 같아요 | — |
 | #4 방 | `rooms` 문서와 방 API | 개발용 시드 `POST /api/dev/seed` | 방 만들기·참가하기(환율 표 입력 포함) |
 | #5 비서 설정 | `agents` 문서의 `memory`·`rules` | 시드 기본값 | 설정 화면과 저장 |
 | #7 위치 | `src/agents/evidence.mjs`의 provider | `createEvidenceProvider()`가 동일한 `(uid, expense, room)` 계약으로 위치 요약 반환. 고정 근거는 개발용 시드에서만 사용 | 타임라인 파일 파서는 장치별 형식 확인 후 별도 연동 |
@@ -59,11 +59,18 @@ API 서버 (server.mjs → src/app.mjs)
 | `listEvents(roomId, afterSeq = 0)` | `seq > afterSeq`인 기록 |
 | `eraseUser(uid)` (선택 확장) | 탈퇴 기능을 제공하는 저장소에서 구현. 개인정보 삭제·방별 무작위 익명 UID 치환을 원자적으로 수행하고 `{ removedLinks }` 반환. 없으면 탈퇴 API는 데이터 변경 없이 503 |
 
-계약 테스트는 `test/store.test.mjs`예요. 따라서 `FirestoreStore`도 이 테스트를 그대로 통과해야 해요.
+계약 테스트는 `test/store.test.mjs`예요. `FirestoreStore`도 에뮬레이터가 있으면 같은 테스트를 돌려요(`npm run test:emulators`). Firestore에서만 생기는 일(동시 seq, 영수증 사진, 탈퇴 트랜잭션, 보안 규칙)은 `test/firestore.test.mjs`가 봐요.
+
+`FirestoreStore`만의 약속:
+
+- `list` 순서는 처음 넣은 순서예요(`MemoryStore`와 같음). 이를 위해 문서에 `_order`를 붙이고, `rooms`에는 보안 규칙용 `_memberUids`(탈퇴하지 않은 멤버 uid)를 붙여요. 둘 다 읽을 때 빼서 돌려줘요.
+- `appendEvent`의 `seq`는 방마다 카운터 문서(`rooms/{roomId}/meta/events`)를 트랜잭션으로 올려 매겨요. 경합에서 지면 seq를 건너뛰지 않고 오류를 내요.
+- 값이 `undefined`인 칸은 빼고 저장해요. id에 `/`가 있으면 오류예요.
+- `receipts`는 Cloud Storage에 있어서 `list`를 지원하지 않아요.
 
 탈퇴 확장 계약은 `test/account-erasure.test.mjs`로 확인해요. 프로필·비서 설정·위치 요약·본인이 등록/결제한 영수증 사진을 삭제하고, 공동 금액·분담·환율·이벤트 순번은 유지해요. `Member.deleted=true`인 익명 참여자는 새 지출에 넣을 수 없어요. 배분 사유·이의 근거·이벤트 문구에 복제된 개인정보는 지우고 열린 중재안은 다시 확인하게 해요. 원 계정과 익명 UID의 역매핑을 저장하지 않아요. 이미 발급한 QR은 무효화하고 AI 응답 캐시도 비워요. 최소 `deletedUsers/{uid}` 표식은 접근 차단·삭제 재시도용으로 유지해요. 이미 다른 참여자가 별도로 복사한 기록은 회수할 수 없어요.
 
-메모리 프로토타입에서는 방·계정 API와 tick을 한 큐로 직렬화해 AI 요청 도중 탈퇴/철회로 데이터가 되살아나는 경쟁을 막아요. 여러 인스턴스를 쓰는 #3 저장소에서는 같은 보장을 트랜잭션과 삭제 작업으로 구현해야 해요. 해당 능력이 없는 저장소에 탈퇴 기능을 조용히 활성화하지 않아요.
+방·계정 API와 tick은 서버 안에서 한 큐로 직렬화해 AI 요청 도중 탈퇴/철회로 데이터가 되살아나는 경쟁을 막아요. `FirestoreStore`의 `eraseUser`와 `appendEvent`는 트랜잭션이지만, 다른 API의 '읽고 고쳐 쓰기'는 여전히 이 큐에 기대요. 그래서 Cloud Run은 `--max-instances 1`을 유지해요(QR 토큰·AI 캐시·호출 제한도 서버 메모리라 같은 조건이에요). 인스턴스를 늘리려면 이 경로들을 트랜잭션으로 옮겨야 해요. 해당 능력이 없는 저장소에 탈퇴 기능을 조용히 활성화하지 않아요.
 ### 계좌 칸 암호화 (`src/store/encrypted.mjs`)
 
 `server.mjs`는 Store를 `encryptedStore(store, key)`로 감싸요. 계좌번호가 들어가는 칸(`agents.payout`, `transfers.link`, `transfers.fallback`)은 넣을 때 AES-256-GCM으로 잠그고(`enc:v1:…`, `src/security/seal.mjs`) 꺼낼 때 풀어요. 그래서 다른 코드는 평문을 넣고 평문을 받고, 저장소에는 잠긴 글자만 남아요.
@@ -72,7 +79,7 @@ API 서버 (server.mjs → src/app.mjs)
 - 잠긴 칸이 평문이거나 풀리지 않으면 오류를 내요. 잠긴 칸으로는 `list` 검색을 할 수 없어요.
 - 열쇠는 `PAYOUT_ENC_KEY`(base64, 32바이트)예요. 배포(`NODE_ENV=production`, `Dockerfile`이 넣어 줌)에서 없으면 서버가 시작하지 않고, 로컬에서는 개발용 열쇠를 써요.
 - 진짜 저장소에 `eraseUser`(#2 탈퇴)가 있으면 그대로 전달하고, 그 사람이 낀 송금의 링크만 평문으로 풀어서 돌려줘요(QR 토큰 무효화용). 풀리지 않는 링크는 어차피 지울 값이라 건너뛰어요.
-- `FirestoreStore`(#3)도 같은 자리에서 감싸면 돼요. 다만 `tick()`은 모든 방의 송금을 풀어 보므로, 열쇠가 바뀌거나 값 하나가 망가지면 모든 방의 알림이 멈춰요. 그래서 열쇠는 바꾸지 않아요.
+- `FirestoreStore`(#3)도 `server.mjs`의 같은 자리에서 감싸요. `tick()`은 모든 방의 송금을 풀어 보므로, 열쇠가 바뀌거나 값 하나가 망가지면 모든 방의 알림이 멈춰요. 그래서 Firestore에 계좌가 쌓이기 시작한 뒤에는 `PAYOUT_ENC_KEY`를 절대 바꾸지 않아요.
 
 **왜 잠그나.** 「개인정보의 안전성 확보조치 기준」(개인정보보호위원회고시 제2025-9호) 제7조제2항은 이용자의 계좌번호를 안전한 암호 알고리즘으로 암호화해서 저장하라고 정해요. 이 서비스에 받을 계좌를 등록하는 사람이 여기서 말하는 이용자예요. AES-256은 개인정보보호위원회 안내서(2024.10)가 권장 예시로 드는 알고리즘이에요. 조사한 내용은 PR #22 코멘트에 정리했어요.
 
@@ -83,20 +90,24 @@ API 서버 (server.mjs → src/app.mjs)
 
 ## 컬렉션과 Firestore 경로
 
-| 컬렉션 | 문서 타입 | Firestore 경로(제안) |
-| --- | --- | --- |
-| `rooms` | `Room` | `rooms/{roomId}` |
-| `expenses` | `Expense` | `rooms/{roomId}/expenses/{expenseId}` |
-| `agents` | `AgentSettings` | `agents/{uid}` |
-| `invoices` | `Invoice` | `rooms/{roomId}/invoices/{invoiceId}` |
-| `disputes` | `Dispute` | `rooms/{roomId}/disputes/{disputeId}` |
-| `transfers` | `Transfer` | `rooms/{roomId}/transfers/{transferId}` |
-| `receipts` | 영수증 사진 `{ id(=지출 id), roomId, mimeType, data }` | Firebase Storage `receipts/{roomId}/{expenseId}.jpg` 권장 |
-| `users` | `UserProfile` | `users/{uid}` (본인만) |
-| `deletedUsers` | `DeletedUser` | `deletedUsers/{uid}` (서버 전용) |
-| `locationConsents` | `LocationConsent` | `rooms/{roomId}/locationConsents/{uid}` (본인·서버만) |
-| `locationEvidence` | `LocationEvidence` | `rooms/{roomId}/locationEvidence/{id}` (본인 원기록; 공유는 이의의 요약만) |
-| 비서 기록 | `AgentEvent` | `rooms/{roomId}/events/{seq}` |
+Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 모든 방의 송금을 훑어요. 그래서 컬렉션은 최상위에 두고, 방에 속한 문서는 `roomId` 필드로 걸러요. 비서 기록만 방 아래에 있어요. 보안 규칙은 `firestore.rules`, `storage.rules`예요. **쓰기는 모두 서버(Admin SDK)만** 하고, 화면에서 직접 읽는 건 실시간 갱신용 비서 기록뿐이에요.
+
+| 컬렉션 | 문서 타입 | Firestore 경로 | 화면에서 직접 읽기(규칙) |
+| --- | --- | --- | --- |
+| `rooms` | `Room` | `rooms/{roomId}` | 방 멤버 |
+| `expenses` | `Expense` | `expenses/{expenseId}` | 방 멤버 |
+| `agents` | `AgentSettings` | `agents/{uid}` | 안 됨(기억·잠긴 계좌) |
+| `invoices` | `Invoice` | `invoices/{invoiceId}` | 방 멤버 |
+| `disputes` | `Dispute` | `disputes/{disputeId}` | 방 멤버 |
+| `transfers` | `Transfer` | `transfers/{transferId}` | 송금 당사자 |
+| `receipts` | 영수증 사진 `{ id(=지출 id), roomId, mimeType, data }` | Cloud Storage `receipts/{expenseId}`(문서 1MiB 한도를 넘을 수 있어서) | 안 됨(API로만) |
+| `users` | `UserProfile` | `users/{uid}` | 본인 |
+| `deletedUsers` | `DeletedUser` | `deletedUsers/{uid}` | 안 됨 |
+| `locationConsents` | `LocationConsent` | `locationConsents/{id}` | 안 됨 |
+| `locationEvidence` | `LocationEvidence` | `locationEvidence/{id}` | 안 됨 |
+| 비서 기록 | `AgentEvent` | `rooms/{roomId}/events/{seq}`, 카운터 `rooms/{roomId}/meta/events` | 방 멤버(기록만, 카운터는 안 됨) |
+
+방 멤버는 `rooms` 문서의 `_memberUids`로 확인해요. 탈퇴로 익명 처리된 멤버는 여기서 빠져요.
 
 ## 도메인 타입 요약
 
@@ -118,7 +129,7 @@ API 서버 (server.mjs → src/app.mjs)
 
 | 메서드 | 경로 | 하는 일 |
 | --- | --- | --- |
-| GET | `/api/config` | 기존 `mode`·`model` 유지, `auth: { firebase, dev, emulator }` 추가. Firebase 값은 공개 웹 앱 설정이며 비밀키를 포함하지 않음 |
+| GET | `/api/config` | 기존 `mode`·`model` 유지, `auth: { firebase, dev, emulator }` 추가. Firebase 값은 공개 웹 앱 설정이며 비밀키를 포함하지 않음. `STORE=firestore`이고 로그인이 켜져 있으면 `realtime: { firestore: true, emulator }`(#3) |
 | GET / POST | `/api/me` | 내 프로필 읽기 / `{ name, color }` 저장 |
 | GET | `/api/rooms` | 내 방 목록 `{ rooms: [{ id, name, dates }] }` |
 | GET | `/api/me/deletion` | 삭제 재시도 상태 `{ pending }` |
@@ -158,7 +169,10 @@ API 서버 (server.mjs → src/app.mjs)
 ```bash
 npm start                      # 데모 화면: http://localhost:4500
 DEV_SEED=1 npm start           # 실제 방 화면을 시드 데이터로 열어 볼 때
-npm test                       # 계약·계산 테스트
+npm test                       # 계약·계산 테스트(에뮬레이터가 필요한 테스트는 건너뜀)
+npm run test:emulators         # Firebase 에뮬레이터(Firestore·Storage·Auth)를 띄워 전체 테스트. Java 21과 firebase-tools 필요
 ```
+
+Firestore로 서버를 띄우는 방법은 [Firestore 안내](docs/firestore-setup.md)를 보세요.
 
 키가 없으면 규칙 모드로 동작해요. Gemini가 필요하면 `.env`에 `GEMINI_API_KEY`를 넣으세요(`.env`는 저장소에 올라가지 않아요).
