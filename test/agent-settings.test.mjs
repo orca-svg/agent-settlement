@@ -114,20 +114,47 @@ test('완료 기준: 바로로 정하면 다음 확인 때 바로 알린다', as
   assert.equal(pair(await ctx.transfers(), 'cs', 'me').status, 'due');
 });
 
-test('직접 보내기: 알림 시각이 없고, 시간이 지나도 알리지 않으며, 본인이 보낼 수는 있다', async () => {
+// 직접 보내기는 바로 알리지 않는다. 다만 3일 뒤 09:00(KST)까지 받는 사람이 받았다고 하지 않았으면 그때 한 번 알린다
+// 철수는 송금이 여러 건일 수 있어 그 송금 하나(t)만 본다
+const dueFor = async (ctx, t) => (await ctx.store.listEvents(ROOM)).filter((e) => e.kind === 'transfer_due' && e.action?.ref === t.id);
+const asksToSend = async (ctx, t) => pendingActions({ room: await ctx.store.get('rooms', ROOM), transfers: await ctx.transfers() }).some((a) => a.type === 'approve_transfer' && a.ref === t.id);
+
+test('직접 보내기: 바로 알리지 않고, 3일 뒤 09:00(KST)까지 받았다는 확인이 없으면 그때 한 번 알린다', async () => {
+  const ctx = await setup(); // 11/10 12:00 KST
+  await ctx.settings.updateRules('cs', { sendWhen: 'manual' });
+  await ctx.orch.sendInvoices(ROOM, 'me');
+  const t = pair(await ctx.transfers(), 'cs', 'me');
+  assert.equal(t.manual, true);
+  assert.equal(t.remindAt, '2026-11-13T00:00:00.000Z', '11/13 09:00 KST');
+  ctx.clock.now = new Date('2026-11-12T23:59:00Z');
+  await ctx.orch.tick();
+  assert.equal((await ctx.store.get('transfers', t.id)).status, 'scheduled');
+  assert.equal((await dueFor(ctx, t)).length, 0, '그 전에는 알리지 않는다');
+  assert.equal(await asksToSend(ctx, t), false);
+
+  ctx.clock.now = new Date('2026-11-13T00:00:00Z');
+  await ctx.orch.tick();
+  await ctx.orch.tick();
+  assert.equal((await ctx.store.get('transfers', t.id)).status, 'due');
+  const due = await dueFor(ctx, t);
+  assert.equal(due.length, 1, '한 번만 알린다');
+  assert.match(due[0].text, /받았다는 확인이 없어요/);
+  assert.equal(due[0].meta, '정해 둔 규칙: 직접 보내기');
+  assert.equal(await asksToSend(ctx, t), true);
+  assert.equal((await ctx.orch.approveTransfer(ROOM, t.id, 'cs')).status, 'opened');
+  assert.equal((await ctx.orch.markSent(ROOM, t.id, 'cs')).status, 'sent');
+});
+
+test('직접 보내기: 받는 사람이 먼저 받았다고 하면 보내는 사람에게 알리지 않는다', async () => {
   const ctx = await setup();
   await ctx.settings.updateRules('cs', { sendWhen: 'manual' });
   await ctx.orch.sendInvoices(ROOM, 'me');
   const t = pair(await ctx.transfers(), 'cs', 'me');
-  assert.equal(t.remindAt, null);
-  ctx.clock.now = new Date('2027-06-01T00:00:00Z');
+  assert.equal((await ctx.orch.confirmReceipt(ROOM, t.id, 'me')).status, 'confirmed', '보냈어요를 누르기 전에도 받았다고 할 수 있다');
+  ctx.clock.now = new Date('2026-11-20T00:00:00Z');
   await ctx.orch.tick();
-  assert.equal((await ctx.store.get('transfers', t.id)).status, 'scheduled');
-  assert.ok((await ctx.store.listEvents(ROOM)).every((e) => !(e.kind === 'transfer_due' && e.from === 'cs')));
-  const room = await ctx.store.get('rooms', ROOM);
-  assert.ok(!pendingActions({ room, transfers: await ctx.transfers() }).some((a) => a.type === 'approve_transfer' && a.for === 'cs'));
-  assert.equal((await ctx.orch.approveTransfer(ROOM, t.id, 'cs')).status, 'opened');
-  assert.equal((await ctx.orch.markSent(ROOM, t.id, 'cs')).status, 'sent');
+  assert.equal((await dueFor(ctx, t)).length, 0);
+  assert.equal(await asksToSend(ctx, t), false);
 });
 
 test('보낼 시기를 바꿔도 이미 만들어진 송금은 그대로고, 다음 청구서부터 적용된다', async () => {
@@ -140,7 +167,7 @@ test('보낼 시기를 바꿔도 이미 만들어진 송금은 그대로고, 다
   const room = await ctx.store.get('rooms', ROOM);
   await ctx.store.put('rooms', { ...room, version: room.version + 1 });
   await ctx.orch.sendInvoices(ROOM, 'me');
-  assert.equal(pair((await ctx.transfers()).filter((t) => t.version === room.version + 1), 'cs', 'me').remindAt, null);
+  assert.equal(pair((await ctx.transfers()).filter((t) => t.version === room.version + 1), 'cs', 'me').manual, true);
 });
 
 // ---------------------------------------------------------------- 규칙 저장과 변경 기록

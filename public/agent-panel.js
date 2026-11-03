@@ -3,7 +3,7 @@
 // 화면 원칙: 항상 보이는 버튼은 꼭 필요한 것만 둔다. 저장은 바꿨을 때만, 기억 고치기·지우기는 기억을 눌렀을 때만 나온다.
 import { esc, chip, CHEVRON } from './ui.js';
 import { won } from './core.js';
-import { AUTO_ACCEPT_PRESETS, AUTO_ACCEPT_MAX, MEMORY_MAX_CHARS, NOTIFY, DEFAULT_RULES, sendWhenLabel, autoAcceptLabel } from './agent-rules.js';
+import { AUTO_ACCEPT_PRESETS, AUTO_ACCEPT_MAX, MEMORY_MAX_CHARS, MANUAL_WAIT_DAYS, NOTIFY, DEFAULT_RULES, sendWhenLabel, autoAcceptLabel } from './agent-rules.js';
 
 const DISPUTE_NOTES = {
   ask: '내가 낸 지출에 이의가 오면 나에게 물어봐요.',
@@ -14,7 +14,7 @@ const SEND_MODES = [['now', '바로'], ['payday', '지정일'], ['manual', '직�
 const SEND_NOTES = {
   now: '',
   payday: '그날 오전 9시에 알려 드려요. 그달에 그날이 없으면 마지막 날에 알려요.',
-  manual: '알림 없이, 내가 편할 때 방에서 보내요.',
+  manual: `내가 편할 때 보내요. ${MANUAL_WAIT_DAYS}일이 지나도 받는 사람이 받았다고 하지 않으면 한 번 알려 드려요.`,
 };
 
 const onlyDigits = (v) => String(v ?? '').replace(/\D/g, '');

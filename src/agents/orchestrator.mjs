@@ -257,9 +257,9 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return `${dayLabel(kst.slice(0, 10))} 09:00`;
   };
 
-  const remindText = (remindAt, now) => {
-    if (!remindAt) return '직접 보낼 때까지 따로 알리지 않을게요';
-    return new Date(remindAt) > now ? `${whenText(remindAt)}에 알려 드릴게요` : '곧 알려 드릴게요';
+  const remindText = (t, now) => {
+    if (t.manual) return `편할 때 보내 주세요. ${whenText(t.remindAt)}까지 받았다는 확인이 없으면 알려 드릴게요`;
+    return new Date(t.remindAt) > now ? `${whenText(t.remindAt)}에 알려 드릴게요` : '곧 알려 드릴게요';
   };
 
   // 지금 version의 송금을 한 번만 만든다. 이전 version의 아직 보내지 않은 송금은 대체한다
@@ -279,12 +279,13 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       const transfer = {
         id: `${roomId}:v${room.version}:t${i + 1}`, roomId, version: room.version, from: edge.from, to: edge.to, amount: edge.amount,
         status: 'scheduled', remindAt: nextSendAt(now, sender.rules.sendWhen), ...paymentOf(receiver.payout, edge.amount),
+        ...(sender.rules.sendWhen === 'manual' ? { manual: true } : {}),
       };
       await store.put('transfers', transfer);
       out.push(transfer);
       await say(roomId, {
         from: edge.from, to: edge.from, kind: 'transfer_scheduled',
-        text: `${name(edge.to)}에게 ${won(edge.amount)}을 보내요. ${remindText(transfer.remindAt, now)}`,
+        text: `${name(edge.to)}에게 ${won(edge.amount)}을 보내요. ${remindText(transfer, now)}`,
         meta: `정해 둔 규칙: ${sendWhenLabel(sender.rules.sendWhen)}`,
       });
       if (!transfer.link) {
@@ -401,10 +402,13 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       const { room, name } = await roomOf(t.roomId);
       if (['scheduled', 'due', 'opened'].includes(t.status) && t.version !== room.version) {
         await store.put('transfers', { ...t, status: 'superseded' });
-      } else if (t.status === 'scheduled' && t.remindAt && new Date(t.remindAt) <= now) { // remindAt이 없으면 직접 보내기라 알리지 않는다
+      } else if (t.status === 'scheduled' && t.remindAt && new Date(t.remindAt) <= now) { // remindAt이 없는 예전 직접 보내기는 알리지 않는다
+        // 받는 사람이 받았다고 했으면 confirmed라 여기 오지 않는다. 직접 보내기는 그래서 '확인이 없을 때만' 알리게 된다
         await store.put('transfers', { ...t, status: 'due', dueAt: now.toISOString() });
         await say(t.roomId, {
-          from: t.from, to: t.from, kind: 'transfer_due', text: `${name(t.to)}에게 ${won(t.amount)}을 보낼 때예요`,
+          from: t.from, to: t.from, kind: 'transfer_due',
+          text: t.manual ? `${name(t.to)}에게 보낼 ${won(t.amount)}, 아직 받았다는 확인이 없어요. 보냈다면 보냈어요를 눌러 주세요` : `${name(t.to)}에게 ${won(t.amount)}을 보낼 때예요`,
+          ...(t.manual ? { meta: `정해 둔 규칙: ${sendWhenLabel('manual')}` } : {}),
           action: { type: 'approve_transfer', ref: t.id, for: t.from },
         });
         due++;

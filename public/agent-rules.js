@@ -10,6 +10,8 @@ export const MEMORY_LIMITS = { free: MEMORY_LIMIT };
 export const MEMORY_MAX_CHARS = 60;
 export const AUTO_ACCEPT_MAX = 10_000_000;
 export const AUTO_ACCEPT_PRESETS = [0, 10_000, 30_000, 50_000];
+// 직접 보내기: 바로 알리지 않고, 이만큼 지난 날 09:00(KST)까지 받는 사람이 받았다고 하지 않았으면 그때 한 번 알린다
+export const MANUAL_WAIT_DAYS = 3;
 
 export const ON_DISPUTE = {
   ask: '나에게 묻기',
