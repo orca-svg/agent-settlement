@@ -38,7 +38,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
   }
 
   const claimFrom = (name, { evidence }) => {
-    if (evidence.some(e => e.locationId || e.source === 'browser_self_report' || e.uncertain)) return `${name}의 위치 요약만으로 참석 여부를 확정할 수 없어 부담 항목 확인을 요청해요.`;
+    if (evidence.some(e => e.locationId || e.source === 'timeline_export' || e.uncertain)) return `${name}의 위치 요약만으로 참석 여부를 확정할 수 없어 부담 항목 확인을 요청해요.`;
     const left = evidence.find((e) => e.kind === 'left_at' && e.time);
     return left
       ? `${topic(name)} ${left.time}에 자리를 떠났어요. 그 뒤에 시킨 것까지 똑같이 나누는 건 맞지 않아요.`
@@ -137,7 +137,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
 
   // 근거의 '떠난 시각' 뒤 주문에서 이의를 낸 사람이 빠졌는지
   const matchesEvidence = (exp, dispute, alloc) => {
-    if (dispute.evidence.some(e => e.source === 'browser_self_report' || e.locationId || e.requiresHumanApproval)
+    if (dispute.evidence.some(e => e.source === 'timeline_export' || e.locationId || e.requiresHumanApproval)
       || Object.values(alloc).some(a => a.evidenceConflict)) return false;
     const left = dispute.evidence.find((e) => e.kind === 'left_at' && e.time);
     return Boolean(left) && exp.items.filter((it) => it.time && it.time > left.time).every((it) => !alloc[it.id]?.consumers.includes(dispute.by));

@@ -1,9 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { HttpError, readJson } from './http.mjs';
+import { expenseWindow, kstTime, timelineSummary } from '../public/timeline.js';
 
 const consentId = (roomId, uid) => JSON.stringify([roomId, uid]);
 const DAY = 86400000;
-// User-supplied browser measurements are supporting evidence, never proof of absence.
+// 이의를 마무리할 때까지 요약을 두는 기간. 지나면 요약을 지우고 그 요약을 쓴 미확정 중재안을 다시 열린 이의로 돌린다
+const KEEP = 7 * DAY;
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const FIELDS = ['agree', 'expenseId', 'leftAt', 'nextAt', 'nextHome', 'stayedUntil'];
+
+// #7 위치 근거: 이의를 낼 때 사용자가 고른 Google 지도 타임라인 파일에서 브라우저가 찾은 시각만 받는다(public/timeline.js).
+// 파일·좌표·장소 이름은 서버에 오지 않는다. 본인이 낸 자료라 위변조할 수 있으므로 늘 사람 확인이 필요한 근거로 다룬다.
 export function createLocationService({ store, clock }) {
   async function purge(uid, roomId) {
     const docs = await store.list('locationEvidence', { uid, roomId });
@@ -18,10 +25,9 @@ export function createLocationService({ store, clock }) {
     }
     if (docs.length) await store.appendEvent(roomId, {
       at: clock().toISOString(), from: 'system', to: 'all', kind: 'location_removed',
-      text: '공유 기간이 끝났거나 동의가 철회되어 참석 근거를 삭제했어요. 열린 이의를 다시 확인해 주세요.',
+      text: '보관 기간이 끝났거나 동의를 철회해 위치 요약을 지웠어요. 열린 이의를 다시 확인해 주세요.',
     });
-    // Events contain only generic wording for location-derived actions, so no
-    // location summary is left in the immutable event stream after revocation.
+    // 위치에서 나온 행동은 이벤트에 일반 문구로만 남겨, 철회 뒤 지울 수 없는 기록에 요약이 남지 않게 한다
   }
   async function active(uid, roomId) {
     const c = await store.get('locationConsents', consentId(roomId, uid));
@@ -35,11 +41,11 @@ export function createLocationService({ store, clock }) {
   async function evidenceFor(uid, expense, room) {
     if (!await active(uid, room.id)) return [];
     const records = await store.list('locationEvidence', { uid, roomId: room.id });
-    return records.filter(e => e.expenseId === expense.id && e.action === 'checkout').map(e => ({
-      kind: 'text', summary: e.summary, locationId: e.id, source: 'browser_self_report',
-      // Older records have no structured result; do not infer it from prose.
-      relation: e.relation || 'uncertain', uncertain: !e.relation || e.relation === 'uncertain',
-      observedAt: e.observedAt, requiresHumanApproval: true,
+    // 떠난 시각은 중재가 그 뒤 주문에서 그 사람을 빼는 left_at으로, 결제까지 머문 사실은 글로 넘긴다.
+    // 예전 체크인·체크아웃 기록(source 없음)은 근거로 쓰지 않는다
+    return records.filter(e => e.expenseId === expense.id && e.source === 'timeline_export').map(e => ({
+      ...(e.leftAt ? { kind: 'left_at', time: e.leftAt } : { kind: 'text', stayedUntil: e.stayedUntil }),
+      summary: e.summary, locationId: e.id, source: 'timeline_export', requiresHumanApproval: true,
     }));
   }
   // 끝난 동의를 정리한다. roomId를 주면 그 방만(방 요청은 그 방의 줄 안에서 부른다), 없으면 모든 방(주기 작업)
@@ -50,21 +56,27 @@ export function createLocationService({ store, clock }) {
   async function hasExpired(roomId) {
     return (await store.list('locationConsents', { roomId })).some(c => Date.parse(c.expiresAt) <= clock().getTime());
   }
+
+  // 받은 시각이 그 지출 시간대(첫 주문~결제) 안에서 나올 수 있는 값인지. 요약 글은 서버가 같은 규칙으로 다시 만든다
+  function checkResult(input, exp) {
+    const { from, until } = expenseWindow(exp);
+    if (input.stayedUntil !== undefined) {
+      if (input.leftAt !== undefined || input.stayedUntil !== kstTime(until)) throw new HttpError(400, '결제 시각까지 머문 기록만 보낼 수 있어요');
+      return { stayedUntil: input.stayedUntil };
+    }
+    if (!HHMM.test(input.leftAt ?? '')) throw new HttpError(400, '떠난 시각을 확인해 주세요');
+    // 자정을 넘긴 지출이면 떠난 시각이 결제일의 전날일 수 있다
+    const left = [0, -DAY].map(d => Date.parse(`${exp.date}T${input.leftAt}:00+09:00`) + d).find(ms => ms > from && ms < until);
+    if (left === undefined) throw new HttpError(400, '떠난 시각이 그 지출의 첫 주문과 결제 사이가 아니에요');
+    if (input.nextAt != null && !HHMM.test(input.nextAt)) throw new HttpError(400, '도착 시각을 확인해 주세요');
+    return { leftAt: input.leftAt, nextAt: input.nextAt ?? null, nextHome: input.nextHome === true };
+  }
+
   function register(routes, member) {
     routes.get('/api/rooms/:id/location', async ({ req, params }) => {
       const { me } = await member(req, params.id);
       const consent = await active(me.uid, params.id);
       return { consent, records: consent ? await store.list('locationEvidence', { uid: me.uid, roomId: params.id }) : [] };
-    });
-    routes.post('/api/rooms/:id/location/consent', async ({ req, params }) => {
-      const { me } = await member(req, params.id);
-      const input = await readJson(req);
-      if (input?.agree !== true) throw new HttpError(400, '위치 요약 공유에 동의해 주세요');
-      const expires = Date.parse(input.expiresAt);
-      if (!Number.isFinite(expires) || expires <= clock().getTime() || expires > clock().getTime() + DAY) throw new HttpError(400, '동의 기간은 지금부터 최대 24시간이에요');
-      await purge(me.uid, params.id);
-      const consent = await store.put('locationConsents', { id: consentId(params.id, me.uid), uid: me.uid, roomId: params.id, expiresAt: new Date(expires).toISOString() });
-      return { consent };
     });
     routes.post('/api/rooms/:id/location/revoke', async ({ req, params }) => {
       const { me } = await member(req, params.id);
@@ -72,25 +84,22 @@ export function createLocationService({ store, clock }) {
       await store.delete('locationConsents', consentId(params.id, me.uid));
       return { deleted: true };
     });
-    routes.post('/api/rooms/:id/location', async ({ req, params }) => {
+    // 이의를 낼 때 타임라인에서 찾은 결과를 붙인다. 붙이는 이 순간에 동의를 받고, 요약은 7일 동안 둔다
+    routes.post('/api/rooms/:id/location/timeline', async ({ req, params }) => {
       const { room, me } = await member(req, params.id);
       const input = await readJson(req);
-      if (!await active(me.uid, room.id)) throw new HttpError(403, '위치 요약 공유에 먼저 동의해 주세요');
-      // Reject raw coordinates and arbitrary free text: only this tiny contract crosses the network.
-      if (!input || Object.keys(input).some(k => !['expenseId', 'action', 'observedAt', 'relation'].includes(k))) throw new HttpError(400, '좌표 원본은 전송할 수 없어요');
-      if (!['checkin', 'checkout'].includes(input.action) || !['near', 'away', 'uncertain'].includes(input.relation)) throw new HttpError(400, '위치 확인 결과가 올바르지 않아요');
-      const when = Date.parse(input.observedAt);
-      if (!Number.isFinite(when) || Math.abs(clock().getTime() - when) > 120000) throw new HttpError(400, '지금 측정한 위치만 사용할 수 있어요');
+      if (input?.agree !== true) throw new HttpError(400, '위치 요약을 보내는 데 동의해 주세요');
+      if (Object.keys(input).some(k => !FIELDS.includes(k))) throw new HttpError(400, '타임라인에서 찾은 시각만 보낼 수 있어요');
       const exp = await store.get('expenses', input.expenseId);
-      if (!exp || exp.roomId !== room.id || !exp.present.includes(me.uid)) throw new HttpError(400, '내가 참여한 지출을 골라 주세요');
-      const local = new Date(when + 9 * 3600000).toISOString();
-      if (exp.date !== local.slice(0, 10)) throw new HttpError(400, '오늘 지출에만 체크인할 수 있어요. 과거 참석 여부는 추정하지 않아요');
-      const relation = { near: '지정 장소 근처', away: '지정 장소 밖', uncertain: '위치 불확실' }[input.relation];
-      const summary = `${local.slice(0, 10)} ${local.slice(11, 16)} (한국 시각) ${input.action === 'checkout' ? '체크아웃' : '체크인'} · ${relation} · 사용자 기기 보고, 참석·귀가 확정 아님`;
-      // One record per action/expense/person. Replacing invalidates any old proposal.
-      const old = (await store.list('locationEvidence', { uid: me.uid, roomId: room.id })).find(e => e.expenseId === exp.id && e.action === input.action);
-      if (old) throw new HttpError(409, '이미 기록했어요. 철회·삭제 후 다시 동의하면 새로 기록할 수 있어요');
-      const record = await store.put('locationEvidence', { id: randomUUID(), uid: me.uid, roomId: room.id, expenseId: exp.id, action: input.action, relation: input.relation, summary, observedAt: new Date(when).toISOString() });
+      if (!exp || exp.roomId !== room.id || !exp.present.includes(me.uid)) throw new HttpError(400, '내가 함께 있던 지출을 골라 주세요');
+      const result = checkResult(input, exp);
+      const mine = await store.list('locationEvidence', { uid: me.uid, roomId: room.id });
+      if (mine.some(e => e.expenseId === exp.id)) throw new HttpError(409, '이 지출에는 이미 위치 요약을 붙였어요. 지우고 다시 붙여 주세요');
+      await store.put('locationConsents', { id: consentId(room.id, me.uid), uid: me.uid, roomId: room.id, expiresAt: new Date(clock().getTime() + KEEP).toISOString() });
+      const record = await store.put('locationEvidence', {
+        id: randomUUID(), uid: me.uid, roomId: room.id, expenseId: exp.id, source: 'timeline_export',
+        ...result, summary: timelineSummary(result, exp), createdAt: clock().toISOString(),
+      });
       return { record };
     });
   }

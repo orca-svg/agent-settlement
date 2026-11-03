@@ -7,6 +7,7 @@ import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
 import { initAuth, authOptions, onSessionChange } from './auth.js';
 import { BANKS } from './banks.js';
+import { readVisits, departure, timelineSummary, expenseWindow, kstTime } from './timeline.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
@@ -434,9 +435,9 @@ function noRoom() {
 }
 
 function whoPicker() {
-  if (!authOptions().dev) return `<section class="group"><a class="btn secondary" href="location.html?room=${encodeURIComponent(roomId)}">참석 근거 · 위치 요약</a></section>`;
+  if (!authOptions().dev) return '';
   const me = currentUid();
-  return `<section class="group"><a class="text-btn" href="location.html?room=${encodeURIComponent(roomId)}">참석 근거 · 위치 요약</a><h2 class="group-label"><span>누구로 볼까요?</span><span>개발용 시드 신원</span></h2>
+  return `<section class="group"><h2 class="group-label"><span>누구로 볼까요?</span><span>개발용 시드 신원</span></h2>
     <div class="seg" role="radiogroup" aria-label="보는 사람" data-seg="who"><span class="seg-thumb"></span>
       ${members().filter(m => !m.deleted).map((m) => `<button type="button" role="radio" aria-checked="${m.uid === me}" data-action="who" data-id="${esc(m.uid)}">${esc(m.name)}</button>`).join('')}
     </div></section>`;
@@ -686,6 +687,7 @@ function invoiceSheet() {
         ${dd.expenseId === e.id ? chip('고름', 'ok') : ''}</button>`).join('')}</div></section>
     <section class="group"><div class="list"><label class="row field"><span class="grow">맞지 않는 점</span>
       <input data-dd="claim" value="${esc(dd.claim)}" maxlength="200" placeholder="예: 리무진은 타지 않았어요"></label></div></section>
+    ${dd.expenseId ? timelineSection(byId('expenses', dd.expenseId), dd.timeline) : ''}
     ${formError()}
     <button class="btn" style="width:100%" id="dispute-send" data-action="answer-invoice" data-decision="dispute" ${dd.expenseId && dd.claim.trim() ? '' : 'disabled'}>이의 보내기</button>` : '';
   return {
@@ -699,6 +701,56 @@ function invoiceSheet() {
   };
 }
 
+// #7 위치 근거: 이의를 낼 때 고른 지출의 시간대(첫 주문~결제)만 Google 지도 타임라인 파일에서 찾아 본다.
+// 파일은 이 화면에서만 읽고 올리지 않는다. 찾은 한 줄은 사용자가 체크해야만 이의 상대와 중재 비서에게 간다(public/timeline.js)
+function timelineSection(exp, tl) {
+  const { from, until } = expenseWindow(exp);
+  const result = !tl
+    ? `<p class="group-note">휴대폰 Google 지도의 타임라인 설정에서 '타임라인 데이터 내보내기'로 받은 파일을 고르면, 이 지출 시간대(${kstTime(from)}~${kstTime(until)})의 기록만 읽어요. 파일은 올리지 않아요.</p>`
+    : tl.state === 'reading' ? '<p class="group-note">파일에서 이 지출 시간대만 찾는 중이에요…</p>'
+    : tl.state === 'none' ? '<p class="group-note">이 지출 시간대의 기록을 찾지 못했어요. 위치 근거 없이 이의를 보내요.</p>'
+    : tl.state === 'error' ? `<p class="form-error">${esc(tl.message)}</p>`
+    : `<div class="list"><div class="row"><span class="grow">${esc(tl.summary)}</span></div>
+        <label class="row field"><span class="grow">이 한 줄을 이의 상대와 중재 비서에게 보내요</span><input type="checkbox" data-timeline-agree ${tl.agree ? 'checked' : ''}></label></div>
+      <p class="group-note">파일과 좌표는 보내지 않아요. 보낸 요약은 7일 뒤나 지우기를 누르면 사라져요.</p>`;
+  const pick = `<label class="btn secondary sm" style="display:inline-flex;align-items:center">${tl ? '다른 파일 고르기' : '타임라인 파일 고르기'}
+      <input type="file" accept=".json,application/json" data-timeline hidden></label>`;
+  const sample = authOptions().dev ? '<button type="button" class="text-btn" data-action="timeline-sample">개발용 가짜 기록으로 해 보기</button>' : '';
+  return `<section class="group"><h3 class="group-label"><span>위치 기록으로 확인</span><span>선택</span></h3>${result}
+    <div class="actions" style="align-items:center;margin-top:8px">${pick}${sample}</div></section>`;
+}
+
+// 타임라인 방문에서 고른 지출의 결과를 찾아 미리보기에 둔다. 기록이 없거나 확신이 낮으면 아무것도 넣지 않는다
+function applyTimeline(visits, exp) {
+  const result = departure(visits, exp);
+  state.disputeDraft.timeline = result ? { state: 'found', result, summary: timelineSummary(result, exp), agree: false } : { state: 'none' };
+}
+
+async function readTimeline(file) {
+  const dd = state.disputeDraft;
+  const exp = dd?.expenseId && byId('expenses', dd.expenseId);
+  if (!exp) return;
+  dd.timeline = { state: 'reading' };
+  renderSheet();
+  try {
+    const visits = readVisits(JSON.parse(await file.text()));
+    if (state.disputeDraft !== dd || dd.expenseId !== exp.id) return; // 읽는 사이 다른 지출을 골랐으면 버린다
+    applyTimeline(visits, exp);
+  } catch (e) {
+    dd.timeline = { state: 'error', message: e instanceof SyntaxError ? 'JSON 파일이 아니에요. 휴대폰 Google 지도에서 내보낸 타임라인 파일을 골라 주세요.' : e.message };
+  }
+  renderSheet();
+}
+
+// 개발용: 고른 지출에 맞춘 가짜 타임라인. 첫 주문 20분 전부터 머물다 결제 전에 떠나 13분 뒤 다른 곳에 도착한다
+function sampleTimeline(exp) {
+  const { from, until } = expenseWindow(exp);
+  const iso = (ms) => new Date(ms + 9 * 3600_000).toISOString().replace('Z', '+09:00');
+  const left = from + Math.round((until - from) * 0.6);
+  const visit = (start, end) => ({ startTime: iso(start), endTime: iso(end), visit: { hierarchyLevel: 0, probability: 0.9, topCandidate: { semanticType: 'UNKNOWN' } } });
+  return { semanticSegments: [visit(from - 20 * 60_000, left), visit(left + 13 * 60_000, left + 8 * 3600_000)] };
+}
+
 // 이의와 중재안. 중재안은 줄마다 누구 몫인지와 사람별 몫이 어떻게 바뀌는지 보여 준다
 function disputeSheet() {
   const d = byId('disputes', state.ref);
@@ -706,8 +758,11 @@ function disputeSheet() {
   if (!exp) return notFound('이의');
   const { room, me } = state.data;
   const party = [exp.payer, d.by].includes(me.uid);
+  // 이의를 낸 사람이 붙인 타임라인 요약은 본인이 언제든 지울 수 있다(동의 철회). 지우면 미확정 중재안은 다시 열린 이의가 된다
+  const mine = d.by === me.uid && d.evidence.some((e) => e.locationId);
   const evidence = d.evidence.length
-    ? `<div class="list">${d.evidence.map((e) => `<div class="row"><span class="grow">${esc(e.summary)}</span>${e.time ? chip(e.time) : ''}</div>`).join('')}</div>` : '';
+    ? `<div class="list">${d.evidence.map((e) => `<div class="row"><span class="grow">${esc(e.summary)}</span>${e.time ? chip(e.time) : ''}</div>`).join('')}</div>
+      ${mine ? '<div class="actions" style="margin-top:8px"><button type="button" class="text-btn" data-action="revoke-location">내 위치 요약 지우기</button></div>' : ''}` : '';
   let body = '';
   if (d.status === 'open') {
     body = party
@@ -890,7 +945,7 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'open-payout', 'save-payout', 'copy']);
+const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'open-payout', 'save-payout', 'copy']);
 
 async function agentAct(name, d) {
   const base = `/api/rooms/${enc(roomId)}`;
@@ -927,9 +982,20 @@ async function agentAct(name, d) {
     renderSheet();
   } else if (name === 'dispute-pick') {
     state.disputeDraft.expenseId = d.id;
+    state.disputeDraft.timeline = null; // 다른 지출이면 시간대가 달라서 다시 찾는다
     renderSheet();
+  } else if (name === 'timeline-sample') {
+    const exp = byId('expenses', state.disputeDraft?.expenseId);
+    if (exp) applyTimeline(readVisits(sampleTimeline(exp)), exp);
+    renderSheet();
+  } else if (name === 'revoke-location') {
+    await post('/location/revoke');
   } else if (name === 'answer-invoice') {
-    const body = d.decision === 'dispute' ? { decision: 'dispute', ...state.disputeDraft } : { decision: 'accept' };
+    const dd = state.disputeDraft;
+    // 사용자가 체크한 타임라인 요약을 먼저 붙인다. 그러면 이의에 근거로 함께 들어간다
+    if (d.decision === 'dispute' && dd.timeline?.state === 'found' && dd.timeline.agree
+      && !(await post('/location/timeline', { agree: true, expenseId: dd.expenseId, ...dd.timeline.result }))) return;
+    const body = d.decision === 'dispute' ? { decision: 'dispute', expenseId: dd.expenseId, claim: dd.claim } : { decision: 'accept' };
     if (await post(`/invoices/${enc(state.ref)}/answer`, body)) {
       state.disputeDraft = null;
       sheet.close();
@@ -1034,6 +1100,9 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', (e) => {
   if (e.target.matches?.('input[data-receipt]') && e.target.files?.[0]) readReceipt(e.target.files[0]);
+  if (e.target.matches?.('input[data-timeline]') && e.target.files?.[0]) readTimeline(e.target.files[0]);
+  // 체크만 기억한다(다시 그리면 초점을 잃는다)
+  if (e.target.matches?.('input[data-timeline-agree]') && state.disputeDraft?.timeline) state.disputeDraft.timeline.agree = e.target.checked;
 });
 document.addEventListener('change', (e) => {
   const f = e.target.dataset?.field;

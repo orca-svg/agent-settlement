@@ -85,9 +85,9 @@ API 서버 (server.mjs → src/app.mjs)
 
 ### #7 위치 근거의 판단과 승인 (11/3 리뷰 반영)
 
-`LocationEvidence.relation`은 `near`·`away`·`uncertain`을 보존해요. `Evidence`에는 이 값과 `observedAt`, `requiresHumanApproval=true`를 전달해요. `uncertain`은 측정 판단 불가일 때만 true예요. 이 필드가 없던 옛 기록은 uncertain으로 읽고 문구에서 결과를 추측하지 않아요. 좌표는 여전히 서버로 보내지 않아요.
+위치 근거는 이의를 낼 때 사용자가 고른 Google 지도 타임라인 파일에서 브라우저가 찾은 시각만 받아요(`public/timeline.js`). `LocationEvidence`는 `leftAt`·`nextAt`·`nextHome` 또는 `stayedUntil`과 서버가 다시 만든 `summary`만 가져요. `Evidence`로는 떠난 시각이면 `left_at`(`time`), 결제까지 머물렀으면 `text`(`stayedUntil`)로, 늘 `requiresHumanApproval=true`와 함께 넘겨요. 파일·좌표·장소 이름은 서버로 보내지 않아요. 예전 체크인·체크아웃 기록(`source` 없음)은 근거로 쓰지 않아요.
 
-중재 모델 출력의 줄별 `evidenceConflict`가 true인 경우만 서버가 그 줄의 confidence를 0.49 이하로 제한해요. 다른 줄의 확신도는 그대로예요. 모델의 의미 판단은 완전한 충돌 검출을 보장하지 않아요. 규칙 fallback에서는 충돌을 추측하지 않아요. 브라우저 보고가 있으면 confidence와 별도로 `confirmed=false`이며, 기존 `left_at`과 섞여 있어도 자동 동의를 하지 않아요. 두 당사자의 명시적 동의 후에만 배분을 확정해요. `observedAt`은 순간 측정이지 계속 자리를 비운 시각이 아니므로 `time/left_at`으로 변환하지 않아요.
+중재 모델 출력의 줄별 `evidenceConflict`가 true인 경우만 서버가 그 줄의 confidence를 0.49 이하로 제한해요. 다른 줄의 확신도는 그대로예요. 모델의 의미 판단은 완전한 충돌 검출을 보장하지 않아요. 규칙 fallback에서는 충돌을 추측하지 않아요. 타임라인 요약은 본인이 낸 자료라 confidence와 별도로 `confirmed=false`이며 자동 동의를 하지 않아요. 두 당사자의 명시적 동의 후에만 배분을 확정해요.
 
 위치 요약과 중재 설명은 이의 당사자만 API로 읽어요. #35의 Firestore 규칙에서도 disputes 직접 읽기를 차단해야 해요. 위 Store 설명의 전역 큐 문장은 #35 병합 시 `src/state-locks.mjs`의 방 단위 큐와 여러 방에 걸친 작업의 배타 처리로 갱신해야 해요(리뷰어가 충돌을 피하려고 기존 문장을 남긴 상태).
 
@@ -131,8 +131,8 @@ API 서버 (server.mjs → src/app.mjs)
 | GET | `/api/rooms` | 내 방 목록 `{ rooms: [{ id, name, dates }] }` |
 | GET | `/api/me/deletion` | 삭제 재시도 상태 `{ pending }` |
 | POST | `/api/me/delete` | 5분 이내 Google 재인증 필요. 개인정보 삭제·공동 기록 익명화·Firebase 계정 삭제 |
-| GET / POST | `/api/rooms/:id/location` | 내 요약 목록 / `{ expenseId, action, observedAt, relation }` 기록. 좌표 원본·임의 요약 문자열은 거부 |
-| POST | `/api/rooms/:id/location/consent` | `{ agree: true, expiresAt }`. 최대 24시간 동의 |
+| GET | `/api/rooms/:id/location` | 내 동의와 위치 요약 목록 |
+| POST | `/api/rooms/:id/location/timeline` | 이의를 낼 때 타임라인에서 찾은 결과 `{ agree: true, expenseId, leftAt, nextAt?, nextHome? }` 또는 `{ agree: true, expenseId, stayedUntil }`. 그 지출 시간대 밖의 시각·좌표·다른 필드는 거부, 지출당 한 번(409). 붙이는 순간 7일 동의 |
 | POST | `/api/rooms/:id/location/revoke` | 내 동의와 요약, 연결된 미확정 중재안 삭제 |
 | POST | `/api/allocate`, `/api/mediate` | 데모 화면용 메뉴 배분·중재 |
 | POST | `/api/dev/seed` | 개발용 데모 방 만들기(`DEV_SEED=1`일 때만) |

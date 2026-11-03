@@ -71,7 +71,8 @@ async function setup(t) {
 
 // ms 안에 응답이 오면 그 응답, 아니면 null
 const within = (promise, ms) => Promise.race([promise, new Promise((r) => setTimeout(() => r(null), ms))]);
-const consent = () => ({ agree: true, expiresAt: new Date(Date.now() + 60_000).toISOString() });
+// 같은 방의 가벼운 쓰기 예: 내 위치 요약 지우기(지울 것이 없어도 200)
+const revoke = (roomId) => `/api/rooms/${roomId}/location/revoke`;
 
 test('한 방의 중재가 Gemini를 기다리는 동안에도 같은 방 읽기, 다른 방 읽기·쓰기, 영수증 읽기는 바로 끝난다', async (t) => {
   const { gemini, request, blockOnGemini } = await setup(t);
@@ -80,7 +81,7 @@ test('한 방의 중재가 Gemini를 기다리는 동안에도 같은 방 읽기
     ['같은 방 화면', request('/api/rooms/room-one', { uid: 'ms' })],
     ['같은 방 기록', request('/api/rooms/room-one/events?after=0', { uid: 'yh' })],
     ['다른 방 화면', request('/api/rooms/room-two', { uid: 'ms' })],
-    ['다른 방 쓰기', request('/api/rooms/room-two/location/consent', { uid: 'ms', body: consent() })],
+    ['다른 방 쓰기', request(revoke('room-two'), { uid: 'ms', body: {} })],
     ['같은 방 영수증 읽기', request('/api/rooms/room-one/receipts/extract', { uid: 'cs', body: { image: { mimeType: 'image/jpeg', data: 'AAAA' } } })],
   ]) {
     const res = await within(pending, 1000);
@@ -94,7 +95,7 @@ test('한 방의 중재가 Gemini를 기다리는 동안에도 같은 방 읽기
 test('같은 방의 쓰기는 진행 중인 중재가 끝난 뒤에 처리한다', async (t) => {
   const { gemini, request, blockOnGemini } = await setup(t);
   const slow = await blockOnGemini('room-one');
-  const write = request('/api/rooms/room-one/location/consent', { uid: 'ms', body: consent() });
+  const write = request(revoke('room-one'), { uid: 'ms', body: {} });
   assert.equal(await within(write, 200), null);
   gemini.open();
   assert.equal((await slow.response).status, 200);
@@ -113,8 +114,8 @@ test('여러 방에 걸친 탈퇴는 진행 중인 중재가 끝나기를 기다
 
 test('본문을 느리게 보내는 요청이 같은 방의 다른 쓰기를 붙잡지 않는다', async (t) => {
   const { base, request } = await setup(t);
-  const json = JSON.stringify(consent());
-  const slowBody = http.request(`${base}/api/rooms/room-one/location/consent`, {
+  const json = JSON.stringify({ note: '본문을 천천히 보내요' });
+  const slowBody = http.request(`${base}${revoke('room-one')}`, {
     method: 'POST',
     headers: { authorization: 'Bearer ms', 'content-type': 'application/json', 'content-length': Buffer.byteLength(json) },
   });
@@ -124,7 +125,7 @@ test('본문을 느리게 보내는 요청이 같은 방의 다른 쓰기를 붙
   });
   slowBody.write(json.slice(0, 5)); // 나머지는 아직 보내지 않는다
   await new Promise((r) => setTimeout(r, 50));
-  const other = await within(request('/api/rooms/room-one/location/consent', { uid: 'me', body: consent() }), 1000);
+  const other = await within(request(revoke('room-one'), { uid: 'me', body: {} }), 1000);
   assert.ok(other, '느린 본문을 기다렸어요');
   assert.equal(other.status, 200);
   slowBody.end(json.slice(5));
