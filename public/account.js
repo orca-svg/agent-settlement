@@ -1,6 +1,7 @@
 import { initAuth, currentUser, login, logout, reauthenticate } from './auth.js';
 import { api } from './room-api.js';
-import { esc, chip, CHEVRON } from './ui.js';
+import { esc, CHEVRON } from './ui.js';
+import { profileFormHtml, mountProfileForm } from './profile-form.js';
 const panel = document.querySelector('#account');
 // 알림은 방금 누른 버튼 바로 아래에 띄운다. 화면을 다시 그릴 때마다 #message 자리도 함께 그린다
 const say = (text, error = false) => {
@@ -48,15 +49,12 @@ async function render() {
       ${rooms.map((r) => linkRow(`room.html?room=${encodeURIComponent(r.id)}`, esc(r.name), esc(r.dates || ''))).join('')
         || '<div class="row"><span class="grow meta">아직 참여한 방이 없어요. 초대받은 방이 여기에 보여요.</span></div>'}
     </div></section>
-    <section class="group"><h2 class="group-label"><span>프로필</span></h2>
-      <form id="profile"><div class="list">
-        <label class="row field"><span class="grow">표시 이름</span><input name="name" maxlength="40" required value="${esc(profile.name)}"></label>
-        <label class="row field"><span class="grow">프로필 색</span><input name="color" type="color" value="${esc(profile.color)}"></label>
-      </div><div class="actions" style="margin-top:12px"><button class="btn">저장</button></div>${MESSAGE}</form></section>
+    <section class="group"><h2 class="group-label"><span>프로필</span><span>방에서 이 이름과 색으로 보여요</span></h2>
+      ${profileFormHtml(profile)}${MESSAGE}</section>
     <section class="group"><h2 class="group-label"><span>계정</span></h2>
       <div class="list"><button type="button" class="row act" id="logout">로그아웃</button><button type="button" class="row act danger" id="delete">계정 탈퇴</button></div>
       <p class="group-note">탈퇴하면 프로필·비서 설정·위치 요약을 지우고 방에서 내 이름과 계정 연결을 끊어요. 함께 정산한 금액은 익명 기록으로 남고, 내야 할 돈이 없어지지는 않아요.</p></section>`;
-  panel.querySelector('#profile').onsubmit = (e) => { e.preventDefault(); const body = Object.fromEntries(new FormData(e.target)); run(async () => { await api('/api/me', { method: 'POST', body }); say('프로필을 저장했어요.'); }); };
+  mountProfileForm(panel.querySelector('#profile'), (body) => run(async () => { await api('/api/me', { method: 'POST', body }); say('프로필을 저장했어요.'); return true; }));
   panel.querySelector('#logout').onclick = () => run(logout);
   panel.querySelector('#delete').onclick = () => run(async () => {
     if (!confirm('프로필·비서 설정·위치 요약을 지우고 탈퇴할까요? 함께 정산한 금액은 익명 기록으로 남고 되돌릴 수 없어요.')) return;
@@ -65,5 +63,5 @@ async function render() {
     await logout();
   });
 }
-async function run(fn) { try { await fn(); } catch (e) { say(e.message, true); } }
+async function run(fn) { try { return await fn(); } catch (e) { say(e.message, true); } }
 run(render);

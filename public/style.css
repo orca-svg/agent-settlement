@@ -210,6 +210,7 @@ h1, h2, h3, p { margin: 0; }
   flex: none;
 }
 .avatar.lg { width: 32px; height: 32px; font-size: 0.875rem; }
+.avatar.xl { width: 64px; height: 64px; font-size: 1.75rem; transition: background-color 200ms ease; }
 .avatar.agent { border-radius: 8px; }
 
 /* ---------- 다음 할 일 카드 ---------- */
@@ -322,6 +323,30 @@ a.row:active { background: var(--fill); }
   box-shadow: inset 0 0 0 1px var(--sep);
 }
 .btn.google svg { width: 18px; height: 18px; flex: none; }
+
+/* 프로필 미리보기와 색 견본. 고르는 순간 미리보기 아바타 색이 바뀐다(눌림은 누르는 순간 줄어들어 알린다) */
+.profile-preview { display: grid; justify-items: center; gap: 8px; padding: 4px 0 20px; }
+.profile-preview .title { font-size: 1.0625rem; font-weight: 600; }
+/* 견본은 늘 한 줄. 견본 수(8~9개)에 맞춰 칸을 나눠 좁은 폰에서도 두 줄로 꺾이지 않게 한다 */
+.swatches { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 12px 12px; }
+.swatch { position: relative; display: grid; place-items: center; height: 40px; cursor: pointer; }
+.swatch input {
+  appearance: none;
+  margin: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--c);
+  cursor: pointer;
+  transition: box-shadow 150ms ease, transform 100ms ease-out;
+}
+/* 고른 것은 바깥 고리(모양)와 체크(기호)로 함께 알린다. 색만으로 구분하지 않는다 */
+.swatch input:checked { box-shadow: 0 0 0 2.5px var(--card), 0 0 0 4.5px var(--c); }
+.swatch input:active { transform: scale(0.9); }
+.swatch input:focus-visible { outline: 3px solid color-mix(in srgb, var(--tint) 60%, transparent); outline-offset: 5px; }
+.swatch .check { position: absolute; width: 16px; height: 16px; opacity: 0; pointer-events: none; transition: opacity 150ms ease; }
+.swatch input:checked + .check { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .swatch input, .swatch .check, .avatar.xl { transition: none; } }
 .row + .row::before {
   content: "";
   position: absolute;
