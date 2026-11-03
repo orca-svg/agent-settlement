@@ -782,9 +782,10 @@ button.row:active { background: var(--fill); }
   place-items: center;
 }
 
-/* 꼬리말 링크(개인정보 처리방침)는 흐린 안내 글과 구분되게 본문 글자색·굵은 글씨로 보이고, 밑줄로 링크임을 보인다
-   (표준 개인정보 보호지침 제20조①: 글자 크기·색상 등으로 다른 고지사항과 구분) */
-.foot a { color: var(--label); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+/* 꼬리말 링크(개인정보 처리방침)는 흐린 안내 글과 색·굵기·밑줄로 구분한다(표준 개인정보 보호지침 제20조①:
+   글자 크기·색상 등으로 다른 고지사항과 구분). 다만 혼자 가장 밝게 튀지 않도록 본문색을 65%만 섞는다
+   — 배경과 대비 밝은 화면 6.7:1, 어두운 화면 8.6:1(WCAG AA 4.5:1 이상) */
+.foot a { color: color-mix(in srgb, var(--label) 65%, var(--bg)); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .foot {
   max-width: 1120px;
   margin: 0 auto;
