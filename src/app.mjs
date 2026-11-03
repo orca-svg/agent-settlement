@@ -52,6 +52,16 @@ const demoDispute = {
 // 계좌·송금 링크는 송금 당사자에게만 보여 준다
 export const redactTransfer = (t, uid) => (t.from === uid || t.to === uid ? t : { ...t, link: null, fallback: null });
 
+// 위치 요약은 이의 당사자(이의를 낸 사람과 지출을 낸 사람)와 중재 비서만 본다(#7). 다른 멤버에게는 근거가 붙었다는
+// 사실만 남기고, 요약이 옮겨 적혔을 수 있는 중재안 요약과 줄별 이유도 가린다. 저장본은 그대로다
+export function redactDispute(d, uid, payer) {
+  if (!(d.evidence ?? []).some((e) => e.locationId) || uid === d.by || uid === payer) return d;
+  const evidence = d.evidence.map((e) => (e.locationId ? { kind: 'text', summary: '위치 요약 첨부 · 이의 당사자만 볼 수 있어요' } : e));
+  if (!d.proposal) return { ...d, evidence };
+  const alloc = Object.fromEntries(Object.entries(d.proposal.alloc ?? {}).map(([id, a]) => [id, { ...a, reason: '위치 요약을 참고한 배분' }]));
+  return { ...d, evidence, proposal: { ...d.proposal, summary: '위치 요약을 참고한 중재안이에요. 당사자가 확인해 주세요.', alloc } };
+}
+
 function serveStatic(pathname, res) {
   const file = path.normalize(path.join(publicDir, pathname === '/' ? 'index.html' : pathname));
   if (!file.startsWith(publicDir + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return send(res, 404, { error: 'not found' });
@@ -153,7 +163,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       me,
       expenses: expenses.map((e) => ({ ...e, allocFresh: Boolean(e.alloc) && e.allocMemory === memoryNow })),
       invoices,
-      disputes,
+      disputes: disputes.map((d) => redactDispute(d, me.uid, expenses.find((e) => e.id === d.expenseId)?.payer)),
       transfers: transfers.map((t) => redactTransfer(t, me.uid)),
       ledger: ledger(room, expenses, room.policy),
       actions: pendingActions({ room, expenses, invoices, disputes, transfers }).filter((x) => x.for === me.uid),

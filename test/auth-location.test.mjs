@@ -17,7 +17,7 @@ async function setup(t, options = {}) {
   const auth = {
     async verifyIdToken(token, checkRevoked) {
       verified.push([token, checkRevoked]);
-      if (!['me', 'ms', 'outsider'].includes(token)) throw new Error('invalid/revoked/expired');
+      if (!['me', 'cs', 'yh', 'ms', 'outsider'].includes(token)) throw new Error('invalid/revoked/expired');
       return { uid: token, name: '테스트 사용자', auth_time: now.getTime() / 1000 };
     },
     async deleteUser(uid) { deleted.push(uid); },
@@ -132,6 +132,32 @@ test('revocation removes attached summaries and reopens an unconfirmed proposal'
   assert.deepEqual(after.agreedBy, []);
   assert.ok(!(JSON.stringify(await store.listEvents('room-one'))).includes('한국 시각'));
   assert.equal((await store.listEvents('room-one')).at(-1).kind, 'location_removed');
+});
+
+// #7: 원본 대신 요약을 '상대 비서와 중재 비서'에게만 공유한다. 같은 방의 다른 멤버에게는 첨부됐다는 사실만 보인다
+test('location summary is visible only to the dispute parties; other members see that one is attached', async t => {
+  const { request, exp, now, store } = await setup(t);
+  const path = '/api/rooms/room-one/location';
+  await request(`${path}/consent`, { body: { agree: true, expiresAt: new Date(+now() + 60000).toISOString() } });
+  await request(path, { body: { expenseId: exp.id, action: 'checkout', relation: 'away', observedAt: now().toISOString() } });
+  assert.equal((await request('/api/rooms/room-one/disputes', { body: { expenseId: exp.id, claim: '참석 근거를 확인해 주세요' } })).status, 200);
+  const d = (await store.list('disputes'))[0];
+  const summary = d.evidence[0].summary;
+  // 중재안 요약과 줄별 이유에도 위치 요약이 그대로 들어갈 수 있다
+  await store.put('disputes', { ...d, status: 'proposed', agreedBy: [], proposal: { summary: `근거: ${summary}`, alloc: { [exp.items[0].id]: { consumers: ['me'], confidence: 0.4, reason: summary } }, source: 'rules' } });
+  const seen = async uid => (await (await request('/api/rooms/room-one', { uid })).json()).disputes.find(x => x.id === d.id);
+  const parties = new Set(['me', exp.payer]);
+  for (const uid of parties) assert.ok(JSON.stringify(await seen(uid)).includes(summary), `${uid}는 당사자예요`);
+  const room = await store.get('rooms', 'room-one');
+  const others = room.members.map(m => m.uid).filter(uid => !parties.has(uid));
+  assert.ok(others.length);
+  for (const uid of others) {
+    const hidden = await seen(uid);
+    assert.doesNotMatch(JSON.stringify(hidden), /한국 시각|체크아웃|지정 장소/);
+    assert.equal(hidden.evidence.length, 1);
+    assert.equal(hidden.evidence[0].locationId, undefined);
+  }
+  assert.match((await store.get('disputes', d.id)).evidence[0].summary, /한국 시각/); // 저장본은 그대로
 });
 
 test('uncertain location cannot turn a model assertion into a confirmed allocation', async t => {

@@ -24,7 +24,7 @@ async function render() {
   const [{ consent, records }, data] = await Promise.all([api(path), api(`/api/rooms/${encodeURIComponent(roomId)}`)]);
   message.textContent = consent ? `공유 동의 만료: ${new Date(consent.expiresAt).toLocaleString('ko-KR')}` : '위치 권한은 동의 후 기록 버튼을 누를 때만 요청해요.';
   if (!consent) {
-    content.innerHTML = `<form id="consent" class="next"><h2>이번 모임에만 동의</h2><p>최대 24시간 동안 기록할 수 있어요. 요약은 같은 방 참여자와 중재 AI가 볼 수 있고, 동의가 끝나면 삭제해요. 체크아웃은 귀가·불참을 확정하는 증거가 아니에요.</p><label><input name="agree" type="checkbox" required> 위치 요약 수집·공유에 동의해요</label><label class="row field">공유 기간 <select name="hours"><option value="1">1시간</option><option value="6">6시간</option><option value="24">24시간</option></select></label><button class="btn">동의하고 시작</button></form>`;
+    content.innerHTML = `<form id="consent" class="next"><h2>이번 모임에만 동의</h2><p>최대 24시간 동안 기록할 수 있어요. 요약은 이의 상대(지출을 낸 사람)와 중재 AI만 볼 수 있고, 같은 방의 다른 참여자에게는 요약이 붙었다는 사실만 보여요. 동의가 끝나면 삭제해요. 체크아웃은 귀가·불참을 확정하는 증거가 아니에요.</p><label><input name="agree" type="checkbox" required> 위치 요약 수집·공유에 동의해요</label><label class="row field">공유 기간 <select name="hours"><option value="1">1시간</option><option value="6">6시간</option><option value="24">24시간</option></select></label><button class="btn">동의하고 시작</button></form>`;
     content.querySelector('form').onsubmit = e => { e.preventDefault(); const f = new FormData(e.target); run(async () => { await api(`${path}/consent`, { method: 'POST', body: { agree: f.has('agree'), expiresAt: new Date(Date.now() + Number(f.get('hours')) * 3600000).toISOString() } }); await render(); }); };
     return;
   }
