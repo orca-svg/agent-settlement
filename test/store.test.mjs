@@ -11,6 +11,11 @@ const IMPLS = [
   ['MemoryStore', (opts) => new MemoryStore(opts)],
   ['encryptedStore', (opts) => encryptedStore(new MemoryStore(opts), KEY)],
 ];
+// FirestoreStore(#3)는 에뮬레이터가 있을 때만 같은 계약을 돌린다(docs/firestore-setup.md). 테스트마다 빈 데이터베이스를 쓴다
+if (process.env.FIRESTORE_EMULATOR_HOST) {
+  const { emulatorStore } = await import('./helpers/firestore-emulator.mjs');
+  IMPLS.push(['FirestoreStore', (opts) => emulatorStore(opts)], ['encryptedStore(FirestoreStore)', (opts) => encryptedStore(emulatorStore(opts), KEY)]);
+}
 
 for (const [name, make] of IMPLS) {
   test(`[${name}] put 후 get이 같은 문서`, async () => {
