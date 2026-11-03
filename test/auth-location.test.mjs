@@ -59,6 +59,16 @@ test('AI limits follow verified uid even when IP changes', async t => {
   assert.equal((await request(path, { uid: 'ms', body: {}, headers: { 'x-forwarded-for': '198.51.100.1' } })).status, 400);
 });
 
+// 처음 들어온 사람은 견본 중 무작위 색으로 시작하고, 그 색은 저장돼 다시 열어도 같다
+test('first profile read stores a random palette color that stays the same', async t => {
+  const { request, store } = await setup(t);
+  const { PROFILE_COLORS } = await import('../public/profile-colors.js');
+  const first = (await (await request('/api/me')).json()).profile;
+  assert.ok(PROFILE_COLORS.some(([c]) => c === first.color), first.color);
+  assert.equal((await store.get('users', 'me')).color, first.color);
+  assert.equal((await (await request('/api/me')).json()).profile.color, first.color);
+});
+
 test('profile updates only verified user and room list never leaks other rooms', async t => {
   const { request, store } = await setup(t);
   await store.put('rooms', { id: 'secret', name: '비공개', members: [{ uid: 'outsider', name: '타인' }] });
