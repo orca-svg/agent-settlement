@@ -89,19 +89,20 @@ export function flaggedLines(expenses, isFlagged) {
   });
 }
 
-// 청구서 보내기를 눌렀는데 막혔을 때 버튼 아래에 보일 안내: 몇 줄이 남았고, 어느 지출의 어느 줄을, 누가 확인해야 하는지, 어디로 가면 되는지.
+// 청구서 보내기를 눌렀는데 막혔을 때 버튼 아래에 보일 안내: 몇 줄이 남았고, 어느 지출의 어느 줄을, 누구의 비서가 물었는지, 어디로 가면 되는지.
+// '누가 확인해야 한다'가 아니라 '누구의 비서가 물어봤다'고 쓴다: 서버는 방 멤버 누구나 줄을 확인하게 두므로 철수만 할 수 있다는 말이 되면 안 된다.
 // 지출마다 한 줄이고, 그 지출의 첫 줄로 안내한다. 데모 방에는 이름이 '나'인 사람이 있어 내가 보는 사람이 아닐 때는 ‘나’로 따옴표를 쳐서 구분한다
 export function blockedNotice(groups, { me, nameOf }) {
   if (!groups.length) return null;
   const total = groups.reduce((n, g) => n + g.lines.length, 0);
-  const who = (uid) => (uid === me ? '내가' : nameOf(uid) === '나' ? '‘나’가' : subj(nameOf(uid)));
+  const agent = (uid) => (uid === me ? '내 비서' : nameOf(uid) === '나' ? '‘나’의 비서' : `${nameOf(uid)}의 비서`);
   return {
     title: '청구서를 아직 보낼 수 없어요',
     lead: `비서가 짐작하지 않고 물어본 줄이 ${total}줄 남았어요.`,
     rows: groups.map((g) => {
       const [first] = g.lines;
       const more = g.lines.length - 1;
-      return { expId: g.expId, lineId: first.id, what: `${g.title}의 ‘${first.name}’${more ? ` 외 ${more}줄` : ''}`, who: `${who(g.owner)} 확인해야 해요`, label: '확인하러 가기' };
+      return { expId: g.expId, lineId: first.id, what: `${g.title}의 ‘${first.name}’${more ? ` 외 ${more}줄` : ''}`, who: `${agent(g.owner)}가 물어봤어요`, label: '확인하러 가기' };
     }),
   };
 }

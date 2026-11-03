@@ -134,31 +134,31 @@ test('flaggedLines: 확인이 필요한 줄만 지출별로 모은다', () => {
   assert.deepEqual(flaggedLines([confirmed], flagged), []); // 사람이 확인한 줄은 더 막지 않는다
 });
 
-test('blockedNotice: 몇 줄이 남았고 어느 지출의 줄이며 누가 확인할지, 어디로 가야 하는지 알린다', () => {
+test('blockedNotice: 몇 줄이 남았고 어느 지출의 줄이며 누구의 비서가 물었는지, 어디로 가야 하는지 알린다', () => {
   const groups = flaggedLines(expenses, flagged);
   assert.deepEqual(blockedNotice(groups, { me: 'ms', nameOf }), {
     title: '청구서를 아직 보낼 수 없어요',
     lead: '비서가 짐작하지 않고 물어본 줄이 1줄 남았어요.',
-    rows: [{ expId: 'e2', lineId: 'i1', what: '이자카야 저녁의 ‘오차즈케’', who: '철수가 확인해야 해요', label: '확인하러 가기' }],
+    rows: [{ expId: 'e2', lineId: 'i1', what: '이자카야 저녁의 ‘오차즈케’', who: '철수의 비서가 물어봤어요', label: '확인하러 가기' }],
   });
   assert.equal(blockedNotice([], { me: 'ms', nameOf }), null); // 막는 줄이 없으면 안내도 없다
 });
 
-test('blockedNotice: 내 줄이면 내가, 줄이 여럿이면 지출마다 한 줄씩 보여 주고 첫 줄로 안내한다', () => {
+test('blockedNotice: 내 비서가 물었으면 내 비서, 줄이 여럿이면 지출마다 한 줄씩 보여 주고 첫 줄로 안내한다', () => {
   const two = { ...izakaya, alloc: { i1: { confidence: 0.4 }, i2: { confidence: 0.5 } } };
   const other = { id: 'e5', title: '난바 호텔 2박', createdBy: 'yh', items: [{ id: 'i9', name: '조식' }], alloc: { i9: { confidence: 0.2 } } };
   const n = blockedNotice(flaggedLines([two, other], flagged), { me: 'cs', nameOf });
   assert.equal(n.lead, '비서가 짐작하지 않고 물어본 줄이 3줄 남았어요.');
   assert.deepEqual(n.rows.map((r) => [r.what, r.who, r.lineId]), [
-    ['이자카야 저녁의 ‘오차즈케’ 외 1줄', '내가 확인해야 해요', 'i1'],
-    ['난바 호텔 2박의 ‘조식’', '영희가 확인해야 해요', 'i9'],
+    ['이자카야 저녁의 ‘오차즈케’ 외 1줄', '내 비서가 물어봤어요', 'i1'],
+    ['난바 호텔 2박의 ‘조식’', '영희의 비서가 물어봤어요', 'i9'],
   ]);
 });
 
-test('blockedNotice: 데모 방의 이름 "나"는 보는 사람이 아닐 때 내가로 읽히지 않는다', () => {
+test('blockedNotice: 데모 방의 이름 "나"는 보는 사람이 아닐 때 내 비서로 읽히지 않는다', () => {
   const mine = flaggedLines([{ ...izakaya, createdBy: 'me' }], flagged);
-  assert.equal(blockedNotice(mine, { me: 'me', nameOf }).rows[0].who, '내가 확인해야 해요');
-  assert.equal(blockedNotice(mine, { me: 'yh', nameOf }).rows[0].who, '‘나’가 확인해야 해요');
+  assert.equal(blockedNotice(mine, { me: 'me', nameOf }).rows[0].who, '내 비서가 물어봤어요');
+  assert.equal(blockedNotice(mine, { me: 'yh', nameOf }).rows[0].who, '‘나’의 비서가 물어봤어요');
 });
 
 // 가짜 프레임 시계: requestAnimationFrame을 1/60초씩 직접 돌려 스프링이 멈출 때까지 지켜본다
