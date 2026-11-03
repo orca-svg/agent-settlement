@@ -16,7 +16,7 @@
         ▼
 API 서버 (server.mjs → src/app.mjs)
   ├─ src/identity.mjs     Firebase 신원 검증 (#2)
-  ├─ src/store/           Store 인터페이스. MemoryStore(기본) 또는 FirestoreStore(STORE=firestore, #3). encryptedStore가 계좌 칸을 잠가 저장
+  ├─ src/store/           Store 인터페이스. MemoryStore(기본) 또는 FirestoreStore(STORE=firestore, #3). encryptedStore가 계좌·위치 요약 칸을 잠가 저장
   ├─ src/gemini.mjs       Gemini 호출 (키는 Secret Manager·로컬 .env에만)
   ├─ src/agents/          메뉴 배분·중재, 이후 규칙 판단·청구·송금 안내
   └─ public/core.js       돈 계산(환율·몫·차액·송금 경로). 화면·서버·테스트가 같은 코드를 씀
@@ -29,7 +29,7 @@ API 서버 (server.mjs → src/app.mjs)
 - **비서는 사람이 정한 범위 안에서만 움직여요.** 자동 수락 한도를 넘거나 근거가 없는 일은 반드시 주인에게 물어요.
 - **우리 서비스는 돈을 보관하거나 이체하지 않아요.** 송금은 사용자의 송금 앱에서 일어나요. 우리는 금액이 채워진 송금 화면을 승인하는 순간 열어 줄 뿐이에요.
 - **비서 기록(이벤트)은 서버만 써요.** 화면은 읽기만 해요.
-- **민감 정보는 최소로 다뤄요.** 위치는 원본 대신 요약만, 계좌번호는 송금 당사자에게만 보여요. 저장소에는 계좌를 잠근 채로 넣어요(`src/store/encrypted.mjs`).
+- **민감 정보는 최소로 다뤄요.** 위치는 원본 대신 요약만, 계좌번호는 송금 당사자에게만 보여요. 저장소에는 계좌·위치 요약을 잠근 채로 넣어요(`src/store/encrypted.mjs`).
 
 ## 확장 지점
 
@@ -43,7 +43,7 @@ API 서버 (server.mjs → src/app.mjs)
 | #5 비서 설정 | `agents` 문서의 `memory`·`rules` | 시드 기본값 | 설정 화면과 저장 |
 | #7 위치 | `src/agents/evidence.mjs`의 provider | `createEvidenceProvider()`가 동일한 `(uid, expense, room)` 계약으로 위치 요약 반환. 고정 근거는 개발용 시드에서만 사용 | 타임라인 파일 파서는 장치별 형식 확인 후 별도 연동 |
 | #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs`, `public/banks.js` | 받는 계좌 설정 화면(은행 선택 목록), `supertoss://send?…` 링크(실기기 검증 완료, 은행은 실기기로 확인한 표기로 바꿔 넣음), 데스크톱 QR 핸드오프(`src/payments/qr.mjs`), 계좌 칸 암호화 저장(`src/store/encrypted.mjs`), 송금 확인(받는 사람의 "아직 안 들어왔어요", 다시 알림 1일·3일) | iPhone 은행 표기 확인 |
-| #10 보안 | `src/http.mjs`, `src/store/encrypted.mjs`, Firestore 보안 규칙 | 신원당 호출 제한, 계좌 칸 암호화 저장(`PAYOUT_ENC_KEY`) | 토큰 필수, 보안 규칙 테스트 |
+| #10 보안 | `src/http.mjs`, `src/store/encrypted.mjs`, Firestore 보안 규칙 | 신원당 호출 제한, 계좌·위치 요약 칸 암호화 저장(`PAYOUT_ENC_KEY`) | 토큰 필수, 보안 규칙 테스트 |
 
 ## Store 인터페이스
 
@@ -59,7 +59,7 @@ API 서버 (server.mjs → src/app.mjs)
 | `roomsOf(uid)` | `uid`가 탈퇴하지 않은 멤버인 방. `FirestoreStore`는 모든 방을 읽지 않고 `_memberUids` 색인으로 그 방만 읽음 |
 | `appendEvent(roomId, ev)` | 비서 기록 추가. `seq`(방마다 1부터)와 `at`(ISO 시각)을 채워서 돌려줌 |
 | `listEvents(roomId, afterSeq = 0)` | `seq > afterSeq`인 기록 |
-| `eraseUser(uid)` (선택 확장) | 탈퇴 기능을 제공하는 저장소에서 구현. 개인정보 삭제·방별 무작위 익명 UID 치환을 원자적으로 수행하고 `{ removedLinks }` 반환. 없으면 탈퇴 API는 데이터 변경 없이 503 |
+| `eraseUser(uid)` (선택 확장) | 탈퇴 기능을 제공하는 저장소에서 구현. 개인정보 삭제·방별 무작위 익명 UID 치환을 원자적으로 수행하고 `{ removedLinks }` 반환. 없으면 탈퇴 API는 데이터 변경 없이 503. 래퍼를 거치지 않고 쓰므로 잠그는 칸(`SEALED_FIELDS`)에는 `null`·빈 목록 `[]`·칸 삭제만 쓴다(그 밖의 평문은 읽을 때 오류) |
 
 계약 테스트는 `test/store.test.mjs`예요. `FirestoreStore`도 에뮬레이터가 있으면 같은 테스트를 돌려요(`npm run test:emulators`). Firestore에서만 생기는 일(동시 seq, 영수증 사진, 탈퇴 트랜잭션, 보안 규칙)은 `test/firestore.test.mjs`가 봐요.
 
@@ -74,22 +74,23 @@ API 서버 (server.mjs → src/app.mjs)
 
 방·계정 API와 tick은 서버 안의 줄(`src/state-locks.mjs`)에 세워요. 한 방의 일은 그 방의 줄에 서고, 탈퇴·프로필 변경·tick처럼 여러 방에 걸친 일은 진행 중인 방의 일이 끝난 뒤 혼자 돌아요. 그래서 AI 요청 도중 탈퇴/철회로 데이터가 되살아나는 경쟁을 막아요. `FirestoreStore`의 `eraseUser`와 `appendEvent`는 트랜잭션이지만, 다른 API의 '읽고 고쳐 쓰기'는 여전히 이 줄에 기대요. 그래서 Cloud Run은 `--max-instances 1`을 유지해요(QR 토큰·AI 캐시·호출 제한도 서버 메모리라 같은 조건이에요). 인스턴스를 늘리려면 이 경로들을 트랜잭션으로 옮겨야 해요. 해당 능력이 없는 저장소에 탈퇴 기능을 조용히 활성화하지 않아요.
 
-### 계좌 칸 암호화 (`src/store/encrypted.mjs`)
+### 계좌·위치 요약 칸 암호화 (`src/store/encrypted.mjs`)
 
-`server.mjs`는 Store를 `encryptedStore(store, key)`로 감싸요. 계좌번호가 들어가는 칸(`agents.payout`, `transfers.link`, `transfers.fallback`)은 넣을 때 AES-256-GCM으로 잠그고(`enc:v1:…`, `src/security/seal.mjs`) 꺼낼 때 풀어요. 그래서 다른 코드는 평문을 넣고 평문을 받고, 저장소에는 잠긴 글자만 남아요.
+`server.mjs`는 Store를 `encryptedStore(store, key)`로 감싸요. 계좌번호가 들어가는 칸(`agents.payout`, `transfers.link`, `transfers.fallback`)과 위치 요약이 들어가는 칸(`locationEvidence`의 `summary`·`leftAt`·`stayedUntil`·`nextAt`·`nextHome`, 요약을 베낀 `disputes.evidence`, 요약을 보고 쓴 `disputes.proposal`)은 넣을 때 AES-256-GCM으로 잠그고(`enc:v1:…`, `src/security/seal.mjs`) 꺼낼 때 풀어요. 그래서 다른 코드는 평문을 넣고 평문을 받고, 저장소에는 잠긴 글자만 남아요.
 
 - 잠긴 값에는 `컬렉션/문서id/칸` 이름표가 묶여 있어서 다른 문서로 옮겨 붙이면 풀리지 않아요. 그래서 잠긴 문서의 `id`를 바꾸는 코드는 이 래퍼로 풀었다가 다시 넣어야 해요.
 - 잠긴 칸이 평문이거나 풀리지 않으면 오류를 내요. 잠긴 칸으로는 `list` 검색을 할 수 없어요.
-- 열쇠는 `PAYOUT_ENC_KEY`(base64, 32바이트)예요. 배포(`NODE_ENV=production`, `Dockerfile`이 넣어 줌)에서 없으면 서버가 시작하지 않고, 로컬에서는 개발용 열쇠를 써요.
+- 비어 있는 값(`null`, 빈 목록 `[]`)은 잠그지 않아요. 탈퇴 처리(`src/store/erase-user.mjs`)가 래퍼를 거치지 않고 `disputes.evidence`를 `[]`로 비우기 때문이에요. 잠그는 칸을 늘릴 때는 탈퇴 처리가 그 칸에 무엇을 쓰는지 같이 확인해요.
+- 열쇠는 `PAYOUT_ENC_KEY`(base64, 32바이트) 하나예요. 이름은 계좌용이지만 위치 요약도 이 열쇠로 잠가요. 배포(`NODE_ENV=production`, `Dockerfile`이 넣어 줌)에서 없으면 서버가 시작하지 않고, 로컬에서는 개발용 열쇠를 써요.
 - 진짜 저장소에 `eraseUser`(#2 탈퇴)가 있으면 그대로 전달하고, 그 사람이 낀 송금의 링크만 평문으로 풀어서 돌려줘요(QR 토큰 무효화용). 풀리지 않는 링크는 어차피 지울 값이라 건너뛰어요.
-- `FirestoreStore`(#3)도 `server.mjs`의 같은 자리에서 감싸요. `tick()`은 모든 방의 송금을 풀어 보므로, 열쇠가 바뀌거나 값 하나가 망가지면 모든 방의 알림이 멈춰요. 그래서 Firestore에 계좌가 쌓이기 시작한 뒤에는 `PAYOUT_ENC_KEY`를 절대 바꾸지 않아요.
+- `FirestoreStore`(#3)도 `server.mjs`의 같은 자리에서 감싸요. 다만 `tick()`은 모든 방의 송금을, 그 앞에 도는 `sweep()`은 위치 동의가 끝난 방의 이의를 풀어 보므로, 열쇠가 바뀌거나 값 하나가 망가지면 모든 방의 알림이 멈춰요. 그래서 Firestore에 계좌·위치 요약이 쌓이기 시작한 뒤에는 `PAYOUT_ENC_KEY`를 절대 바꾸지 않아요.
 
-**왜 잠그나.** 「개인정보의 안전성 확보조치 기준」(개인정보보호위원회고시 제2025-9호) 제7조제2항은 이용자의 계좌번호를 안전한 암호 알고리즘으로 암호화해서 저장하라고 정해요. 이 서비스에 받을 계좌를 등록하는 사람이 여기서 말하는 이용자예요. AES-256은 개인정보보호위원회 안내서(2024.10)가 권장 예시로 드는 알고리즘이에요. 조사한 내용은 PR #22 코멘트에 정리했어요.
+**왜 잠그나.** 「개인정보의 안전성 확보조치 기준」(개인정보보호위원회고시 제2025-9호) 제7조제2항은 이용자의 계좌번호를 안전한 암호 알고리즘으로 암호화해서 저장하라고 정해요. 이 서비스에 받을 계좌를 등록하는 사람이 여기서 말하는 이용자예요. AES-256은 개인정보보호위원회 안내서(2024.10)가 권장 예시로 드는 알고리즘이에요. 조사한 내용은 PR #22 코멘트에 정리했어요. 위치 요약은 이 조항이 말하는 계좌번호는 아니지만, 이의에 붙는 민감한 정보라 같은 열쇠로 함께 잠가요.
 
-- 지금 저장소는 서버 메모리라서 이 잠금이 실제로 막는 건 거의 없어요. 효과는 #3 Firestore에 계좌가 계속 남기 시작할 때부터예요. 그래도 먼저 넣은 건, 평문이 쌓인 뒤에 잠그면 기존 값을 다시 잠그는 이전 작업이 생기기 때문이에요.
+- 지금 저장소는 서버 메모리라서 이 잠금이 실제로 막는 건 거의 없어요. 효과는 #3 Firestore에 계좌·위치 요약이 계속 남기 시작할 때부터예요. 그래도 먼저 넣은 건, 평문이 쌓인 뒤에 잠그면 기존 값을 다시 잠그는 이전 작업이 생기기 때문이에요.
 - 인터넷 구간으로 주고받을 때의 암호화(같은 조 제4항)는 Cloud Run·GitHub Pages의 HTTPS가 맡아요. QR에도 계좌가 아니라 15분짜리 토큰만 담아요.
 - 열쇠 관리 절차(같은 조 제6항)는 정보주체 10만 명 이상인 대기업·중견기업·공공기관, 100만 명 이상인 중소기업·단체의 의무라 지금 규모에는 해당하지 않아요. 그래도 열쇠는 Secret Manager에만 두고 버전 `1`로 고정해서 바꾸지 않아요.
-- 인증은 #2의 Firebase ID 토큰 검증으로 보호해요. 운영에서는 개발용 신원 헤더를 받지 않아요. 암호화는 인증을 대체하지 않으며, 서버 권한으로 읽는 동안에는 필요한 계좌 정보가 복호화돼요.
+- 인증은 #2의 Firebase ID 토큰 검증으로 보호해요. 운영에서는 개발용 신원 헤더를 받지 않아요. 암호화는 인증을 대체하지 않으며, 서버 권한으로 읽는 동안에는 필요한 계좌·위치 요약이 복호화돼요.
 
 ## 컬렉션과 Firestore 경로
 

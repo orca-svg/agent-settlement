@@ -96,7 +96,7 @@ npm test           # 계산 sanity check
 
 - 키가 없거나 서버에 닿지 않으면 **규칙 모드**로 동작합니다. 이때 화면 상단에도 그렇게 표시합니다.
 - 모델은 `GEMINI_MODEL`로 고를 수 있습니다. 생략하면 이 키로 쓸 수 있는 최신 Flash 모델을 자동으로 고릅니다.
-- 받을 계좌는 저장소에 넣을 때 잠급니다(#8, #10). 열쇠는 `PAYOUT_ENC_KEY`(base64, 32바이트)입니다. 로컬에서는 없어도 개발용 열쇠로 잠그고 경고만 띄웁니다. 직접 정하려면 `.env`에 추가합니다(bash·Git Bash 기준. 앞의 줄바꿈은 `.env` 마지막 줄에 붙지 않게 하려는 것).
+- 받을 계좌와 이의에 붙인 위치 요약은 저장소에 넣을 때 잠급니다(#7, #8, #10). 열쇠는 `PAYOUT_ENC_KEY`(base64, 32바이트)입니다. 로컬에서는 없어도 개발용 열쇠로 잠그고 경고만 띄웁니다. 직접 정하려면 `.env`에 추가합니다(bash·Git Bash 기준. 앞의 줄바꿈은 `.env` 마지막 줄에 붙지 않게 하려는 것).
   ```bash
   printf '\nPAYOUT_ENC_KEY=%s\n' "$(node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64'))")" >> .env
   ```
@@ -125,7 +125,7 @@ gcloud run deploy agent-settlement --source . --region asia-northeast1 \
   --set-env-vars NODE_ENV=production,CRON_SECRET=<임의의 긴 문자열>
 ```
 
-- 계좌 암호화 열쇠(`PAYOUT_ENC_KEY`)는 **위 배포 명령을 처음 실행하기 전에** 한 번만 Secret Manager에 만들고, Cloud Run 서비스 계정이 읽을 수 있게 합니다(bash·Git Bash 기준). 배포(`NODE_ENV=production`, `Dockerfile`이 넣어 줌)에서 이 열쇠가 없으면 서버가 시작하지 않고 이전 버전이 계속 동작합니다. **열쇠를 잃거나 바꾸면 이미 저장된 계좌를 풀 수 없으니**(#3 Firestore 이후 특히) 한 번 만든 열쇠는 그대로 둡니다. 그래서 배포 명령은 `latest` 대신 버전 `1`로 고정합니다.
+- 계좌·위치 요약 암호화 열쇠(`PAYOUT_ENC_KEY`)는 **위 배포 명령을 처음 실행하기 전에** 한 번만 Secret Manager에 만들고, Cloud Run 서비스 계정이 읽을 수 있게 합니다(bash·Git Bash 기준). 배포(`NODE_ENV=production`, `Dockerfile`이 넣어 줌)에서 이 열쇠가 없으면 서버가 시작하지 않고 이전 버전이 계속 동작합니다. **열쇠를 잃거나 바꾸면 이미 저장된 계좌와 위치 요약을 풀 수 없으니**(#3 Firestore 이후 특히) 한 번 만든 열쇠는 그대로 둡니다. 그래서 배포 명령은 `latest` 대신 버전 `1`로 고정합니다.
   ```bash
   # 0) 서비스 계정 확인: 비어 있거나 …-compute@developer.gserviceaccount.com이면 2)를 그대로, 다른 계정이면 2)의 --member를 그 계정으로 바꾼다
   gcloud run services describe agent-settlement --region asia-northeast1 --format='value(spec.template.spec.serviceAccountName)'

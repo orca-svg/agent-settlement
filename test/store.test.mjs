@@ -1,5 +1,5 @@
 // Store 계약: MemoryStore와 이후의 FirestoreStore(#3)가 똑같이 지켜야 하는 동작.
-// 계좌 칸을 잠그는 래퍼(encryptedStore, #8·#10)도 같은 계약을 지켜야 하므로 두 구현에 똑같이 돌린다.
+// 계좌·위치 요약 칸을 잠그는 래퍼(encryptedStore, #8·#10)도 같은 계약을 지켜야 하므로 두 구현에 똑같이 돌린다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MemoryStore } from '../src/store/memory.mjs';
