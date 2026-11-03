@@ -1,7 +1,7 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode } from '../public/ui.js';
+import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp } from '../public/ui.js';
 
 test('allocButton: 나눈 뒤 바뀐 게 없으면 막고, 남은 일을 알려 준다', () => {
   assert.deepEqual(allocButton({ allocated: false, fresh: false, flagged: 0 }), { label: '비서에게 나누기 맡기기', disabled: false, hint: '' });
@@ -113,4 +113,24 @@ test('receiptPickers: 휴대폰·태블릿은 카메라로 찍기와 앨범에�
 
 test('receiptPickers: 컴퓨터는 capture 없이 파일 고르기 하나만', () => {
   assert.deepEqual(pickers(receiptPickers(false)), [['사진 고르기', null]]);
+});
+
+// 밀어서 보낸 뒤 안내. iPhone Safari는 'Open in "Toss"?'를 묻는 동안 페이지가 그대로 보여서, 시간이 지났다고 실패로 단정하면
+// 사용자가 Open을 눌러 토스가 열려도 '열리지 않았어요'가 남는다. 시간이 지나면 복사 안내만 띄우고, 나중에 토스로 넘어갔다 돌아오면 '보냈나요?'로 바꾼다
+test('sendFollowUp: iOS 확인 창 때문에 늦게 앱으로 넘어가도 돌아오면 보냈는지 묻는다', () => {
+  let p = { id: 't1', left: false };
+  let r = sendFollowUp(p, 'timeout');
+  assert.equal(r.note, 'fallback');
+  assert.deepEqual(r.pending, p); // 기다림을 끝내지 않는다
+  r = sendFollowUp(r.pending, 'hidden');
+  assert.equal(r.note, null);
+  assert.equal(r.pending.left, true);
+  r = sendFollowUp(r.pending, 'visible');
+  assert.deepEqual(r, { pending: null, note: 'back' });
+});
+
+test('sendFollowUp: 바로 앱으로 넘어갔으면 시간이 지나도 실패 안내를 띄우지 않는다', () => {
+  let r = sendFollowUp({ id: 't1', left: false }, 'hidden');
+  assert.equal(sendFollowUp(r.pending, 'timeout').note, null);
+  assert.deepEqual(sendFollowUp(null, 'visible'), { pending: null, note: null });
 });
