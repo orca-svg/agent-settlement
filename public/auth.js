@@ -18,7 +18,11 @@ export function initAuth() {
     if (options.emulator && ['localhost', '127.0.0.1'].includes(location.hostname)) auth.connectAuthEmulator(instance, `http://${options.emulator}`);
     await instance.authStateReady();
     return options;
-  })();
+  })().catch(error => {
+    // A temporary config/CDN failure must not poison every later API request.
+    starting = undefined;
+    throw error;
+  });
 }
 export const authOptions = () => options;
 export const currentUser = () => instance?.currentUser || null;

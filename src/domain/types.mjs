@@ -101,7 +101,7 @@ export {};
 /** #2. Public profile; identity always comes from a verified token. @typedef {{ id: string, name: string, color: string }} UserProfile */
 /** Minimal deletion/retry gate, never returned in room data. @typedef {{ id: string }} DeletedUser */
 /** #7. Maximum 24-hour opt-in; id is JSON.stringify([roomId, uid]). @typedef {{ id: string, roomId: string, uid: string, expiresAt: string }} LocationConsent */
-/** Raw coordinates and movement paths are deliberately not part of this type.
+  /** Checkin and checkout both supply instantaneous evidence. Raw coordinates and movement paths are deliberately not part of this type.
  * @typedef {{ id: string, roomId: string, uid: string, expenseId: string, action: 'checkin'|'checkout', relation?: 'near'|'away'|'uncertain', summary: string, observedAt: string }} LocationEvidence
  */
 /** Optional Store capability needed to enable account deletion. Atomically deletes

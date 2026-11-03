@@ -112,6 +112,25 @@ test('location requires consent, rejects coordinates/stale times/cross-room data
   assert.equal((await store.listEvents('room-one')).length, events.length);
 });
 
+test('checkin alone reaches the counterparty as evidence and revocation removes it', async t => {
+  const { request, exp, now, store } = await setup(t);
+  const path = '/api/rooms/room-one/location';
+  assert.equal((await request(`${path}/consent`, { body: { agree: true, expiresAt: new Date(+now() + 60000).toISOString() } })).status, 200);
+  assert.equal((await request(path, { body: { expenseId: exp.id, action: 'checkin', relation: 'near', observedAt: now().toISOString() } })).status, 200);
+  assert.equal((await request('/api/rooms/room-one/disputes', { body: { expenseId: exp.id, claim: '참석 근거를 확인해 주세요' } })).status, 200);
+  const d = (await store.list('disputes'))[0];
+  assert.equal(d.evidence.length, 1);
+  assert.equal(d.evidence[0].relation, 'near');
+  assert.equal(d.evidence[0].requiresHumanApproval, true);
+  assert.match(d.evidence[0].summary, /체크인/);
+  const seen = async uid => (await (await request('/api/rooms/room-one', { uid })).json()).disputes.find(x => x.id === d.id);
+  assert.equal((await seen(exp.payer)).evidence[0].summary, d.evidence[0].summary);
+  const outsider = (await store.get('rooms', 'room-one')).members.find(m => !['me', exp.payer].includes(m.uid));
+  assert.doesNotMatch(JSON.stringify(await seen(outsider.uid)), /한국 시각|체크인|지정 장소/);
+  assert.equal((await request(`${path}/revoke`, { body: {} })).status, 200);
+  assert.deepEqual((await seen(exp.payer)).evidence, []);
+});
+
 test('revocation removes attached summaries and reopens an unconfirmed proposal', async t => {
   const { request, exp, now, store } = await setup(t);
   const path = '/api/rooms/room-one/location';

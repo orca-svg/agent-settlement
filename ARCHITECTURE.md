@@ -85,6 +85,8 @@ API 서버 (server.mjs → src/app.mjs)
 
 ### #7 위치 근거의 판단과 승인 (11/3 리뷰 반영)
 
+체크인과 체크아웃 모두 해당 지출의 이의 근거로 전달해요. 체크인만 기록한 경우도 제외하지 않으며, 각 기록은 해당 순간에 대한 요약 한 줄이에요. 두 기록이 있어도 그 사이의 연속 체류나 부재를 추정하지 않아요.
+
 `LocationEvidence.relation`은 `near`·`away`·`uncertain`을 보존해요. `Evidence`에는 이 값과 `observedAt`, `requiresHumanApproval=true`를 전달해요. `uncertain`은 측정 판단 불가일 때만 true예요. 이 필드가 없던 옛 기록은 uncertain으로 읽고 문구에서 결과를 추측하지 않아요. 좌표는 여전히 서버로 보내지 않아요.
 
 중재 모델 출력의 줄별 `evidenceConflict`가 true인 경우만 서버가 그 줄의 confidence를 0.49 이하로 제한해요. 다른 줄의 확신도는 그대로예요. 모델의 의미 판단은 완전한 충돌 검출을 보장하지 않아요. 규칙 fallback에서는 충돌을 추측하지 않아요. 브라우저 보고가 있으면 confidence와 별도로 `confirmed=false`이며, 기존 `left_at`과 섞여 있어도 자동 동의를 하지 않아요. 두 당사자의 명시적 동의 후에만 배분을 확정해요. `observedAt`은 순간 측정이지 계속 자리를 비운 시각이 아니므로 `time/left_at`으로 변환하지 않아요.

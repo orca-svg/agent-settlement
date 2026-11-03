@@ -35,7 +35,7 @@ export function createLocationService({ store, clock }) {
   async function evidenceFor(uid, expense, room) {
     if (!await active(uid, room.id)) return [];
     const records = await store.list('locationEvidence', { uid, roomId: room.id });
-    return records.filter(e => e.expenseId === expense.id && e.action === 'checkout').map(e => ({
+    return records.filter(e => e.expenseId === expense.id && ['checkin', 'checkout'].includes(e.action)).map(e => ({
       kind: 'text', summary: e.summary, locationId: e.id, source: 'browser_self_report',
       // Older records have no structured result; do not infer it from prose.
       relation: e.relation || 'uncertain', uncertain: !e.relation || e.relation === 'uncertain',
