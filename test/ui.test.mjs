@@ -1,7 +1,14 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, topic, subj, whose, restNote, allocLabel, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, disputeWaiting, disputeChoices, disputeNote, disputeStatus, disputeLive } from '../public/ui.js';
+import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, disputeWaiting, disputeChoices, disputeNote, disputeStatus, disputeLive } from '../public/ui.js';
+
+test('allocButton: 나눈 뒤 바뀐 게 없으면 막고, 남은 일을 알려 준다', () => {
+  assert.deepEqual(allocButton({ allocated: false, fresh: false, flagged: 0 }), { label: '비서에게 나누기 맡기기', disabled: false, hint: '' });
+  assert.deepEqual(allocButton({ allocated: true, fresh: false, flagged: 1 }), { label: '비서에게 다시 나누기', disabled: false, hint: '' }); // 기억이 바뀌었다
+  assert.deepEqual(allocButton({ allocated: true, fresh: true, flagged: 1 }), { label: '비서가 나누기를 마쳤어요', disabled: true, hint: '확인 필요한 1줄만 확인하면 끝나요.' });
+  assert.deepEqual(allocButton({ allocated: true, fresh: true, flagged: 0 }), { label: '나누기를 모두 마쳤어요', disabled: true, hint: '지출을 고치거나 비서의 기억이 바뀌면 다시 나눌 수 있어요.' });
+});
 
 test('조사: 받침에 따라 은/는, 이/가, 나는 내가', () => {
   assert.equal(topic('오차즈케'), '오차즈케는');
@@ -81,6 +88,19 @@ test('logItemHtml: 안 읽은 기록 표시와 덧붙일 내용', () => {
   assert.match(html, /<details><\/details>/);
 });
 
+// 비서끼리 기록은 시스템 로그가 아니라 비서들의 대화처럼 보인다: 받는 사람은 '→' 대신 '○○에게',
+// 근거(규칙·수치)는 말풍선 밖 '왜 그렇게 했나요'를 눌러야 펼쳐지고, 같은 분의 시각은 한 번만 보인다
+test('logItemHtml: 받는 사람은 문장처럼, 근거는 펼쳐 보기로, 빈 시각은 그리지 않는다', () => {
+  const html = logItemHtml({ avatar: '', who: '민수의 비서', to: '중재 비서', time: '9:01', text: '동의할게요', meta: '규칙: 근거와 맞으면 <동의>' });
+  assert.match(html, /<span class="to">중재 비서에게<\/span>/);
+  assert.doesNotMatch(html, /→/);
+  assert.match(html, /<p class="text">동의할게요<\/p>/);
+  assert.match(html, /<details class="why"><summary>왜 그렇게 했나요<\/summary><p>규칙: 근거와 맞으면 &lt;동의&gt;<\/p><\/details>/);
+  const quiet = logItemHtml({ avatar: '', who: '나의 비서', time: '', text: '다음 말' });
+  assert.doesNotMatch(quiet, /<time>/);
+  assert.doesNotMatch(quiet, /class="why"|class="to"/);
+});
+
 test('qrImageUrl: 데이터를 인코딩해 QR 이미지 주소를 만든다', () => {
   assert.equal(
     qrImageUrl('supertoss://send?bank=토스뱅크&accountNo=1&amount=1'),
@@ -95,6 +115,17 @@ test('qrIsFresh: 같은 송금의 QR 토큰이 1분 넘게 남았을 때만 그�
   assert.equal(qrIsFresh(qr, 't2', now), false); // 다른 송금의 토큰
   assert.equal(qrIsFresh(qr, 't1', Date.parse('2026-11-25T00:14:30Z')), false); // 30초 남음 → 새로 받는다
   assert.equal(qrIsFresh(null, 't1', now), false);
+});
+
+test('sendMode: 컴퓨터에서 토스 링크가 있으면 QR만, 휴대폰이나 링크가 없으면 슬라이더', () => {
+  const link = { link: 'supertoss://send?bank=x', fallback: { bank: 'x', accountNo: '1' } };
+  const copyOnly = { link: null, fallback: { bank: '경남은행', accountNo: '1' } };
+  const none = { link: null, fallback: null };
+  assert.equal(sendMode(link, { computer: true }), 'qr');
+  assert.equal(sendMode(link, { computer: false }), 'slider');
+  assert.equal(sendMode(copyOnly, { computer: true }), 'slider'); // QR로 열 토스 링크가 없으니 계좌 복사 슬라이더를 남긴다
+  assert.equal(sendMode(none, { computer: true }), 'no-payout');
+  assert.equal(sendMode(none, { computer: false }), 'no-payout');
 });
 
 test('qrImageUrl: 빈 값이면 null', () => {
@@ -122,4 +153,40 @@ test('disputeStatus: 이의 목록의 한 줄. 열린 이의는 누구를 기다
 
 test('disputeLive: 열린(open·proposed) 이의만', () => {
   assert.deepEqual(['open', 'proposed', 'resolved', 'withdrawn', 'dismissed', 'superseded'].map((status) => disputeLive({ status })), [true, true, false, false, false, false]);
+});
+
+// 영수증 사진 버튼을 (라벨, capture 여부)로 읽는다. 모두 영수증 입력(data-receipt)이고 이미지만 받아야 한다.
+const pickers = (html) => [...html.matchAll(/<label[^>]*>([^<]+)<input([^>]*)>/g)].map(([, label, attrs]) => {
+  assert.match(attrs, /type="file"/);
+  assert.match(attrs, /accept="image\/\*"/);
+  assert.match(attrs, /data-receipt/);
+  return [label.trim(), attrs.match(/capture="([^"]*)"/)?.[1] ?? null];
+});
+
+test('receiptPickers: 휴대폰·태블릿은 카메라로 찍기와 앨범에서 고르기를 따로 둔다', () => {
+  assert.deepEqual(pickers(receiptPickers(true)), [['사진 찍기', 'environment'], ['앨범에서 고르기', null]]);
+});
+
+test('receiptPickers: 컴퓨터는 capture 없이 파일 고르기 하나만', () => {
+  assert.deepEqual(pickers(receiptPickers(false)), [['사진 고르기', null]]);
+});
+
+// 밀어서 보낸 뒤 안내. iPhone Safari는 'Open in "Toss"?'를 묻는 동안 페이지가 그대로 보여서, 시간이 지났다고 실패로 단정하면
+// 사용자가 Open을 눌러 토스가 열려도 '열리지 않았어요'가 남는다. 시간이 지나면 복사 안내만 띄우고, 나중에 토스로 넘어갔다 돌아오면 '보냈나요?'로 바꾼다
+test('sendFollowUp: iOS 확인 창 때문에 늦게 앱으로 넘어가도 돌아오면 보냈는지 묻는다', () => {
+  let p = { id: 't1', left: false };
+  let r = sendFollowUp(p, 'timeout');
+  assert.equal(r.note, 'fallback');
+  assert.deepEqual(r.pending, p); // 기다림을 끝내지 않는다
+  r = sendFollowUp(r.pending, 'hidden');
+  assert.equal(r.note, null);
+  assert.equal(r.pending.left, true);
+  r = sendFollowUp(r.pending, 'visible');
+  assert.deepEqual(r, { pending: null, note: 'back' });
+});
+
+test('sendFollowUp: 바로 앱으로 넘어갔으면 시간이 지나도 실패 안내를 띄우지 않는다', () => {
+  let r = sendFollowUp({ id: 't1', left: false }, 'hidden');
+  assert.equal(sendFollowUp(r.pending, 'timeout').note, null);
+  assert.deepEqual(sendFollowUp(null, 'visible'), { pending: null, note: null });
 });

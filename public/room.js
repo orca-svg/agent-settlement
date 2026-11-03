@@ -1,11 +1,13 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, ARROW, qrImageUrl, qrIsFresh, disputeWaiting, disputeChoices, disputeNote, disputeRejected, disputeLive, disputeStatus, CROSS } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, CROSS, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, COMPUTER_QUERY, disputeWaiting, disputeChoices, disputeNote, disputeRejected, disputeLive, disputeStatus } from './ui.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
+import { initAuth, authOptions, onSessionChange } from './auth.js';
 import { BANKS } from './banks.js';
+import { readVisits, departure, timelineSummary, expenseWindow, kstTime, keepForSettlement } from './timeline.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
@@ -13,21 +15,25 @@ const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
-const nameOf = (uid) => ({ system: '시스템', mediator: '중재 비서', all: '모두' })[uid] ?? members().find((m) => m.uid === uid)?.name ?? uid;
+const nameOf = (uid) => ({ system: '정산방', mediator: '중재 비서', all: '모두' })[uid] ?? members().find((m) => m.uid === uid)?.name ?? uid;
 const agentName = (uid) => (uid === 'system' || uid === 'mediator' ? nameOf(uid) : `${nameOf(uid)}의 비서`);
 const colorOf = (uid) => {
+  const profileColor = members().find(m => m.uid === uid)?.color;
+  if (/^#[0-9a-f]{6}$/i.test(profileColor)) return profileColor;
   const i = members().findIndex((m) => m.uid === uid);
   return i < 0 ? '#8e8e93' : `var(--p${i % 4})`;
 };
 const avatar = (uid, cls = '') => avatarHtml(nameOf(uid)[0], colorOf(uid), cls);
-const timeOf = (iso) => new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Seoul' });
+// 기록 시각은 분까지만(로그가 아니라 대화)
+const timeOf = (iso) => new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Seoul' });
 
 // 좁은 화면에서 상단바 종으로 여는 비서끼리 기록. 마지막으로 본 기록은 방·사람마다 기억한다
 const seenKey = () => `agent-settlement.seen.${roomId}.${currentUid()}`;
 const logPop = createLogPop({
   itemHtml: (e, opts) => logItemHtml({
     avatar: avatar(e.from, 'agent'),
-    who: `${agentName(e.from)} → ${nameOf(e.to)}`,
+    who: agentName(e.from),
+    to: nameOf(e.to),
     time: timeOf(e.at),
     text: e.text,
     meta: e.meta,
@@ -90,6 +96,32 @@ function remember(d) {
     localStorage.setItem(LAST_KEY, JSON.stringify({ currency: d.currency, payer: d.payer, method: d.method, present: d.present }));
   } catch {}
 }
+// 정산당 한 번 올린 타임라인(#7). 이 정산 지출 시간대의 방문 시각만 이 브라우저에 7일 두고 서버로는 보내지 않는다.
+// 저장이 막힌 브라우저에서도 지금 화면에서는 쓰도록 메모리에도 둔다. 로그아웃하면 지운다(auth.js)
+const TIMELINE_DAYS = 7;
+const timelineKey = () => `agent-settlement.timeline.${roomId}.${state.data?.me.uid}`;
+const visitsInMemory = {};
+function savedVisits() {
+  const key = timelineKey();
+  try {
+    const saved = JSON.parse(localStorage.getItem(key));
+    if (saved && Date.now() - saved.savedAt < TIMELINE_DAYS * 86400_000) return saved.visits;
+    localStorage.removeItem(key);
+  } catch {}
+  return visitsInMemory[key] ?? null;
+}
+function saveVisits(visits) {
+  visitsInMemory[timelineKey()] = visits;
+  try {
+    localStorage.setItem(timelineKey(), JSON.stringify({ savedAt: Date.now(), visits }));
+  } catch {}
+}
+function forgetVisits() {
+  delete visitsInMemory[timelineKey()];
+  try {
+    localStorage.removeItem(timelineKey());
+  } catch {}
+}
 // 외화는 환율이 있는 날짜만 고를 수 있다
 const fxDates = () => Object.keys(state.data.room.fx?.base ?? {}).sort();
 function fitDate(d) {
@@ -98,7 +130,7 @@ function fitDate(d) {
 }
 function newDraft() {
   const { room, me } = state.data;
-  const uids = room.members.map((m) => m.uid);
+  const uids = room.members.filter(m => !m.deleted).map((m) => m.uid);
   const last = lastUsed();
   const currencies = ['KRW', room.fx?.currency].filter(Boolean);
   return fitDate({
@@ -272,12 +304,14 @@ function expSheetHtml(exp) {
   const { krw, how } = toKrw(exp, room, room.policy);
   const s = shares(exp, room, room.policy);
   const busy = state.allocating === exp.id;
+  const ab = allocButton({ allocated: Boolean(exp.alloc), fresh: Boolean(exp.allocFresh), flagged: (exp.items ?? []).filter((it) => isFlagged(exp.alloc?.[it.id])).length });
   const lines = exp.items?.length
     ? `<section class="group"><h3 class="group-label"><span>영수증 ${exp.items.length}줄 · 어떻게 나눌까요</span><span>${esc(state.allocSource[exp.id] ?? (exp.alloc ? '' : '나누기 전'))}</span></h3>
         ${busy ? '<div class="next" aria-busy="true" style="margin:0 0 12px"><h2 style="font-size:1.0625rem">비서들이 기억으로 나누는 중이에요</h2><div class="progress"><i></i></div></div>' : ''}
         <div class="list">${linesHtml(exp)}</div>
         <p class="group-note">${exp.alloc ? '이름을 눌러 고친 뒤 확인하면 그 줄은 더 묻지 않아요.' : '각자의 비서가 공유한 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄은 짐작하지 않고 물어봐요.'}</p>
-        <button class="btn ${exp.alloc ? 'secondary' : ''}" style="width:100%;margin-top:10px" data-action="allocate-exp" data-id="${esc(exp.id)}" ${busy ? 'disabled' : ''}>${exp.alloc ? '비서에게 다시 나누기' : '비서에게 나누기 맡기기'}</button></section>`
+        <button class="btn ${exp.alloc ? 'secondary' : ''}" style="width:100%;margin-top:10px" data-action="allocate-exp" data-id="${esc(exp.id)}" ${busy || ab.disabled ? 'disabled' : ''}>${ab.label}</button>
+        ${ab.hint ? `<p class="group-note" style="margin-top:8px">${esc(ab.hint)}</p>` : ''}</section>`
     : `<p class="how">영수증 줄이 없어서 함께 있던 ${exp.present.length}명이 똑같이 나눠요.</p>`;
   return `<div class="big"><div class="amt">${won(krw)}</div>
       <p class="sub">${money(amountOf(exp), exp.currency)} · ${esc(nameOf(exp.payer))} ${exp.method === 'card' ? '카드' : '현금'} · ${dayLabel(exp.date)} ${esc(exp.time)}</p></div>
@@ -420,6 +454,7 @@ async function act(name, d) {
 
 // ---------------------------------------------------------------- 화면
 function noRoom() {
+  if (!authOptions().dev) return '<section class="hero"><h1>내 정산 방</h1><p><a class="btn" href="account.html">로그인·내 방 목록</a></p></section>';
   const failed = state.error?.status === 'seed';
   return `<section class="hero"><h1>열 방이 없어요</h1>
     <p class="sub">실제 방 만들기·참가하기는 #4에서 생겨요. 그전까지는 개발용 데모 방으로 확인해요.</p></section>
@@ -429,10 +464,11 @@ function noRoom() {
 }
 
 function whoPicker() {
+  if (!authOptions().dev) return '';
   const me = currentUid();
-  return `<section class="group"><h2 class="group-label"><span>누구로 볼까요?</span><span>개발용 · 로그인(#2)이 생기면 사라져요</span></h2>
+  return `<section class="group"><h2 class="group-label"><span>누구로 볼까요?</span><span>개발용 시드 신원</span></h2>
     <div class="seg" role="radiogroup" aria-label="보는 사람" data-seg="who"><span class="seg-thumb"></span>
-      ${members().map((m) => `<button type="button" role="radio" aria-checked="${m.uid === me}" data-action="who" data-id="${esc(m.uid)}">${esc(m.name)}</button>`).join('')}
+      ${members().filter(m => !m.deleted).map((m) => `<button type="button" role="radio" aria-checked="${m.uid === me}" data-action="who" data-id="${esc(m.uid)}">${esc(m.name)}</button>`).join('')}
     </div></section>`;
 }
 
@@ -503,8 +539,8 @@ function transfersSection() {
   const { transfers, ledger } = state.data;
   const live = transfers.filter((t) => t.status !== 'superseded');
   const list = live.length ? live : settle(ledger).map((t) => ({ ...t, status: 'preview' }));
-  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: '송금 앱 열림', sent: '보냈어요', confirmed: '받았어요' })[t.status] ?? t.status;
   const me = currentUid();
+  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: '송금 앱 열림', sent: !t.notReceivedAt ? '보냈어요' : t.to === me ? '확인을 부탁했어요' : '아직 못 받았대요', confirmed: '받았어요' })[t.status] ?? t.status;
   const rows = list.map((t) => {
     const mine = t.id && (t.from === me || t.to === me);
     const tag = mine ? `button type="button" class="row" data-action="open-transfer" data-id="${esc(t.id)}"` : 'div class="row"';
@@ -523,7 +559,7 @@ const seg = (key, field, options, value) => `<div class="seg" role="radiogroup" 
 
 function addSheetHtml() {
   const d = state.draft;
-  const { room } = state.data;
+  const room = { ...state.data.room, members: state.data.room.members.filter(m => !m.deleted) };
   const currencies = ['KRW', room.fx?.currency].filter(Boolean);
   const dateField = d.currency === 'KRW'
     ? `<input type="date" data-field="date" value="${esc(d.date)}" aria-label="날짜">`
@@ -558,10 +594,11 @@ function photoPickHtml() {
   if (!state.aiReady) {
     return `<p class="preview-note">사진 읽기는 AI 서버가 필요해요. 지금은 '직접 입력'을 써 주세요.</p>`;
   }
-  return `<section class="next" style="margin:0"><h2>영수증을 찍거나 골라 주세요</h2>
+  // 터치가 주 입력인 기기(휴대폰·태블릿)면 찍기와 앨범에서 고르기를 따로 둔다(receiptPickers)
+  const touch = matchMedia('(pointer: coarse)').matches;
+  return `<section class="next" style="margin:0"><h2>${touch ? '영수증을 찍거나 골라 주세요' : '영수증 사진을 골라 주세요'}</h2>
     <p>AI가 읽은 내용은 저장 전에 직접 확인하고 고칠 수 있어요. 사진 원본은 저장하지 않아요.</p>
-    <div class="actions"><label class="btn" style="display:inline-flex;align-items:center">사진 고르기
-      <input type="file" accept="image/*" capture="environment" data-receipt hidden></label></div></section>`;
+    <div class="actions">${receiptPickers(touch)}</div></section>`;
 }
 
 // 읽은 줄을 고칠 수 있는 목록. 합계와 줄 합을 나란히 보여 준다.
@@ -597,10 +634,12 @@ function renderSheet() {
 }
 
 function renderChannel() {
+  const times = minuteLabels(state.events.map((e) => timeOf(e.at)));
   const items = state.events.map((e, i) => logItemHtml({
     avatar: avatar(e.from, 'agent'),
-    who: `${agentName(e.from)} → ${nameOf(e.to)}`,
-    time: timeOf(e.at),
+    who: agentName(e.from),
+    to: nameOf(e.to),
+    time: times[i],
     text: e.text,
     meta: e.meta,
     tagHtml: e.action ? chip(`${nameOf(e.action.for)}의 확인 필요`, 'warn') : '',
@@ -632,29 +671,36 @@ function actionButtons(a, size = '') {
     case 'agree_dispute':
       return `<button class="${cls}" data-action="open-dispute" data-id="${id}">${byId('disputes', a.ref)?.status === 'proposed' ? '중재안 보기' : '이의 보기'}</button>`;
     case 'approve_transfer':
-      return byId('transfers', a.ref)?.status === 'opened'
+      // opened(송금 앱을 열었다)와, 받는 사람이 안 들어왔다고 한 sent는 둘 다 보냈는지 묻는다
+      return ['opened', 'sent'].includes(byId('transfers', a.ref)?.status)
         ? `<button class="${cls}" data-action="mark-sent" data-id="${id}">보냈어요</button><button class="${cls} secondary" data-action="open-transfer" data-id="${id}">다시 보내기</button>`
         : `<button class="${cls}" data-action="open-transfer" data-id="${id}">보내러 가기</button>`;
     case 'set_payout':
       return `<button class="${cls}" data-action="open-payout">받을 계좌 알려 주기</button>`;
     case 'confirm_receipt':
-      return `<button class="${cls}" data-action="confirm-receipt" data-id="${id}">받았어요</button>`;
+      // 이미 안 들어왔다고 했으면 보내는 사람의 답을 기다리는 중이라 받았어요만 둔다
+      return `<button class="${cls}" data-action="confirm-receipt" data-id="${id}">받았어요</button>${byId('transfers', a.ref)?.notReceivedAt ? '' : `<button class="${cls} secondary" data-action="not-received" data-id="${id}">아직 안 들어왔어요</button>`}`;
     default:
       return '';
   }
 }
 
+// 일반 글자를 돌려준다(이름이 들어간다). HTML에 넣을 때는 쓰는 쪽에서 esc()로 감싼다(지금은 nextCard() 한 곳)
 function actionNote(a) {
-  const opened = byId('transfers', a.ref)?.status === 'opened';
+  const t = byId('transfers', a.ref);
+  const opened = t?.status === 'opened';
   return {
     confirm_line: '비서들의 기억에 근거가 없는 줄이에요. 그래서 비서가 짐작으로 청구하지 않고 먼저 물어봐요.',
     answer_invoice: '자동 수락 한도를 넘어서 비서가 대신 받지 않고 먼저 물어봐요.',
     agree_dispute: byId('disputes', a.ref)?.status === 'proposed'
       ? '양쪽이 동의하면 그 지출을 중재안대로 다시 나누고 청구서를 다시 보내요. 거부하면 이의가 끝나고 지금 배분 그대로 정산해요.'
       : '중재 비서가 양쪽 근거와 영수증의 주문 시각을 보고 나누는 법을 제안해요.',
-    approve_transfer: opened ? '송금 앱에서 보냈다면 알려 주세요. 받는 사람에게 확인을 부탁할게요.' : '밀어서 보내면 토스 송금 화면이 받는 사람·금액이 채워진 채로 열려요.',
+    approve_transfer: t?.notReceivedAt ? '토스 송금 내역을 먼저 확인해 주세요. 보냈다면 ‘보냈어요’를, 아니면 ‘다시 보내기’를 눌러요.'
+      : !opened ? '밀어서 보내면 토스 송금 화면이 받는 사람·금액이 채워진 채로 열려요.'
+      : '송금 앱에서 보냈다면 알려 주세요. 받는 사람에게 확인을 부탁할게요.',
     set_payout: '계좌번호는 나에게 돈을 보낼 사람에게만 보여요.',
-    confirm_receipt: '받았다면 확인해 주세요. 그래야 이 송금이 끝나요.',
+    confirm_receipt: t?.notReceivedAt ? `${nameOf(t.from)}에게 송금 내역을 확인해 달라고 했어요. 그 사이 들어왔다면 알려 주세요.`
+      : `통장에 들어왔는지 보고 알려 주세요. 안 들어왔으면 ${t ? nameOf(t.from) : '보낸 사람'}에게 다시 확인을 부탁할게요.`,
   }[a.type] ?? '';
 }
 
@@ -699,12 +745,14 @@ function invoiceSheet() {
         ${dd.expenseId === e.id ? chip('고름', 'ok') : ''}</button>`).join('')}</div></section>
     <section class="group"><div class="list"><label class="row field"><span class="grow">맞지 않는 점</span>
       <input data-dd="claim" value="${esc(dd.claim)}" maxlength="200" placeholder="예: 리무진은 타지 않았어요"></label></div></section>
+    ${dd.expenseId ? timelineSection(byId('expenses', dd.expenseId), dd.timeline) : ''}
     ${formError()}
     <button class="btn" style="width:100%" id="dispute-send" data-action="answer-invoice" data-decision="dispute" ${dd.expenseId && dd.claim.trim() ? '' : 'disabled'}>이의 보내기</button>` : '';
   return {
     title: '청구서',
     html: `<div class="big"><div class="amt">${won(Math.max(0, -inv.net))}</div>
-        <p class="sub">낸 돈 ${won(inv.paid)} · 내 몫 ${won(inv.owed)} · 방 version ${inv.version}</p></div>
+        <p class="sub">낸 돈 ${won(inv.paid)} · 내 몫 ${won(inv.owed)} · 방 version ${inv.version}</p>
+        ${inv.hasLocationSummary ? `<p class="badges">${chip('위치 요약 · 확인 전')}</p>` : ''}</div>
       <p class="how">${esc(inv.reasons.join(' · '))}</p>
       ${answering && !dd ? `${formError()}<div style="display:grid;gap:8px"><button class="btn" data-action="answer-invoice" data-decision="accept">이대로 받기</button>
         <button class="btn secondary" data-action="start-dispute">맞지 않는 지출이 있어요</button></div>` : ''}
@@ -734,6 +782,95 @@ function proposalChoices(d, exp, uid) {
         <button class="btn plain" data-action="reject-cancel" ${busy ? 'disabled' : ''}>취소</button></div>` : ''}`;
 }
 
+const rowText = (title, meta = '', end = '') => `<span class="grow"><span class="title">${esc(title)}</span>${meta ? `<span class="meta" style="display:block">${esc(meta)}</span>` : ''}</span>${end}`;
+
+// #7 정산당 한 번: 여행이 끝난 뒤 Google 지도 타임라인 파일을 한 번 고르면, 이의를 낼 때마다 그 지출 시간대를 여기 남긴 방문에서 찾는다
+function locationSection() {
+  const { expenses, me } = state.data;
+  if (!expenses.some((e) => e.present.includes(me.uid))) return '';
+  const visits = savedVisits();
+  const body = state.timelineReading
+    ? `<div class="list" aria-busy="true"><div class="row">${tile('pin')}${rowText('파일에서 이 정산 기간만 찾는 중…')}</div></div>`
+    : visits
+    ? `<div class="list"><div class="row">${tile('pin')}${rowText('Google 지도 타임라인을 올렸어요', visits.length ? `이 정산 기간 방문 ${visits.length}곳 · 이의를 낼 때 자동으로 찾아요` : '이 정산 기간의 기록이 없어요')}
+        <button type="button" class="text-btn" data-action="timeline-forget">지우기</button></div></div>`
+    : `<div class="list"><button type="button" class="row" data-action="timeline-pick">${tile('pin')}${rowText('Google 지도 타임라인 올리기', '여행이 끝난 뒤 한 번만 올리면 돼요', CHEVRON)}</button></div>`;
+  return `<section class="group"><h2 class="group-label"><span>내 위치 기록</span><span>선택</span></h2>${body}
+    ${state.timelineError ? `<p class="form-error" role="alert">${esc(state.timelineError)}</p>` : ''}
+    <p class="group-note">파일은 이 기기에서만 읽어요. 이 정산 기간의 방문 시각만 이 브라우저에 ${TIMELINE_DAYS}일 두고, 이의를 낼 때 내가 켠 한 줄만 상대에게 가요.</p></section>`;
+}
+
+// 이의를 낼 때 고른 지출의 시간대(첫 주문~결제). 올려 둔 타임라인이 있으면 바로 찾아 채우고, 없으면 여기서 올린다.
+// 찾은 결과는 사용자가 스위치를 켜야만 이의 상대와 중재 비서에게 간다(public/timeline.js)
+function timelineSection(exp, tl) {
+  const { from, until } = expenseWindow(exp);
+  const r = tl?.result;
+  const found = r && (r.stayedUntil
+    ? rowText(`결제(${r.stayedUntil})까지 머물렀어요`, `첫 주문 ${kstTime(from)}부터 같은 곳`)
+    : rowText(`${r.leftAt}에 떠났어요`, `첫 주문 ${kstTime(from)} 때 있던 곳 · ${r.nextAt ? `${r.nextAt} ${r.nextHome ? '집' : '다른 장소'} 도착` : '도착 기록 없음'}`));
+  const body = !tl
+    ? `<div class="list"><button type="button" class="row" data-action="timeline-pick">${tile('pin')}${rowText('Google 지도 타임라인 올리기', `이 지출 시간대(${kstTime(from)}~${kstTime(until)})를 찾아요`, CHEVRON)}</button></div>
+      <p class="group-note">휴대폰 Google 지도에서 내보낸 타임라인 파일(JSON)을 골라요. 한 번 올리면 이 정산의 다른 이의에도 다시 고르지 않고 써요.</p>`
+    : tl.state === 'reading' ? `<div class="list" aria-busy="true"><div class="row">${tile('pin')}${rowText('이 시간대만 찾는 중…')}</div></div>`
+    : tl.state === 'none' ? `<div class="list"><div class="row">${tile('pin')}${rowText('이 시간대 기록이 없어요', '위치 요약 없이 이의를 보내요')}</div></div>`
+    : tl.state === 'error' ? `<p class="form-error" role="alert">${esc(tl.message)}</p>`
+    : `<div class="list"><div class="row">${tile('pin')}${found}</div>
+        <label class="row" style="--inset:16px;cursor:pointer">${rowText('이의에 붙이기', '이의 상대와 중재 비서만 봐요')}<input type="checkbox" role="switch" class="switch" data-timeline-agree ${tl.agree ? 'checked' : ''}></label></div>
+      <p class="group-note">${tl.saved ? '올려 둔 타임라인에서 찾았어요. ' : ''}시각만 보내고 파일·좌표·장소 이름은 보내지 않아요. 7일 뒤 지워지고, 그 전에도 지울 수 있어요.</p>`;
+  const again = tl && tl.state !== 'reading' ? '<button type="button" class="text-btn" data-action="timeline-pick">다른 파일 고르기</button>' : '';
+  const sample = authOptions().dev && tl?.state !== 'reading' ? '<button type="button" class="text-btn" data-action="timeline-sample">개발용 가짜 기록</button>' : '';
+  return `<section class="group"><h3 class="group-label"><span>위치 기록</span><span>선택</span></h3>${body}
+    ${again || sample ? `<div class="group-actions">${again}${sample}</div>` : ''}</section>`;
+}
+
+function applyTimeline(visits, exp, saved = false) {
+  const result = departure(visits, exp);
+  state.disputeDraft.timeline = result ? { state: 'found', result, summary: timelineSummary(result, exp), agree: false, saved } : { state: 'none', saved };
+}
+
+// 파일 고르기. 문서에 붙인 입력은 다시 그릴 때 사라지므로 고를 때마다 만든다
+function pickTimeline() {
+  const input = Object.assign(document.createElement('input'), { type: 'file', accept: '.json,application/json', hidden: true });
+  input.addEventListener('change', () => {
+    if (input.files?.[0]) readTimeline(input.files[0]);
+    input.remove();
+  });
+  document.body.append(input);
+  input.click();
+}
+
+// 파일은 여기서만 읽는다. 이 정산 지출 시간대의 방문만 남기고, 이의를 쓰는 중이면 고른 지출 시간대를 바로 찾는다
+async function readTimeline(file) {
+  const dd = state.disputeDraft;
+  const exp = dd?.expenseId && byId('expenses', dd.expenseId);
+  const redraw = () => { render(); if (dd) renderSheet(); };
+  state.timelineReading = true;
+  state.timelineError = '';
+  if (exp) dd.timeline = { state: 'reading' };
+  redraw();
+  try {
+    const mine = state.data.expenses.filter((e) => e.present.includes(state.data.me.uid));
+    const visits = keepForSettlement(readVisits(JSON.parse(await file.text())), mine);
+    saveVisits(visits);
+    if (exp && state.disputeDraft === dd && dd.expenseId === exp.id) applyTimeline(visits, exp, true); // 읽는 사이 다른 지출을 골랐으면 그 지출은 dispute-pick이 찾는다
+  } catch (e) {
+    const message = e instanceof SyntaxError ? 'JSON 파일이 아니에요. 휴대폰 Google 지도에서 내보낸 타임라인 파일을 골라 주세요.' : e.message;
+    if (exp) dd.timeline = { state: 'error', message };
+    else state.timelineError = message;
+  }
+  state.timelineReading = false;
+  redraw();
+}
+
+// 개발용: 고른 지출에 맞춘 가짜 타임라인. 첫 주문 20분 전부터 머물다 결제 전에 떠나 13분 뒤 다른 곳에 도착한다
+function sampleTimeline(exp) {
+  const { from, until } = expenseWindow(exp);
+  const iso = (ms) => new Date(ms + 9 * 3600_000).toISOString().replace('Z', '+09:00');
+  const left = from + Math.round((until - from) * 0.6);
+  const visit = (start, end) => ({ startTime: iso(start), endTime: iso(end), visit: { hierarchyLevel: 0, probability: 0.9, topCandidate: { semanticType: 'UNKNOWN' } } });
+  return { semanticSegments: [visit(from - 20 * 60_000, left), visit(left + 13 * 60_000, left + 8 * 3600_000)] };
+}
+
 // 이의와 중재안. 중재안은 줄마다 누구 몫인지와 사람별 몫이 어떻게 바뀌는지 보여 준다
 function disputeSheet() {
   const d = byId('disputes', state.ref);
@@ -741,8 +878,11 @@ function disputeSheet() {
   if (!exp) return notFound('이의');
   const { room, me } = state.data;
   const party = [exp.payer, d.by].includes(me.uid);
+  // 이의를 낸 사람이 붙인 타임라인 요약은 본인이 언제든 지울 수 있다(동의 철회). 지우면 미확정 중재안은 다시 열린 이의가 된다
+  const mine = d.by === me.uid && d.evidence.some((e) => e.locationId);
   const evidence = d.evidence.length
-    ? `<div class="list">${d.evidence.map((e) => `<div class="row"><span class="grow">${esc(e.summary)}</span>${e.time ? chip(e.time) : ''}</div>`).join('')}</div>` : '';
+    ? `<div class="list">${d.evidence.map((e) => `<div class="row"><span class="grow">${esc(e.summary)}</span>${e.time ? chip(e.time) : ''}</div>`).join('')}</div>
+      ${mine ? '<div class="actions" style="margin-top:8px"><button type="button" class="text-btn" data-action="revoke-location">내 위치 요약 지우기</button></div>' : ''}` : '';
   let body = '';
   if (d.status === 'superseded') {
     body = `<p class="group-note">${esc(disputeNote(d, exp, nameOf))}</p>`;
@@ -789,7 +929,7 @@ const copyRow = (label, value, key) => `<div class="row"><span class="grow"><spa
 // 데스크톱 QR(#8). 토큰은 수명이 15분이라, 송금 화면을 열 때마다 서버에서 새로 받는다.
 // QR에는 계좌·금액이 든 t.link를 바로 담지 않는다. 우리 서버의 짧은 수명 토큰(/api/qr/:token)을 담아,
 // QR 이미지를 만들어 주는 외부 서비스는 그 토큰만 보고 실제 계좌 정보는 보지 못하게 한다.
-const isDesktop = () => matchMedia('(min-width: 640px)').matches; // style.css의 .qr-desktop 기준과 같게
+const isComputer = () => matchMedia(COMPUTER_QUERY).matches;
 let qrTimer = 0;
 let qrAsked = { id: null, at: 0 };
 
@@ -814,20 +954,22 @@ async function refreshQr(tid) {
   renderSheet();
 }
 
-function qrBlock(t) {
-  if (!t.link || !isDesktop()) return '';
+// 부르는 쪽에서 컴퓨터이고 t.link가 있을 때만 부른다(링크가 없으면 QR로 열 토스 화면이 없고, 휴대폰은 토스가 바로 열린다)
+function qrBlock(t, { sentButton = true } = {}) {
   if (!qrIsFresh(state.qr, t.id)) refreshQr(t.id);
   const qr = state.qr?.id === t.id ? state.qr : null;
   // 휴대폰 카메라가 찍을 절대 주소가 필요해서, API_BASE가 비어 있으면(로컬 개발) 지금 페이지 origin을 쓴다
   const img = qr?.token
     ? `<img src="${qrImageUrl(`${API_BASE || location.origin}/api/qr/${enc(qr.token)}`)}" width="220" height="220" alt="휴대폰으로 토스 송금 화면을 여는 QR 코드" referrerpolicy="no-referrer">`
     : `<div class="qr-wait">${qr?.failed ? 'QR을 만들지 못했어요.<br>위 계좌번호를 복사해 보내 주세요.' : 'QR을 만드는 중이에요'}</div>`;
-  // 휴대폰으로 보내고 돌아온 사람이 슬라이더(데스크톱에선 토스가 안 열림)를 거치지 않고 바로 끝낼 수 있게
-  return `<div class="qr-desktop"><p class="group-note">컴퓨터라면 휴대폰으로 QR을 찍어 토스를 열어요.</p>${img}
-    <button class="btn secondary" style="width:100%;margin-top:12px" data-action="mark-sent" data-id="${esc(t.id)}">휴대폰으로 보냈어요</button></div>`;
+  // 컴퓨터에는 슬라이더가 없으니, 휴대폰으로 보내고 돌아온 사람이 여기서 바로 끝낸다.
+  // 보냈어요 버튼이 이미 있는 시트(보냈나요?)에서는 sentButton: false로 QR만 붙인다
+  return `<div class="qr-desktop"><p class="group-note">휴대폰 카메라로 QR을 찍으면 토스 송금 화면이 열려요.</p>${img}
+    ${sentButton ? `<button class="btn secondary" style="width:100%;margin-top:12px" data-action="mark-sent" data-id="${esc(t.id)}">보냈어요</button>` : ''}</div>`;
 }
 
-// 송금: 밀어서 보내면 그 제스처 안에서 토스를 연다. 앱이 안 열리면 계좌·금액을 복사해 둔다
+// 송금: 밀어서 보내면 그 제스처 안에서 토스를 연다. 앱이 안 열리면 계좌·금액을 복사해 둔다.
+// 컴퓨터에서는 토스가 열리지 않으니 슬라이더 대신 휴대폰으로 넘기는 QR만 보여 준다(sendMode)
 function transferSheet() {
   const t = byId('transfers', state.ref);
   if (!t) return notFound('송금');
@@ -836,27 +978,40 @@ function transferSheet() {
   const account = t.fallback ? `<section class="group"><h3 class="group-label"><span>${esc(toName)}의 계좌</span><span>${esc(t.fallback.bank)}</span></h3>
       <div class="list">${copyRow('계좌번호', t.fallback.accountNo, 'acct')}${copyRow('금액', String(t.amount), 'amt')}</div></section>` : '';
   const note = {
-    fallback: '송금 앱이 열리지 않았어요. 계좌번호를 복사해 두었으니 쓰시는 은행 앱에 붙여 넣어 보내 주세요.',
+    fallback: '토스가 열리지 않으면, 계좌번호를 복사해 두었으니 쓰시는 은행 앱에 붙여 넣어 보내 주세요.',
     back: '송금 앱에서 돌아왔어요. 보냈나요?',
   }[state.transferNote];
   let actions = '';
   if (t.from === me && ['scheduled', 'due'].includes(t.status)) {
-    actions = t.link || t.fallback
-      ? `<div class="slider" data-commit="send" data-id="${esc(t.id)}"><span class="slider-fill"></span>
+    const mode = sendMode(t, { computer: isComputer() });
+    actions = mode === 'qr'
+      ? qrBlock(t)
+      : mode === 'slider'
+        ? `<div class="slider" data-commit="send" data-id="${esc(t.id)}"><span class="slider-fill"></span>
           <span class="slider-label">${t.link ? '밀어서 토스로 보내기' : '밀어서 계좌 복사하기'}</span>
           <button type="button" class="slider-thumb" aria-label="${t.link ? '밀어서 토스로 보내기' : '밀어서 계좌 복사하기'}. Enter 키로도 할 수 있어요">${ARROW}</button></div>
-        <p class="slider-hint">${t.link ? '토스가 열리지 않으면 계좌번호를 복사해 드려요' : '받는 사람의 계좌를 복사해 드려요'}</p>
-        ${qrBlock(t)}`
-      : `<p class="group-note">${esc(subj(toName))} 받을 계좌를 아직 알려 주지 않았어요. 알려 주면 바로 보낼 수 있어요.</p>`;
-  } else if (t.from === me && t.status === 'opened') {
-    actions = `<h3 style="margin:0 0 10px">보냈나요?</h3><div style="display:grid;gap:8px">
+        <p class="slider-hint">${t.link ? '토스가 열리지 않으면 계좌번호를 복사해 드려요' : '받는 사람의 계좌를 복사해 드려요'}</p>`
+        : `<p class="group-note">${esc(subj(toName))} 받을 계좌를 아직 알려 주지 않았어요. 알려 주면 바로 보낼 수 있어요.</p>`;
+  } else if (t.from === me && (t.status === 'opened' || (t.status === 'sent' && t.notReceivedAt))) {
+    // 받는 사람이 "아직 안 들어왔어요"라고 했으면(상태는 sent 그대로) 제목만 바꾸고 송금 내역부터 보게 한다(버튼은 같다)
+    const head = t.notReceivedAt
+      ? `<h3 style="margin:0 0 8px">${esc(subj(toName))} 아직 못 받았대요</h3><p class="group-note" style="padding:0;margin:0 0 10px">토스 송금 내역을 먼저 확인해 주세요. 두 번 보내지 않게요.</p>`
+      : '<h3 style="margin:0 0 10px">보냈나요?</h3>';
+    // 컴퓨터(마우스 기기)에서는 토스 링크가 열리지 않으므로 토스 다시 열기 대신 휴대폰으로 넘길 QR을 보여 준다(보냈어요 버튼은 위에 있다).
+    // 너비로 판단하면 가로로 돌린 휴대폰에서 토스 다시 열기가 사라지고 자기 화면의 QR이 뜬다
+    actions = `${head}<div style="display:grid;gap:8px">
       <button class="btn" data-action="mark-sent" data-id="${esc(t.id)}">보냈어요</button>
-      ${t.link ? `<button class="btn secondary" data-action="reopen-link" data-id="${esc(t.id)}">토스 다시 열기</button>` : ''}
-      <button class="btn plain" data-action="close-sheet">아직이에요</button></div>`;
+      ${t.link && !isComputer() ? `<button class="btn secondary" data-action="reopen-link" data-id="${esc(t.id)}">토스 다시 열기</button>` : ''}
+      <button class="btn plain" data-action="close-sheet">아직이에요</button></div>${t.link && isComputer() ? qrBlock(t, { sentButton: false }) : ''}`;
+  } else if (t.to === me && t.status === 'sent' && !t.notReceivedAt) {
+    actions = `<div style="display:grid;gap:8px"><button class="btn" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>
+      <button class="btn secondary" data-action="not-received" data-id="${esc(t.id)}">아직 안 들어왔어요</button></div>`;
   } else if (t.to === me && t.status === 'sent') {
-    actions = `<button class="btn" style="width:100%" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>`;
+    // 다시 확인해 달라고 한 사이 돈이 늦게 들어왔으면 바로 끝낼 수 있게
+    actions = `<p class="group-note">${esc(nameOf(t.from))}에게 다시 확인해 달라고 했어요. 그 사이 들어왔다면 알려 주세요.</p>
+      <button class="btn" style="width:100%;margin-top:10px" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>`;
   } else {
-    actions = `<p class="group-note">${{ scheduled: `${whenText(t.remindAt)}에 ${esc(nameOf(t.from))}에게 알려요.`, due: `${esc(subj(nameOf(t.from)))} 보낼 차례예요.`, opened: `${esc(subj(nameOf(t.from)))} 송금 앱을 열었어요.`, sent: `${esc(subj(nameOf(t.from)))} 보냈어요. 받는 사람의 확인을 기다려요.`, confirmed: '받았다고 확인했어요. 이 송금은 끝났어요.', superseded: '지출이 바뀌어 대체된 송금이에요.' }[t.status] ?? ''}</p>`;
+    actions = `<p class="group-note">${{ scheduled: `${whenText(t.remindAt)}에 ${esc(nameOf(t.from))}에게 알려요.`, due: `${esc(subj(nameOf(t.from)))} 보낼 차례예요.`, opened: `${esc(subj(nameOf(t.from)))} 송금 앱을 열었어요.`, sent: t.notReceivedAt ? `${esc(subj(toName))} 아직 못 받았대요. ${esc(subj(nameOf(t.from)))} 확인하고 있어요.` : `${esc(subj(nameOf(t.from)))} 보냈어요. 받는 사람의 확인을 기다려요.`, confirmed: '받았다고 확인했어요. 이 송금은 끝났어요.', superseded: '지출이 바뀌어 대체된 송금이에요.' }[t.status] ?? ''}</p>`;
   }
   return {
     title: '송금',
@@ -914,29 +1069,23 @@ function sendGesture(tid) {
   api(`/api/rooms/${enc(roomId)}/transfers/${enc(tid)}/approve`, { method: 'POST', body: {}, keepalive: true }).catch(() => {});
   state.pendingSend = { id: tid, left: false };
   if (t.link) location.href = t.link;
-  // 1.5초 안에 페이지가 숨지 않으면 앱이 열리지 않은 것(앱 없음·데스크톱)으로 보고 복사 안내를 띄운다
-  setTimeout(() => {
-    if (state.pendingSend?.id !== tid || state.pendingSend.left) return;
-    state.pendingSend = null;
-    state.transferNote = 'fallback';
-    openAgentSheet('transfer', tid);
-    load();
-  }, 1500);
+  // 2초 안에 페이지가 가려지지 않으면(앱 없음·데스크톱, 또는 iPhone이 'Open in "Toss"?'를 묻는 중) 복사 안내를 띄운다.
+  // 실패로 단정하지 않아서, 나중에 토스로 넘어갔다 돌아오면 '보냈나요?'로 바뀐다(sendFollowUp)
+  setTimeout(() => { if (state.pendingSend?.id === tid) followUp('timeout'); }, 2000);
 }
-document.addEventListener('visibilitychange', () => {
-  if (!state.pendingSend) return;
-  if (document.hidden) {
-    state.pendingSend.left = true;
-  } else if (state.pendingSend.left) {
-    const id = state.pendingSend.id;
-    state.pendingSend = null;
-    state.transferNote = 'back';
-    openAgentSheet('transfer', id);
-    load();
-  }
-});
+function followUp(event) {
+  const id = state.pendingSend?.id;
+  const { pending, note } = sendFollowUp(state.pendingSend, event);
+  state.pendingSend = pending;
+  if (!note) return;
+  state.transferNote = note;
+  openAgentSheet('transfer', id);
+  load();
+}
+document.addEventListener('visibilitychange', () => followUp(document.hidden ? 'hidden' : 'visible'));
 
-const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'reject-ask', 'reject-cancel', 'reject', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'open-payout', 'save-payout', 'copy']);
+const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'timeline-pick', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'reject-ask', 'reject-cancel', 'reject', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
+
 
 async function agentAct(name, d) {
   const base = `/api/rooms/${enc(roomId)}`;
@@ -973,9 +1122,27 @@ async function agentAct(name, d) {
     renderSheet();
   } else if (name === 'dispute-pick') {
     state.disputeDraft.expenseId = d.id;
+    state.disputeDraft.timeline = null; // 다른 지출이면 시간대가 달라서 다시 찾는다
+    const visits = savedVisits();
+    if (visits) applyTimeline(visits, byId('expenses', d.id), true);
     renderSheet();
+  } else if (name === 'timeline-pick') {
+    pickTimeline();
+  } else if (name === 'timeline-forget') {
+    forgetVisits();
+    render();
+  } else if (name === 'timeline-sample') {
+    const exp = byId('expenses', state.disputeDraft?.expenseId);
+    if (exp) applyTimeline(readVisits(sampleTimeline(exp)), exp);
+    renderSheet();
+  } else if (name === 'revoke-location') {
+    await post('/location/revoke');
   } else if (name === 'answer-invoice') {
-    const body = d.decision === 'dispute' ? { decision: 'dispute', ...state.disputeDraft } : { decision: 'accept' };
+    const dd = state.disputeDraft;
+    // 사용자가 체크한 타임라인 요약을 먼저 붙인다. 그러면 이의에 근거로 함께 들어간다
+    if (d.decision === 'dispute' && dd.timeline?.state === 'found' && dd.timeline.agree
+      && !(await post('/location/timeline', { agree: true, expenseId: dd.expenseId, ...dd.timeline.result }))) return;
+    const body = d.decision === 'dispute' ? { decision: 'dispute', expenseId: dd.expenseId, claim: dd.claim } : { decision: 'accept' };
     if (await post(`/invoices/${enc(state.ref)}/answer`, body)) {
       state.disputeDraft = null;
       sheet.close();
@@ -1026,9 +1193,12 @@ async function agentAct(name, d) {
     openAgentSheet('transfer', d.id);
   } else if (name === 'mark-sent') {
     state.transferNote = null;
+    state.pendingSend = null;
     await post(`/transfers/${enc(d.id)}/sent`);
   } else if (name === 'confirm-receipt') {
     await post(`/transfers/${enc(d.id)}/confirm`);
+  } else if (name === 'not-received') {
+    await post(`/transfers/${enc(d.id)}/not-received`);
   } else if (name === 'open-payout') {
     const mine = state.data.me;
     state.payoutDraft = { bank: BANKS[0].label, accountNo: '', holder: mine.name, other: false };
@@ -1048,17 +1218,19 @@ function render() {
     return;
   }
   if (state.error?.status === 404) {
+    if (!authOptions().dev) { main.innerHTML = '<section class="hero"><h1>방을 찾을 수 없어요</h1><a href="account.html">내 방 목록</a></section>'; return; }
     main.innerHTML = `<section class="hero"><h1>방을 찾을 수 없어요</h1>
       <p class="sub">서버를 다시 켜면 메모리에 있던 방이 사라져요. 개발용 데모 방을 다시 만들어 주세요.</p></section>
       <section class="next"><div class="actions"><button class="btn" data-action="seed">데모 방 만들기</button></div></section>`;
     return;
   }
   if (!state.data) {
+    if (!authOptions().dev) { main.innerHTML = `<section class="hero"><h1>방을 열 수 없어요</h1><p>${esc(state.error?.message || '연결을 확인해 주세요')}</p><a href="account.html">내 계정으로 돌아가기</a></section>`; return; }
     // 아직 누구인지 모르거나(401) 이 방 멤버가 아니면(403) 방 정보 없이 멤버 목록도 모른다.
     // 개발용 시드 방의 uid로 고르게 한다.
     const seedMembers = [['me', '나'], ['cs', '철수'], ['yh', '영희'], ['ms', '민수']];
     main.innerHTML = `<section class="hero"><h1>누구로 볼까요?</h1>
-      <p class="sub">개발용 데모 방의 멤버 중 한 명을 골라 주세요. 로그인(#2)이 생기면 이 단계는 사라져요.</p></section>
+      <p class="sub">개발용 데모 방의 멤버 중 한 명을 골라 주세요. 실제 계정으로 로그인한 경우에는 본인으로만 참여해요.</p></section>
       <section class="group"><div class="list">${seedMembers.map(([uid, name]) => `<button class="row" data-action="who" data-id="${uid}">
         ${avatarHtml(name[0], '#8e8e93')}<span class="grow">${name}</span></button>`).join('')}</div></section>`;
     return;
@@ -1067,7 +1239,7 @@ function render() {
   $('#nav-add').hidden = false;
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
-  main.innerHTML = [hero(), whoPicker(), disputeLine(), nextCard(), disputesSection(), expensesSection(), transfersSection()].join('');
+  main.innerHTML = [hero(), whoPicker(), disputeLine(), nextCard(), disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
   mountSegs(main);
   // 이의·청구서 시트는 글을 쓰는 중이면 다시 그리지 않는다(타이핑 중 초점을 잃지 않게)
   if (['exp', 'transfer'].includes(state.sheet) || (state.sheet === 'dispute' && !state.rejectDraft) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
@@ -1112,6 +1284,8 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', (e) => {
   if (e.target.matches?.('input[data-receipt]') && e.target.files?.[0]) readReceipt(e.target.files[0]);
+  // 체크만 기억한다(다시 그리면 초점을 잃는다)
+  if (e.target.matches?.('input[data-timeline-agree]') && state.disputeDraft?.timeline) state.disputeDraft.timeline.agree = e.target.checked;
 });
 document.addEventListener('change', (e) => {
   const f = e.target.dataset?.field;
@@ -1131,6 +1305,7 @@ const sheet = createSheet($('#sheet-root'), {
     state.disputeDraft = null;
     state.rejectDraft = null;
     state.transferNote = null;
+    state.pendingSend = null; // 시트를 닫으면 송금 앱에서 돌아왔는지 더는 묻지 않는다
     // QR 토큰은 버린다. 다시 열면 새로 받는다
     state.qr = null;
     clearTimeout(qrTimer);
@@ -1142,6 +1317,11 @@ addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 56),
 addEventListener('resize', () => {
   resetSegs();
   mountSegs(document);
+});
+// 송금 시트는 그릴 때 컴퓨터인지 보고 QR이나 슬라이더 중 하나만 둔다. 연 채로 포인터가 바뀌면
+// (iPad에서 키보드를 떼거나 붙일 때 등) 맞는 쪽으로 다시 그린다
+matchMedia(COMPUTER_QUERY).addEventListener('change', () => {
+  if (state.sheet === 'transfer') renderSheet();
 });
 
 async function loadConfig() {
@@ -1158,9 +1338,14 @@ async function loadConfig() {
 }
 
 loadConfig();
-if (roomId) {
-  load();
-  if (currentUid()) watch(); // 누구인지 정해진 뒤에만 기록을 받아 온다
-} else {
-  render();
-}
+try {
+  await initAuth();
+  if (roomId) {
+    if (!authOptions().dev && !currentUid()) location.replace('account.html');
+    else { await load(); if (currentUid()) watch(); }
+  } else render();
+  const sessionUid = currentUid();
+  onSessionChange(user => {
+    if (!user || user.uid !== sessionUid) { unsubscribe(); state.data = null; state.events = []; location.replace('account.html'); }
+  });
+} catch (e) { state.error = e; render(); }

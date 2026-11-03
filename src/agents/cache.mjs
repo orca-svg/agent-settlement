@@ -24,5 +24,6 @@ export function createCache({ max = 200, ttlMs = 24 * 3600_000, now = Date.now }
     get size() {
       return map.size;
     },
+    clear() { map.clear(); },
   };
 }

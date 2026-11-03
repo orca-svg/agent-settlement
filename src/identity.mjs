@@ -1,11 +1,26 @@
-// 누가 요청했는지 정한다. 지금은 개발용 헤더(x-demo-user)를 믿는다.
-// #2 로그인에서 이 함수만 Firebase ID 토큰 검증으로 바꾸면 나머지 서버 코드는 그대로 쓸 수 있다.
-// roomId를 주면 그 방의 멤버일 때만 { uid, name }, 아니면 null.
-export async function identify(req, store, roomId) {
-  const uid = String(req.headers['x-demo-user'] || '').trim();
-  if (!uid) return null;
-  if (!roomId) return { uid, name: uid };
-  const room = await store.get('rooms', roomId);
-  const member = room?.members.find((m) => m.uid === uid);
-  return member ? { uid: member.uid, name: member.name } : null;
+// Production never trusts a uid supplied by the browser. Tests inject the verifier.
+export function createIdentity({ auth = null, dev = false } = {}) {
+  return async (req, store, roomId) => {
+    let who = null;
+    const header = req.headers.authorization;
+    if (header) {
+      const match = /^Bearer (\S+)$/i.exec(header);
+      if (!match || !auth) return null;
+      try {
+        const claims = await auth.verifyIdToken(match[1], true);
+        if (!claims.uid) return null;
+        who = { uid: claims.uid, name: claims.name || '사용자', authTime: claims.auth_time };
+      } catch { return null; }
+    } else if (dev) {
+      const uid = String(req.headers['x-demo-user'] || '').trim();
+      if (uid) who = { uid, name: uid };
+    }
+    if (!who || !roomId) return who;
+    const room = await store.get('rooms', roomId);
+    const member = room?.members.find((m) => m.uid === who.uid);
+    return member && !member.deleted ? { ...who, name: member.name } : null;
+  };
 }
+// Keep the team's public identify(req, store, roomId) signature. Only the server
+// injects identityContext; request headers cannot set this internal property.
+export const identify = (req, store, roomId) => createIdentity(req.identityContext || {})(req, store, roomId);

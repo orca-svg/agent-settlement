@@ -48,6 +48,8 @@ test('줄이 바뀌면 메뉴 배분을 지우고, 그대로면 남긴다', asyn
   const allocated = await store.get('expenses', eid);
   const same = await (await call(`/api/rooms/${roomId}/expenses/${eid}`, 'me', { expense: { ...allocated, title: '이자카야' } })).json();
   assert.ok(same.expense.alloc);
+  assert.ok(allocated.allocMemory);
+  assert.equal(same.expense.allocMemory, allocated.allocMemory); // 배분을 남기면 그때 쓴 기억의 지문도 남겨, 다시 나누기가 막힌 채로 둔다
   const items = allocated.items.map((it) => (it.id === 'beer' ? { ...it, qty: 2 } : it));
   const changed = await (await call(`/api/rooms/${roomId}/expenses/${eid}`, 'me', { expense: { ...allocated, items } })).json();
   assert.equal(changed.expense.alloc, undefined);

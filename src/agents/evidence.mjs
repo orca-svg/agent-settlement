@@ -4,6 +4,15 @@
 import { DEMO_DISPUTE } from '../../public/data.js';
 import { DEMO_UIDS } from '../dev/seed.mjs';
 
+// #7 extension point. Keep the three-argument provider contract used by #9.
+// The caller explicitly opts into fixture evidence; real accounts never receive it.
+export function createEvidenceProvider({ locationService, dev = false }) {
+  return async (uid, expense, room) => [
+    ...await locationService.evidenceFor(uid, expense, room),
+    ...(dev ? await evidenceFor(uid, expense, room) : []),
+  ];
+}
+
 const isDemoBar = (expense, room) => room.id.startsWith('demo-') && expense.id === `${room.id}-${DEMO_DISPUTE.expense}`;
 
 /** @returns {Promise<import('../domain/types.mjs').Evidence[]>} */

@@ -70,7 +70,19 @@ export function disputeNote(d, exp, nameOf) {
   return `중재안에 동의했어요.${waiting.length ? ` ${waiting.map(nameOf).join('·')}의 동의를 기다려요.` : ''}`;
 }
 
+// 영수증 사진을 넣는 버튼(#6). capture가 붙은 입력은 iOS·Android 모두 고르는 메뉴 없이 카메라로 바로 가고,
+// 없으면 운영체제가 정한다(iOS는 사진 보관함·사진 찍기 메뉴, Android 14 이상 Chrome은 카메라 없는 사진 선택기).
+// 그래서 휴대폰·태블릿(touch)에는 갈 곳이 정해진 버튼 둘을 같은 크기로 두고, 컴퓨터에는 capture 없는 하나만 둔다.
+export function receiptPickers(touch) {
+  const pick = (label, cls, attrs = '') => `<label class="btn${cls}" style="display:inline-flex;align-items:center;justify-content:center${touch ? ';flex:1' : ''}">${label}
+      <input type="file" accept="image/*"${attrs} data-receipt hidden></label>`;
+  return touch
+    ? pick('사진 찍기', '', ' capture="environment"') + pick('앨범에서 고르기', ' secondary')
+    : pick('사진 고르기', '');
+}
+
 const ICONS = {
+  pin: '<path d="M12 21s-6.5-5.7-6.5-11a6.5 6.5 0 0 1 13 0c0 5.3-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>',
   stay: '<path d="M3 19V6M3 15h18v4M21 15v-3a3 3 0 0 0-3-3h-7v6"/><circle cx="7" cy="11.5" r="2"/>',
   food: '<path d="M7 3v18M4.5 3v5a2.5 2.5 0 0 0 5 0V3M17 21V3c-2 1.5-3 4-3 7s1 4 3 4"/>',
   ticket: '<path d="M4 7h16v3a2 2 0 0 0 0 4v3H4v-3a2 2 0 0 0 0-4z"/><path d="M14 7v10" stroke-dasharray="2 2"/>',
@@ -99,14 +111,49 @@ export function qrIsFresh(qr, transferId, now = Date.now(), marginMs = 60_000) {
   return Boolean(qr) && qr.id === transferId && Date.parse(qr.expiresAt) - marginMs > now;
 }
 
+// 메뉴 배분 버튼. 이미 나눴고 그 뒤로 비서의 기억이 그대로면(fresh, 서버의 allocFresh) 다시 나눠도 같은 답이고
+// 확인한 줄만 지워지니 막는다. 막을 때는 무엇이 남았는지 버튼 아래(hint)에 알려 준다
+export function allocButton({ allocated, fresh, flagged }) {
+  if (!allocated) return { label: '비서에게 나누기 맡기기', disabled: false, hint: '' };
+  if (!fresh) return { label: '비서에게 다시 나누기', disabled: false, hint: '' };
+  if (flagged) return { label: '비서가 나누기를 마쳤어요', disabled: true, hint: `확인 필요한 ${flagged}줄만 확인하면 끝나요.` };
+  return { label: '나누기를 모두 마쳤어요', disabled: true, hint: '지출을 고치거나 비서의 기억이 바뀌면 다시 나눌 수 있어요.' };
+}
+
+// 컴퓨터인지는 화면 너비가 아니라 마우스로 가리키는지로 본다(#8). 가로로 돌린 휴대폰은 넓어도 토스가 바로 열리기 때문이다
+export const COMPUTER_QUERY = '(hover: hover) and (pointer: fine)';
+
+// 보낼 사람의 송금 화면에 무엇을 둘지. 컴퓨터에서는 슬라이더로 토스가 열리지 않으니 토스 링크가 있으면 QR만 둔다.
+// 링크가 없으면(목록에 없는 은행) QR을 만들 수 없어 컴퓨터에서도 계좌 복사 슬라이더를 남긴다
+export function sendMode(t, { computer }) {
+  if (computer && t.link) return 'qr';
+  if (t.link || t.fallback) return 'slider';
+  return 'no-payout';
+}
+
 // 비서끼리 기록 한 줄
-export const logItemHtml = ({ avatar, who, time, text, meta = '', tagHtml = '', enter = false, unread = false, extraHtml = '' }) => `<li class="${enter ? 'enter' : ''}${unread ? ' unread' : ''}">
+// 밀어서 보낸 뒤 송금 화면에 띄울 안내. pending은 { id, left }(페이지가 한 번이라도 가려졌는지), event는 'timeout'·'hidden'·'visible'.
+// 시간이 지나도 페이지가 그대로면 앱이 없거나 iOS가 'Open in "Toss"?'를 묻는 중이라 실패로 단정하지 않는다:
+// 복사 안내만 띄우고 기다림은 남겨, 나중에 토스로 넘어갔다 돌아오면 '보냈나요?'(back)로 바꾼다
+export function sendFollowUp(pending, event) {
+  if (!pending) return { pending: null, note: null };
+  if (event === 'hidden') return { pending: { ...pending, left: true }, note: null };
+  if (event === 'visible') return pending.left ? { pending: null, note: 'back' } : { pending, note: null };
+  return { pending, note: pending.left ? null : 'fallback' }; // timeout
+}
+
+// 비서끼리 기록 한 줄. 시스템 로그가 아니라 비서들의 대화처럼 보이게 한다: 말은 말풍선에, 받는 사람은 '○○에게'로,
+// 근거(규칙·수치)는 말풍선 밖에 접어 두어 궁금한 사람만 연다. 같은 분에 이어진 말은 시각을 비워 한 번만 보인다
+export const logItemHtml = ({ avatar, who, to = '', time = '', text, meta = '', tagHtml = '', enter = false, unread = false, extraHtml = '' }) => `<li class="${enter ? 'enter' : ''}${unread ? ' unread' : ''}">
     ${avatar}
-    <div><div class="who"><span>${esc(who)}</span><time>${esc(time)}</time></div>
+    <div><div class="who"><span>${esc(who)}${to ? ` <span class="to">${esc(to)}에게</span>` : ''}</span>${time ? `<time>${esc(time)}</time>` : ''}</div>
       <p class="text">${esc(text)}</p>
-      ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}
+      ${meta ? `<details class="why"><summary>왜 그렇게 했나요</summary><p>${esc(meta)}</p></details>` : ''}
       ${tagHtml ? `<div class="tag">${tagHtml}</div>` : ''}${extraHtml}</div>
   </li>`;
+
+/** 기록 시각을 분까지만. 바로 앞 기록과 같은 분이면 빈 글자를 돌려줘 한 번만 보이게 한다 */
+export const minuteLabels = (times) => times.map((t, i) => (i && times[i - 1] === t ? '' : t));
 
 // 이어진 같은 종류의 기록(같은 비서, 같은 kind, 할 일 없음)을 한 묶음으로. kind가 없는 기록은 묶지 않는다.
 export function groupRuns(list) {

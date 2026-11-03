@@ -5,14 +5,14 @@
 export const TAGS = ['술', '무알코올 음료', '나눠 먹는 안주', '날생선', '1인 식사', '기타'];
 
 /** Store의 컬렉션 이름. Firestore 경로는 ARCHITECTURE.md의 표를 따른다. */
-export const COLLECTIONS = ['rooms', 'expenses', 'agents', 'invoices', 'disputes', 'transfers'];
+export const COLLECTIONS = ['rooms', 'expenses', 'agents', 'invoices', 'disputes', 'transfers', 'receipts', 'users', 'deletedUsers', 'locationConsents', 'locationEvidence'];
 
 /** 사람이 처리해야 하는 일. 비서 기록(AgentEvent)의 action.type으로 쓴다. */
 export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 'approve_transfer', 'confirm_receipt', 'set_payout'];
 
 /**
  * uid는 ASCII 문자열이다(#2 이후에는 Firebase uid). 표시 이름은 Member.name으로만 보여 준다.
- * @typedef {{ uid: string, name: string }} Member
+ * @typedef {{ uid: string, name: string, color?: string, deleted?: boolean }} Member
  */
 
 /**
@@ -37,14 +37,14 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
 
 /** @typedef {{ id: string, name: string, qty: number, unit: number, time?: string, tags: string[] }} Item */
 
-/** @typedef {{ consumers: string[], confidence: number, reason: string, confirmed?: boolean }} LineAlloc */
+/** @typedef {{ consumers: string[], confidence: number, reason: string, confirmed?: boolean, evidenceConflict?: boolean }} LineAlloc */
 
 /**
  * 금액은 정수. 날짜는 'YYYY-MM-DD', 시각은 'HH:MM'. items가 있으면 amount 대신 줄 합을 쓴다.
  * @typedef {{
  *   id: string, roomId: string, title: string, kind: string, date: string, time: string,
  *   payer: string, method: 'card'|'cash', currency: string, amount?: number, items?: Item[],
- *   split: 'equal'|'items', present: string[], alloc?: Record<string, LineAlloc>,
+ *   split: 'equal'|'items', present: string[], alloc?: Record<string, LineAlloc>, allocMemory?: string,
  *   source: 'manual'|'receipt', createdBy: string,
  * }} Expense
  */
@@ -58,15 +58,17 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
  * }} AgentSettings
  */
 
-/**
+/** 청구서는 방 사람 모두가 읽는다. 위치 요약 글은 담지 않고 붙었다는 사실만 hasLocationSummary로 둔다.
  * @typedef {{
  *   id: string, roomId: string, version: number, to: string, owed: number, paid: number, net: number,
  *   status: 'pending'|'accepted'|'asked'|'disputed'|'superseded',
  *   decidedBy: 'agent'|'human'|null, reasons: string[],
+ *   hasLocationSummary?: boolean,
  * }} Invoice
  */
 
-/** #7이 위치 요약 등으로 만든다. 원본 위치는 넣지 않는다. @typedef {{ kind: 'left_at'|'not_present'|'text', time?: string, summary: string }} Evidence */
+/** 위치 원본은 넣지 않는다. 타임라인 요약(본인 제출)은 떠난 시각이면 left_at, 결제까지 머물렀으면 text(stayedUntil)이고 늘 사람 확인이 필요하다.
+ * @typedef {{ kind: 'left_at'|'not_present'|'text', time?: string, stayedUntil?: string, summary: string, locationId?: string, source?: 'timeline_export', uncertain?: boolean, requiresHumanApproval?: boolean }} Evidence */
 
 /**
  * resolved는 양쪽이 동의해 지출을 다시 나눈 이의. withdrawn은 이의를 낸 사람이, dismissed는 지출을 낸 사람이 중재안을 거부해
@@ -81,12 +83,13 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
  */
 
 /**
- * 우리 서비스는 돈을 옮기지 않는다. link는 금액이 채워진 송금 앱 링크, fallback은 계좌·금액 복사용.
+ * 우리 서비스는 돈을 옮기지 않는다. link는 금액이 채워진 송금 앱 링크, fallback은 계좌·금액 복사용. notReceivedAt은 받는 사람이 "아직 안 들어왔어요"를 누른 시각(상태는 sent 그대로, 보내는 사람이 답하면 지운다), recheckedAt은 그 뒤 보내는 사람이 보냈어요로 답한 시각, reminders는 보냈어요 뒤 받았나요?를 다시 물은 횟수(#8).
  * @typedef {{
  *   id: string, roomId: string, version: number, from: string, to: string, amount: number,
  *   status: 'scheduled'|'due'|'opened'|'sent'|'confirmed'|'superseded',
  *   remindAt: string | null, link: string | null,
  *   fallback: { bank: string, accountNo: string, amount: number } | null,
+ *   notReceivedAt?: string, recheckedAt?: string, reminders?: number,
  * }} Transfer
  */
 
@@ -99,3 +102,15 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
  */
 
 export {};
+
+/** #2. Public profile; identity always comes from a verified token. @typedef {{ id: string, name: string, color: string }} UserProfile */
+/** Minimal deletion/retry gate, never returned in room data. @typedef {{ id: string }} DeletedUser */
+/** #7. 타임라인 요약을 붙이는 순간 받는 동의. 7일 뒤 끝난다. id is JSON.stringify([roomId, uid]). @typedef {{ id: string, roomId: string, uid: string, expiresAt: string }} LocationConsent */
+/** 좌표·이동 경로·장소 이름은 일부러 넣지 않는다. 시각은 한국 시각 'HH:MM'.
+ * @typedef {{ id: string, roomId: string, uid: string, expenseId: string, source: 'timeline_export', leftAt?: string, nextAt?: string|null, nextHome?: boolean, stayedUntil?: string, summary: string, createdAt: string }} LocationEvidence
+ */
+/** Optional Store capability needed to enable account deletion. Atomically deletes
+ * private records and unlinks shared financial records without changing amounts;
+ * returns internal links to revoke from the QR cache. Existing CRUD stays unchanged.
+ * @typedef {(uid: string) => Promise<{removedLinks: string[]}>} EraseUser
+ */
