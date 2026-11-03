@@ -3,16 +3,16 @@
 // LLM은 중재안만 낸다. 금액은 public/core.js가 계산한다.
 import { randomUUID } from 'node:crypto';
 import { ledger, settle, won, dayLabel } from '../../public/core.js';
-import { topic, subj, obj } from '../../public/ui.js';
+import { topic, subj, obj, disputeRejected } from '../../public/ui.js';
 import { HttpError } from '../http.mjs';
 import { isFlagged } from '../actions.mjs';
 import { evaluateInvoice, nextSendAt } from './rules.mjs';
 import { tossSendLink, payoutFallback } from '../payments/toss.mjs';
 import { signQrToken, QR_TTL_MS } from '../payments/qr.mjs';
 import { mediateWithGemini } from './mediate.mjs';
+import { OPEN } from './disputes.mjs';
 import { findBank } from '../../public/banks.js';
 
-const OPEN = ['open', 'proposed'];
 const STALE = '지출이 바뀌었어요. 청구서를 다시 보낸 뒤 새 금액으로 보내 주세요';
 const DEFAULT_RULES = { autoAccept: 0, sendWhen: 'now', onDispute: 'ask' };
 
@@ -28,9 +28,9 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return { room, expenses, name };
   }
 
-  // 이 사람이 함께한 지출 중 근거가 있는 첫 지출. 이미 이의가 해결된 지출은 다시 보지 않는다
-  async function firstEvidence(uid, room, expenses, resolved) {
-    for (const exp of expenses.filter((e) => e.present.includes(uid) && !resolved.has(`${uid}:${e.id}`))) {
+  // 이 사람이 함께한 지출 중 근거가 있는 첫 지출. 이미 끝난 이의(동의로 해결했거나 거부로 끝난)는 다시 보지 않는다
+  async function firstEvidence(uid, room, expenses, ended) {
+    for (const exp of expenses.filter((e) => e.present.includes(uid) && !ended.has(`${uid}:${e.id}`))) {
       const evidence = await evidenceFor(uid, exp, room);
       if (evidence.length) return { exp, evidence };
     }
@@ -59,13 +59,13 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     if (stale.length) await say(roomId, { from: actorUid, to: 'all', kind: 'invoices_superseded', text: '지출이 바뀌어 다시 보내요' });
 
     const rows = ledger(room, expenses, room.policy);
-    const resolved = new Set((await store.list('disputes', { roomId })).filter((d) => d.status === 'resolved').map((d) => `${d.by}:${d.expenseId}`));
+    const ended = new Set((await store.list('disputes', { roomId })).filter((d) => !OPEN.includes(d.status)).map((d) => `${d.by}:${d.expenseId}`));
     await say(roomId, { from: actorUid, to: 'all', kind: 'invoices_sent', text: `지출 ${expenses.length}건으로 각자의 비서에게 청구서를 보냈어요`, meta: `version ${room.version}` });
     const invoices = [];
     for (const m of room.members) {
       const r = rows[m.uid];
       const base = { id: `${roomId}:v${room.version}:${m.uid}`, roomId, version: room.version, to: m.uid, owed: r.owed, paid: r.paid, net: r.net };
-      const found = await firstEvidence(m.uid, room, expenses, resolved);
+      const found = await firstEvidence(m.uid, room, expenses, ended);
       const { decision, reasons } = evaluateInvoice({ invoice: base, settings: await settingsOf(m.uid), evidence: found?.evidence ?? [] });
       const invoice = {
         ...base,
@@ -130,6 +130,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     if (!dispute || dispute.roomId !== roomId) throw new HttpError(404, '이의를 찾을 수 없어요');
     const { room, expenses } = await load(roomId);
     const exp = expenses.find((e) => e.id === dispute.expenseId);
+    if (!exp) throw new HttpError(409, '지출이 지워져 이 이의는 닫혔어요'); // 지출을 지울 때 이의도 닫지만, 옛 데이터에는 이의만 남아 있을 수 있다
     return { dispute, room, exp, parties: [exp.payer, dispute.by] };
   }
 
@@ -180,6 +181,28 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     await say(roomId, { from: 'mediator', to: 'all', kind: 'dispute_resolved', text: `양쪽이 동의해서 ${obj(`‘${exp.title}’`)} 중재안대로 다시 나눴어요` });
     await sendInvoices(roomId, actorUid);
     return resolved;
+  }
+
+  // 중재안을 거부하면 이의가 끝나고 지출은 지금 배분 그대로 둔 채 정산이 이어진다.
+  // 이의를 낸 사람이 거부하면 철회(withdrawn), 지출을 낸 사람이 거부하면 기각(dismissed).
+  // 비서가 근거 규칙으로 먼저 동의해 뒀어도 사람은 물러설 수 있어서, 이미 동의한 당사자도 거부할 수 있다.
+  // 같은 사람이 같은 거부를 다시 보내면 처음 결과를 돌려준다(기록·송금이 늘지 않는다)
+  async function reject(roomId, disputeId, actorUid, { reason } = {}) {
+    const { dispute, exp, parties } = await disputeOf(roomId, disputeId);
+    if (!parties.includes(actorUid)) throw new HttpError(403, '이의 당사자만 거부할 수 있어요');
+    if (disputeRejected(dispute) && dispute.rejectedBy === actorUid) return dispute;
+    if (dispute.status !== 'proposed') throw new HttpError(409, dispute.status === 'open' ? '아직 중재안이 없어요' : '이미 끝난 이의예요');
+    const why = typeof reason === 'string' ? reason.replace(/\s+/g, ' ').trim().slice(0, 100).trim() : '';
+    const status = actorUid === dispute.by ? 'withdrawn' : 'dismissed';
+    const saved = { ...dispute, status, rejectedBy: actorUid, ...(why ? { rejectReason: why } : {}) };
+    await store.put('disputes', saved);
+    await say(roomId, {
+      from: actorUid, to: 'all', kind: `dispute_${status}`,
+      text: status === 'withdrawn' ? `중재안을 거부하고 ‘${exp.title}’ 이의를 거뒀어요` : `중재안을 거부해서 ‘${exp.title}’ 이의가 끝났어요`,
+      ...(why ? { meta: `사유: ${why}` } : {}),
+    });
+    await settleIfReady(roomId);
+    return saved;
   }
 
   // 지금 version의 청구서에 묻는 중인 것도, 열린 이의도 없으면 송금으로 넘어간다
@@ -329,5 +352,5 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return { due, reminded };
   }
 
-  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers, setPayout, approveTransfer, qrFor, markSent, confirmReceipt, tick };
+  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, reject, createTransfers, setPayout, approveTransfer, qrFor, markSent, confirmReceipt, tick };
 }

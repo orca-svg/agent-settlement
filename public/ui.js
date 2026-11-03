@@ -33,10 +33,39 @@ export const restNote = (rest) => (rest ? `<p class="group-note">나누고 남�
 // 이의 당사자(지출을 낸 사람·이의를 낸 사람) 중 아직 중재안에 동의하지 않은 사람. 같은 사람이면 한 번만
 export const disputeWaiting = (d, exp) => [...new Set([exp.payer, d.by])].filter((u) => !d.agreedBy.includes(u));
 
-// 중재안에 동의해 시트를 닫은 뒤 방 화면에 남기는 한 줄(글자만, 그리는 쪽에서 esc).
-// 상대가 나중에 동의해도 맞도록 그 순간이 아니라 지금 이의 상태로 만든다
-export function agreedNote(d, exp, nameOf) {
+// 아직 열린 이의(중재 전·중재안이 나온 뒤). 열린 이의가 하나라도 있으면 송금이 만들어지지 않는다
+export const disputeLive = (d) => d.status === 'open' || d.status === 'proposed';
+
+// 중재안을 거부해서 끝난 이의(이의를 낸 사람이 거두면 withdrawn, 지출을 낸 사람이 거부하면 dismissed)
+export const disputeRejected = (d) => d.status === 'withdrawn' || d.status === 'dismissed';
+
+// 이의 시트에서 이 사람이 누를 수 있는 것. 중재안이 살아 있는(proposed) 동안 당사자만 동의·거부한다.
+// 비서가 근거 규칙으로 먼저 동의해 뒀어도 사람은 거부로 물러설 수 있어서, 동의했는지와 상관없이 거부는 열어 둔다
+export function disputeChoices(d, exp, uid) {
+  const live = d.status === 'proposed' && [exp.payer, d.by].includes(uid);
+  return { agree: live && !d.agreedBy.includes(uid), reject: live };
+}
+
+// 방 화면 '이의' 목록의 한 줄(글자만, 그리는 쪽에서 esc). 열린 이의는 누구를 기다리는지, 끝난 이의는 어떻게 끝났는지
+export function disputeStatus(d, exp, nameOf) {
+  if (d.status === 'open') return '아직 중재 전이에요';
+  if (d.status === 'proposed') {
+    const waiting = disputeWaiting(d, exp);
+    return `중재안이 나왔어요${waiting.length ? `. ${waiting.map(nameOf).join('·')}의 동의를 기다려요` : ''}`;
+  }
+  if (d.status === 'resolved') return '양쪽이 동의해서 다시 나눴어요';
+  if (d.status === 'withdrawn') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부하고 이의를 거뒀어요`;
+  if (d.status === 'dismissed') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부해서 끝났어요`;
+  return '지출이 바뀌어 닫혔어요';
+}
+
+// 동의·거부해서 시트를 닫은 뒤 방 화면에 남기는 한 줄(글자만, 그리는 쪽에서 esc).
+// 상대가 나중에 동의하거나 거부해도 맞도록 그 순간이 아니라 지금 이의 상태로 만든다
+export function disputeNote(d, exp, nameOf) {
   if (d.status === 'resolved') return `양쪽이 동의해서 ${obj(`‘${exp.title}’`)} 중재안대로 다시 나눴어요. 청구서도 다시 보냈어요.`;
+  if (d.status === 'superseded') return `지출이 바뀌어 ‘${exp.title}’ 이의가 닫혔어요.`;
+  if (d.status === 'withdrawn') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부하고 ‘${exp.title}’ 이의를 거뒀어요. 지금 배분 그대로 정산해요.`;
+  if (d.status === 'dismissed') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부해서 ‘${exp.title}’ 이의가 끝났어요. 지금 배분 그대로 정산해요.`;
   const waiting = disputeWaiting(d, exp);
   return `중재안에 동의했어요.${waiting.length ? ` ${waiting.map(nameOf).join('·')}의 동의를 기다려요.` : ''}`;
 }
@@ -52,6 +81,7 @@ const ICONS = {
 export const tile = (kind) => `<span class="tile ${ICONS[kind] ? kind : 'shop'}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICONS[kind] || ICONS.shop}</svg></span>`;
 export const CHEVRON = '<svg class="chev" width="8" height="14" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 export const CHECK = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+export const CROSS = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>';
 export const ARROW = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 // 데스크톱에서 휴대폰으로 넘길 때 보여줄 QR 이미지 주소(#8).
