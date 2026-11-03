@@ -1,5 +1,26 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>내 비서 · 계정</title><link rel="stylesheet" href="style.css"></head>
-<body><header class="nav"><div class="nav-inner"><span class="nav-title">내 비서</span><a class="nav-btn" href="./">데모 보기</a></div></header>
-<main class="main" style="max-width:760px;margin:auto;padding:20px"><section class="hero"><h1>내 비서와 정산 방</h1><p class="sub">내 계정으로 들어와 확인할 일을 모아 보세요.</p></section><p id="message" role="status">연결 확인 중…</p><div id="account"></div></main>
-<script type="module" src="account.js"></script></body></html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>내 계정 · 정산은 비서끼리</title>
+  <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="solo-page">
+  <header class="nav">
+    <div class="nav-inner" id="nav-inner">
+      <div><a class="nav-brand" href="./">정산은 비서끼리</a></div>
+    </div>
+  </header>
+  <main class="solo">
+    <div id="account"><p id="message" class="group-note" role="status">연결을 확인하는 중이에요…</p></div>
+  </main>
+  <footer class="foot">
+    <p>GDGoC DevFest 2026 「Tell the Vision」 · Team 06 Money is Our Life</p>
+    <p><a href="https://github.com/orca-svg/agent-settlement/blob/main/PRIVACY.md" target="_blank" rel="noopener">개인정보 처리방침</a></p>
+  </footer>
+  <script type="module" src="account.js"></script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers } from '../public/ui.js';
+import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode } from '../public/ui.js';
 
 test('allocButton: 나눈 뒤 바뀐 게 없으면 막고, 남은 일을 알려 준다', () => {
   assert.deepEqual(allocButton({ allocated: false, fresh: false, flagged: 0 }), { label: '비서에게 나누기 맡기기', disabled: false, hint: '' });
@@ -54,6 +54,19 @@ test('logItemHtml: 안 읽은 기록 표시와 덧붙일 내용', () => {
   assert.match(html, /<details><\/details>/);
 });
 
+// 비서끼리 기록은 시스템 로그가 아니라 비서들의 대화처럼 보인다: 받는 사람은 '→' 대신 '○○에게',
+// 근거(규칙·수치)는 말풍선 밖 '왜 그렇게 했나요'를 눌러야 펼쳐지고, 같은 분의 시각은 한 번만 보인다
+test('logItemHtml: 받는 사람은 문장처럼, 근거는 펼쳐 보기로, 빈 시각은 그리지 않는다', () => {
+  const html = logItemHtml({ avatar: '', who: '민수의 비서', to: '중재 비서', time: '9:01', text: '동의할게요', meta: '규칙: 근거와 맞으면 <동의>' });
+  assert.match(html, /<span class="to">중재 비서에게<\/span>/);
+  assert.doesNotMatch(html, /→/);
+  assert.match(html, /<p class="text">동의할게요<\/p>/);
+  assert.match(html, /<details class="why"><summary>왜 그렇게 했나요<\/summary><p>규칙: 근거와 맞으면 &lt;동의&gt;<\/p><\/details>/);
+  const quiet = logItemHtml({ avatar: '', who: '나의 비서', time: '', text: '다음 말' });
+  assert.doesNotMatch(quiet, /<time>/);
+  assert.doesNotMatch(quiet, /class="why"|class="to"/);
+});
+
 test('qrImageUrl: 데이터를 인코딩해 QR 이미지 주소를 만든다', () => {
   assert.equal(
     qrImageUrl('supertoss://send?bank=토스뱅크&accountNo=1&amount=1'),
@@ -68,6 +81,17 @@ test('qrIsFresh: 같은 송금의 QR 토큰이 1분 넘게 남았을 때만 그�
   assert.equal(qrIsFresh(qr, 't2', now), false); // 다른 송금의 토큰
   assert.equal(qrIsFresh(qr, 't1', Date.parse('2026-11-25T00:14:30Z')), false); // 30초 남음 → 새로 받는다
   assert.equal(qrIsFresh(null, 't1', now), false);
+});
+
+test('sendMode: 컴퓨터에서 토스 링크가 있으면 QR만, 휴대폰이나 링크가 없으면 슬라이더', () => {
+  const link = { link: 'supertoss://send?bank=x', fallback: { bank: 'x', accountNo: '1' } };
+  const copyOnly = { link: null, fallback: { bank: '경남은행', accountNo: '1' } };
+  const none = { link: null, fallback: null };
+  assert.equal(sendMode(link, { computer: true }), 'qr');
+  assert.equal(sendMode(link, { computer: false }), 'slider');
+  assert.equal(sendMode(copyOnly, { computer: true }), 'slider'); // QR로 열 토스 링크가 없으니 계좌 복사 슬라이더를 남긴다
+  assert.equal(sendMode(none, { computer: true }), 'no-payout');
+  assert.equal(sendMode(none, { computer: false }), 'no-payout');
 });
 
 test('qrImageUrl: 빈 값이면 null', () => {

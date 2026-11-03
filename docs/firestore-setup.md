@@ -25,7 +25,7 @@
    FIREBASE_STORAGE_BUCKET=<버킷 이름>
    ```
 
-6. **배포.** `--max-instances 1`은 그대로 둬요. 서버 안의 요청 큐, QR 토큰, AI 캐시가 인스턴스 하나를 전제로 해요(`ARCHITECTURE.md` 참고).
+6. **배포.** `--max-instances 1`은 그대로 둬요. 서버 안의 요청 줄(`src/state-locks.mjs`), QR 토큰, AI 캐시가 인스턴스 하나를 전제로 해요(`ARCHITECTURE.md` 참고).
 7. **`PAYOUT_ENC_KEY`는 Firestore에 계좌가 들어간 뒤로 절대 바꾸지 않아요.** 바뀌면 잠긴 계좌를 못 풀어서 `tick()`이 멈추고, 모든 방의 송금 알림이 멈춰요.
 
 ## 프로젝트 없이 에뮬레이터로

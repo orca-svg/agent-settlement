@@ -107,9 +107,9 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     await store.appendEvent(room.id, {
       from: exp.createdBy, to: 'all', kind: 'allocated',
       text: out.how === 'obvious' ? `${topic(`‘${exp.title}’`)} ${out.why}` : `${exp.title} 영수증 ${exp.items.length}줄을 비서들이 공유한 기억 ${used}개로 나눴어요.`,
-      meta: out.how === 'obvious' ? 'allocate · AI 호출 없음'
-        : out.how === 'cache' ? `allocate · ${label} · 이전 답 재사용`
-        : `allocate · ${label} · ${(latencyMs / 1000).toFixed(1)}초`,
+      meta: out.how === 'obvious' ? '나눈 방법: AI 없이 규칙으로'
+        : out.how === 'cache' ? `나눈 방법: ${label} · 이전 답 재사용`
+        : `나눈 방법: ${label} · ${(latencyMs / 1000).toFixed(1)}초 걸렸어요`,
     });
     for (const it of exp.items.filter((x) => isFlagged(alloc[x.id]))) {
       await store.appendEvent(room.id, {

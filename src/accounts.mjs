@@ -1,5 +1,6 @@
 import { HttpError, readJson } from './http.mjs';
 import { revokeQrLinks, revokeUserQr } from './payments/qr.mjs';
+import { randomProfileColor } from '../public/profile-colors.js';
 export function registerAccountRoutes(routes, { store, authenticate, auth, clock, onErased = () => {} }) {
   routes.get('/api/me/deletion', async ({ req }) => {
     const me = await authenticate(req, { allowDeleting: true });
@@ -7,7 +8,8 @@ export function registerAccountRoutes(routes, { store, authenticate, auth, clock
   });
   routes.get('/api/me', async ({ req }) => {
     const me = await authenticate(req);
-    const profile = await store.get('users', me.uid) || { id: me.uid, name: me.name, color: '#007aff' };
+    // 처음 들어온 사람은 견본 중 무작위 색으로 시작한다. 저장해 두어 다시 열어도 같은 색이다
+    const profile = await store.get('users', me.uid) || await store.put('users', { id: me.uid, name: me.name, color: randomProfileColor() });
     return { profile };
   });
   routes.post('/api/me', async ({ req }) => {
@@ -29,7 +31,8 @@ export function registerAccountRoutes(routes, { store, authenticate, auth, clock
   });
   routes.post('/api/me/delete', async ({ req }) => {
     const me = await authenticate(req, { allowDeleting: true });
-    if (!auth || !Number.isFinite(me.authTime) || clock().getTime() / 1000 - me.authTime > 300) throw new HttpError(401, '탈퇴하려면 Google 계정으로 다시 로그인해 주세요');
+    // 검증된 토큰(취소 여부까지 확인)만 받는다. 다시 로그인 창은 띄우지 않고, 되돌릴 수 없으니 화면에서 한 번 확인을 받는다
+    if (!auth) throw new HttpError(401, '로그인이 필요해요');
     if (typeof store.eraseUser !== 'function') throw new HttpError(503, '현재 저장소의 계정 삭제 연결이 필요해요');
     await store.put('deletedUsers', { id: me.uid });
     const { removedLinks } = await store.eraseUser(me.uid);

@@ -42,7 +42,7 @@ API 서버 (server.mjs → src/app.mjs)
 | #4 방 | `rooms` 문서와 방 API | 개발용 시드 `POST /api/dev/seed` | 방 만들기·참가하기(환율 표 입력 포함) |
 | #5 비서 설정 | `agents` 문서의 `memory`·`rules` | 시드 기본값 | 설정 화면과 저장 |
 | #7 위치 | `src/agents/evidence.mjs`의 provider | `createEvidenceProvider()`가 동일한 `(uid, expense, room)` 계약으로 위치 요약 반환. 고정 근거는 개발용 시드에서만 사용 | 타임라인 파일 파서는 장치별 형식 확인 후 별도 연동 |
-| #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs`, `public/banks.js` | 받는 계좌 설정 화면(은행 선택 목록), `supertoss://send?…` 링크(실기기 검증 완료, 은행은 실기기로 확인한 표기로 바꿔 넣음), 데스크톱 QR 핸드오프(`src/payments/qr.mjs`), 계좌 칸 암호화 저장(`src/store/encrypted.mjs`) | 송금 확인 문구·다시 알림 횟수, iPhone 은행 표기 확인 |
+| #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs`, `public/banks.js` | 받는 계좌 설정 화면(은행 선택 목록), `supertoss://send?…` 링크(실기기 검증 완료, 은행은 실기기로 확인한 표기로 바꿔 넣음), 데스크톱 QR 핸드오프(`src/payments/qr.mjs`), 계좌 칸 암호화 저장(`src/store/encrypted.mjs`), 송금 확인(받는 사람의 "아직 안 들어왔어요", 다시 알림 1일·3일) | iPhone 은행 표기 확인 |
 | #10 보안 | `src/http.mjs`, `src/store/encrypted.mjs`, Firestore 보안 규칙 | 신원당 호출 제한, 계좌 칸 암호화 저장(`PAYOUT_ENC_KEY`) | 토큰 필수, 보안 규칙 테스트 |
 
 ## Store 인터페이스
@@ -70,7 +70,8 @@ API 서버 (server.mjs → src/app.mjs)
 
 탈퇴 확장 계약은 `test/account-erasure.test.mjs`로 확인해요. 프로필·비서 설정·위치 요약·본인이 등록/결제한 영수증 사진을 삭제하고, 공동 금액·분담·환율·이벤트 순번은 유지해요. `Member.deleted=true`인 익명 참여자는 새 지출에 넣을 수 없어요. 배분 사유·이의 근거·이벤트 문구에 복제된 개인정보는 지우고 열린 중재안은 다시 확인하게 해요. 원 계정과 익명 UID의 역매핑을 저장하지 않아요. 이미 발급한 QR은 무효화하고 AI 응답 캐시도 비워요. 최소 `deletedUsers/{uid}` 표식은 접근 차단·삭제 재시도용으로 유지해요. 이미 다른 참여자가 별도로 복사한 기록은 회수할 수 없어요.
 
-방·계정 API와 tick은 서버 안에서 한 큐로 직렬화해 AI 요청 도중 탈퇴/철회로 데이터가 되살아나는 경쟁을 막아요. `FirestoreStore`의 `eraseUser`와 `appendEvent`는 트랜잭션이지만, 다른 API의 '읽고 고쳐 쓰기'는 여전히 이 큐에 기대요. 그래서 Cloud Run은 `--max-instances 1`을 유지해요(QR 토큰·AI 캐시·호출 제한도 서버 메모리라 같은 조건이에요). 인스턴스를 늘리려면 이 경로들을 트랜잭션으로 옮겨야 해요. 해당 능력이 없는 저장소에 탈퇴 기능을 조용히 활성화하지 않아요.
+방·계정 API와 tick은 서버 안의 줄(`src/state-locks.mjs`)에 세워요. 한 방의 일은 그 방의 줄에 서고, 탈퇴·프로필 변경·tick처럼 여러 방에 걸친 일은 진행 중인 방의 일이 끝난 뒤 혼자 돌아요. 그래서 AI 요청 도중 탈퇴/철회로 데이터가 되살아나는 경쟁을 막아요. `FirestoreStore`의 `eraseUser`와 `appendEvent`는 트랜잭션이지만, 다른 API의 '읽고 고쳐 쓰기'는 여전히 이 줄에 기대요. 그래서 Cloud Run은 `--max-instances 1`을 유지해요(QR 토큰·AI 캐시·호출 제한도 서버 메모리라 같은 조건이에요). 인스턴스를 늘리려면 이 경로들을 트랜잭션으로 옮겨야 해요. 해당 능력이 없는 저장소에 탈퇴 기능을 조용히 활성화하지 않아요.
+
 ### 계좌 칸 암호화 (`src/store/encrypted.mjs`)
 
 `server.mjs`는 Store를 `encryptedStore(store, key)`로 감싸요. 계좌번호가 들어가는 칸(`agents.payout`, `transfers.link`, `transfers.fallback`)은 넣을 때 AES-256-GCM으로 잠그고(`enc:v1:…`, `src/security/seal.mjs`) 꺼낼 때 풀어요. 그래서 다른 코드는 평문을 넣고 평문을 받고, 저장소에는 잠긴 글자만 남아요.
@@ -98,7 +99,7 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | `expenses` | `Expense` | `expenses/{expenseId}` | 방 멤버 |
 | `agents` | `AgentSettings` | `agents/{uid}` | 안 됨(기억·잠긴 계좌) |
 | `invoices` | `Invoice` | `invoices/{invoiceId}` | 방 멤버 |
-| `disputes` | `Dispute` | `disputes/{disputeId}` | 방 멤버 |
+| `disputes` | `Dispute` | `disputes/{disputeId}` | 안 됨(위치 요약은 API의 `redactDispute`로만 가림) |
 | `transfers` | `Transfer` | `transfers/{transferId}` | 송금 당사자 |
 | `receipts` | 영수증 사진 `{ id(=지출 id), roomId, mimeType, data }` | Cloud Storage `receipts/{expenseId}`(문서 1MiB 한도를 넘을 수 있어서) | 안 됨(API로만) |
 | `users` | `UserProfile` | `users/{uid}` | 본인 |
@@ -108,6 +109,14 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | 비서 기록 | `AgentEvent` | `rooms/{roomId}/events/{seq}`, 카운터 `rooms/{roomId}/meta/events` | 방 멤버(기록만, 카운터는 안 됨) |
 
 방 멤버는 `rooms` 문서의 `_memberUids`로 확인해요. 탈퇴로 익명 처리된 멤버는 여기서 빠져요.
+
+### #7 위치 근거의 판단과 승인 (11/3 리뷰 반영)
+
+위치 근거는 이의를 낼 때 사용자가 고른 Google 지도 타임라인 파일에서 브라우저가 찾은 시각만 받아요(`public/timeline.js`). `LocationEvidence`는 `leftAt`·`nextAt`·`nextHome` 또는 `stayedUntil`과 서버가 다시 만든 `summary`만 가져요. `Evidence`로는 떠난 시각이면 `left_at`(`time`), 결제까지 머물렀으면 `text`(`stayedUntil`)로, 늘 `requiresHumanApproval=true`와 함께 넘겨요. 파일·좌표·장소 이름은 서버로 보내지 않아요. 예전 체크인·체크아웃 기록(`source` 없음)은 근거로 쓰지 않아요.
+
+중재 모델 출력의 줄별 `evidenceConflict`가 true인 경우만 서버가 그 줄의 confidence를 0.49 이하로 제한해요. 다른 줄의 확신도는 그대로예요. 모델의 의미 판단은 완전한 충돌 검출을 보장하지 않아요. 규칙 fallback에서는 충돌을 추측하지 않아요. 타임라인 요약은 본인이 낸 자료라 confidence와 별도로 `confirmed=false`이며 자동 동의를 하지 않아요. 두 당사자의 명시적 동의 후에만 배분을 확정해요.
+
+위치 요약과 중재 설명은 이의 당사자만 API로 읽어요. Firestore 규칙도 `disputes` 직접 읽기를 막아 두었어요.
 
 ## 도메인 타입 요약
 
@@ -133,9 +142,9 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | GET / POST | `/api/me` | 내 프로필 읽기 / `{ name, color }` 저장 |
 | GET | `/api/rooms` | 내 방 목록 `{ rooms: [{ id, name, dates }] }` |
 | GET | `/api/me/deletion` | 삭제 재시도 상태 `{ pending }` |
-| POST | `/api/me/delete` | 5분 이내 Google 재인증 필요. 개인정보 삭제·공동 기록 익명화·Firebase 계정 삭제 |
-| GET / POST | `/api/rooms/:id/location` | 내 요약 목록 / `{ expenseId, action, observedAt, relation }` 기록. 좌표 원본·임의 요약 문자열은 거부 |
-| POST | `/api/rooms/:id/location/consent` | `{ agree: true, expiresAt }`. 최대 24시간 동의 |
+| POST | `/api/me/delete` | 검증된 토큰 필요(다시 로그인 창 없음, 화면에서 한 번 확인). 개인정보 삭제·공동 기록 익명화·Firebase 계정 삭제 |
+| GET | `/api/rooms/:id/location` | 내 동의와 위치 요약 목록 |
+| POST | `/api/rooms/:id/location/timeline` | 이의를 낼 때 타임라인에서 찾은 결과 `{ agree: true, expenseId, leftAt, nextAt?, nextHome? }` 또는 `{ agree: true, expenseId, stayedUntil }`. 그 지출 시간대 밖의 시각·좌표·다른 필드는 거부, 지출당 한 번(409). 붙이는 순간 7일 동의 |
 | POST | `/api/rooms/:id/location/revoke` | 내 동의와 요약, 연결된 미확정 중재안 삭제 |
 | POST | `/api/allocate`, `/api/mediate` | 데모 화면용 메뉴 배분·중재 |
 | POST | `/api/dev/seed` | 개발용 데모 방 만들기(`DEV_SEED=1`일 때만) |
@@ -155,12 +164,12 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | POST | `/api/rooms/:id/disputes/:did/mediate` | 중재 비서에게 맡기기(당사자만) |
 | POST | `/api/rooms/:id/disputes/:did/agree` | 중재안에 동의. 양쪽이 동의하면 지출을 다시 나누고 version을 올려 청구서를 다시 보내요 |
 | POST | `/api/rooms/:id/payout` | 받을 계좌 `{ bank, accountNo, holder }`. 나에게 오는 송금에 토스 링크를 채워요 |
-| POST | `/api/rooms/:id/transfers/:tid/approve` · `sent` · `confirm` | 송금 화면 열기·보냈어요(보내는 사람), 받았어요(받는 사람) |
-| POST | `/api/rooms/:id/transfers/:tid/qr` | 컴퓨터 송금 화면에 띄울 QR 토큰 받기(보내는 사람만). 응답 `{ qrToken, expiresAt }`, 15분 뒤 만료. 받을 계좌가 없거나 이미 보낸 송금이면 409 |
+| POST | `/api/rooms/:id/transfers/:tid/approve` · `sent` · `confirm` · `not-received` | 송금 화면 열기·보냈어요(보내는 사람), 받았어요·아직 안 들어왔어요(받는 사람). `not-received`는 `sent`일 때만 되고, 상태는 `sent` 그대로 두고 `notReceivedAt`만 붙여 보내는 사람에게 다시 물어요. 보냈다고 한 돈이라 지출이 바뀌어도 대체되지 않고, 받는 사람이 계좌를 바꿔도 링크가 바뀌지 않아요. 보내는 사람이 송금 내역을 보고 `sent`를 다시 부르면 표시를 내리고 `recheckedAt`을 남겨요(지출이 바뀐 뒤여도 돼요). 그 사이 돈이 들어왔으면 `confirm`도 돼요 |
+| POST | `/api/rooms/:id/transfers/:tid/qr` | 컴퓨터 송금 화면에 띄울 QR 토큰 받기(보내는 사람만). 응답 `{ qrToken, expiresAt }`, 15분 뒤 만료. 받을 계좌가 없거나 이미 보낸 송금이면 409(받는 사람이 안 들어왔다고 한 송금은 다시 보낼 수 있게 만들어 줘요) |
 | GET | `/api/qr/:token` | 휴대폰으로 QR을 찍으면 열리는 주소. 토큰을 토스 링크로 바꿔 302로 넘겨요. **신원 헤더 없이** 열려요(토큰이 곧 열쇠). 만료되었거나 잘못된 토큰은 404. 토큰은 서버 메모리에만 있어서 서버가 한 대일 때만 맞아요 |
-| POST | `/api/cron/tick` | 때가 된 송금 알림, 보낸 뒤 24시간 미확인 알림. `x-cron-secret`이 `CRON_SECRET`과 같을 때만(로컬 서버는 30초마다 스스로 불러요) |
+| POST | `/api/cron/tick` | 때가 된 송금 알림, 보낸 뒤 미확인 알림(1일·3일 뒤 두 번). `x-cron-secret`이 `CRON_SECRET`과 같을 때만(로컬 서버는 30초마다 스스로 불러요) |
 
-`actions`는 이벤트 기록에서 세지 않고 서버가 현재 상태에서 계산해요(`src/actions.mjs`). 그래서 처리한 일은 자동으로 빠져요. 종류는 `confirm_line`(줄 확인), `answer_invoice`(한도를 넘은 청구서), `agree_dispute`(중재 맡기기·중재안 동의), `approve_transfer`(보낼 때가 된 송금), `set_payout`(받을 계좌 없음), `confirm_receipt`(받았는지 확인)예요.
+`actions`는 이벤트 기록에서 세지 않고 서버가 현재 상태에서 계산해요(`src/actions.mjs`). 그래서 처리한 일은 자동으로 빠져요. 종류는 `confirm_line`(줄 확인), `answer_invoice`(한도를 넘은 청구서), `agree_dispute`(중재 맡기기·중재안 동의), `approve_transfer`(보낼 때가 된 송금, 보냈는지 다시 묻는 송금), `set_payout`(받을 계좌 없음), `confirm_receipt`(받았는지 확인)예요.
 
 **송금 링크는 미리 만들어요.** 브라우저는 사용자 제스처 안에서만 앱을 열어 줘요. 그래서 송금을 만들 때 서버가 `link`(토스 송금 화면)와 `fallback`(계좌·금액 복사용)을 채워 두고, 화면은 밀어서 보내기를 놓는 그 순간 링크를 열어요.
 

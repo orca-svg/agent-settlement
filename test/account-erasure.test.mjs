@@ -59,15 +59,14 @@ test('authenticated deletion unlinks a room member, invalidates QR and rejects s
   await store.put('transfers', { id: 'room:ms:cs', roomId: 'room', from: 'ms', to: 'cs', amount: 200, link: 'supertoss://unrelated-account', fallback: { accountNo: '456' } });
   const currentQr = signQrToken('supertoss://current-account');
   const oldQr = signQrToken('supertoss://old-account', { subjectUids: ['me', 'cs'] });
-  let authTime = Math.floor(Date.now() / 1000) - 600;
+  const authTime = Math.floor(Date.now() / 1000) - 600; // 10분 전에 로그인
   const removed = [];
   const server = createApp({ store, auth: { verifyIdToken: async () => ({ uid: 'me', auth_time: authTime }), deleteUser: async uid => removed.push(uid) } });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   t.after(() => { server.closeAllConnections(); server.close(); });
   const req = (path, method = 'GET') => fetch(`http://127.0.0.1:${server.address().port}${path}`, { method, headers: { authorization: 'Bearer valid' } });
-  assert.equal((await req('/api/me/delete', 'POST')).status, 401);
+  // 오래전에 로그인했어도 다시 로그인 창 없이 탈퇴한다. 되돌릴 수 없으니 화면에서 한 번 확인을 받는다
   assert.ok((await store.get('rooms', 'room')).members.some(m => m.uid === 'me'));
-  authTime = Math.floor(Date.now() / 1000);
   assert.equal((await req('/api/me/delete', 'POST')).status, 200);
   assert.deepEqual(removed, ['me']);
   assert.equal(verifyQrToken(oldQr), null);
