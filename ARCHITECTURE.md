@@ -38,7 +38,7 @@ API 서버 (server.mjs → src/app.mjs)
 | #3 Firestore | `src/store/`의 Store | `MemoryStore` | 같은 메서드를 가진 `FirestoreStore` |
 | #3 Firestore | `public/room-api.js`의 `subscribeRoom()` | 2초 폴링 | `onSnapshot` |
 | #4 방 | `rooms` 문서와 방 API | 개발용 시드 `POST /api/dev/seed` | 방 만들기·참가하기(환율 표 입력 포함) |
-| #5 비서 설정 | `agents` 문서의 `memory`·`rules` | 시드 기본값 | 설정 화면과 저장 |
+| #5 비서 설정 | `src/agents/settings.mjs`, `public/agent-panel.js`, `public/agent-rules.js` | 기억·규칙·규칙 변경 기록·처음 설정·방별 공유 선택. 알림 수준은 지금 종 배지에만 적용 | 푸시 알림이 생기면 `rules.notify`를 따른다. 요금제가 생기면 `MEMORY_LIMITS`에 더한다 |
 | #7 위치 | `src/agents/evidence.mjs`의 `evidenceFor()`·`counterFor()` | 빈 배열(개발용 데모 방의 '2차 바'만 고정 근거) | 위치 요약 → `Evidence` |
 | #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs`, `public/banks.js` | 받는 계좌 설정 화면(은행 선택 목록), `supertoss://send?…` 링크(실기기 검증 완료, 은행은 실기기로 확인한 표기로 바꿔 넣음), 데스크톱 QR 핸드오프(`src/payments/qr.mjs`), 계좌 칸 암호화 저장(`src/store/encrypted.mjs`), 송금 확인(받는 사람의 "아직 안 들어왔어요", 다시 알림 1일·3일) | iPhone 은행 표기 확인 |
 | #10 보안 | `src/http.mjs`, `src/store/encrypted.mjs`, Firestore 보안 규칙 | 신원당 호출 제한, 계좌 칸 암호화 저장(`PAYOUT_ENC_KEY`) | 토큰 필수, 보안 규칙 테스트 |
@@ -97,9 +97,10 @@ API 서버 (server.mjs → src/app.mjs)
 - **`Room`:** 멤버, 환율 표 `fx`(원/100 단위, 결제일별 매매기준율·카드 수수료·사람별 현찰 환율), 합의한 환율 정책, `version`을 가져요. `version`은 지출이 바뀔 때마다 올라가고, 청구서·송금은 이 version에 묶여요.
 - **`Expense`:** `split`이 `'items'`면 영수증 줄(`items`)마다 `alloc`의 `consumers`가 나눠 내요. `allocMemory`는 배분할 때 쓴 비서 기억의 지문이고, 방 응답의 `allocFresh`는 그 지문이 지금 기억과 같은지예요(같으면 화면이 '다시 나누기'를 막아요).
 - **`AgentSettings`:**
-  - `memory`: 정산에 쓰라고 공유한 기억이에요. 무료 요금제는 5개까지예요.
-  - `rules`: 자동 수락 한도, 보낼 시기(`'now'` 또는 `{ payday: 25 }`), 이의 처리예요.
-  - `payout`: 받는 계좌예요.
+  - `memory`: 정산에 쓰는 기억이에요. 무료 요금제는 5개까지예요. `memoryHidden[roomId]`는 그 방에서 공유를 끈 기억이고, 기본은 모두 공유예요. 모델에 가는 기억은 `sharedMemory()`를 거쳐요.
+  - `rules`: 자동 수락 한도, 보낼 시기(`'now'`, `{ payday: 25 }`, `'manual'`), 이의 처리, 알림 수준(`'actions'`, `'all'`)이에요. 값이 망가졌으면 기본값으로 읽어서 한도는 0이 돼요. 즉 모든 청구서를 물어요.
+  - `ruleHistory`: 규칙 변경 기록(최근 50개)이에요. `onboardedAt`: 처음 설정을 마친 시각이에요.
+  - `payout`: 받는 계좌예요. 사람마다 하나이고, 바꾸면 그 사람이 받을 모든 방의 대기 중 송금 링크가 함께 바뀌어요.
 - **`AgentEvent.action`:** 사람이 할 일이에요. `type`은 `confirm_line`, `answer_invoice`, `agree_dispute`, `approve_transfer`, `confirm_receipt`, `set_payout` 중 하나이고, `for`가 그 일을 할 사람이에요.
 
 ## API
@@ -126,7 +127,13 @@ API 서버 (server.mjs → src/app.mjs)
 | POST | `/api/rooms/:id/disputes` | 이의 제기 `{ expenseId, claim }` |
 | POST | `/api/rooms/:id/disputes/:did/mediate` | 중재 비서에게 맡기기(당사자만) |
 | POST | `/api/rooms/:id/disputes/:did/agree` | 중재안에 동의. 양쪽이 동의하면 지출을 다시 나누고 version을 올려 청구서를 다시 보내요 |
-| POST | `/api/rooms/:id/payout` | 받을 계좌 `{ bank, accountNo, holder }`. 나에게 오는 송금에 토스 링크를 채워요 |
+| POST | `/api/rooms/:id/payout` | 받을 계좌 `{ bank, accountNo, holder }`. 내가 받을 모든 방의 대기 중 송금에 토스 링크를 채워요 |
+| GET | `/api/me/agent` | 내 비서 설정 전체(계좌 포함, 본인만). 방 응답의 `myAgent`는 계좌번호 없는 요약이에요 |
+| POST | `/api/me/agent/rules` | 규칙 일부 `{ autoAccept?, sendWhen?, onDispute?, notify? }`. 바뀐 칸만 `ruleHistory`에 남고, 보낼 시기가 바뀌면 대기 중 송금의 알림 시각을 옮겨요 |
+| POST | `/api/me/agent/onboarding` | 처음 설정 마치기 `{ rules?, memory? }` |
+| POST | `/api/me/agent/memory` · `memory/edit` · `memory/delete` | 기억 더하기 `{ text }`, 고치기 `{ from, to }`, 지우기 `{ text }`. 한도를 넘으면 409 |
+| POST | `/api/me/agent/payout` | 방 없이 받을 계좌 저장 |
+| POST | `/api/rooms/:id/agent/shared` | 이 방에 기억 하나 공유·끄기 `{ text, shared }`(방 멤버만) |
 | POST | `/api/rooms/:id/transfers/:tid/approve` · `sent` · `confirm` · `not-received` | 송금 화면 열기·보냈어요(보내는 사람), 받았어요·아직 안 들어왔어요(받는 사람). `not-received`는 `sent`일 때만 되고, 상태는 `sent` 그대로 두고 `notReceivedAt`만 붙여 보내는 사람에게 다시 물어요. 보냈다고 한 돈이라 지출이 바뀌어도 대체되지 않고, 받는 사람이 계좌를 바꿔도 링크가 바뀌지 않아요. 보내는 사람이 송금 내역을 보고 `sent`를 다시 부르면 표시를 내리고 `recheckedAt`을 남겨요(지출이 바뀐 뒤여도 돼요). 그 사이 돈이 들어왔으면 `confirm`도 돼요 |
 | POST | `/api/rooms/:id/transfers/:tid/qr` | 컴퓨터 송금 화면에 띄울 QR 토큰 받기(보내는 사람만). 응답 `{ qrToken, expiresAt }`, 15분 뒤 만료. 받을 계좌가 없거나 이미 보낸 송금이면 409(받는 사람이 안 들어왔다고 한 송금은 다시 보낼 수 있게 만들어 줘요) |
 | GET | `/api/qr/:token` | 휴대폰으로 QR을 찍으면 열리는 주소. 토큰을 토스 링크로 바꿔 302로 넘겨요. **신원 헤더 없이** 열려요(토큰이 곧 열쇠). 만료되었거나 잘못된 토큰은 404. 토큰은 서버 메모리에만 있어서 서버가 한 대일 때만 맞아요 |
@@ -140,7 +147,7 @@ API 서버 (server.mjs → src/app.mjs)
 
 ```bash
 npm start                      # 데모 화면: http://localhost:4500
-DEV_SEED=1 npm start           # 실제 방 화면을 시드 데이터로 열어 볼 때
+DEV_SEED=1 npm start           # 실제 방 화면을 시드 데이터로 열어 볼 때('나를 새 사용자로'는 처음 설정 흐름 확인용)
 npm test                       # 계약·계산 테스트
 ```
 

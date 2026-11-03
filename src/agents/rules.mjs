@@ -13,8 +13,9 @@ export function evaluateInvoice({ invoice, settings, evidence = [] }) {
 const KST = 9 * 3600_000;
 const daysIn = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
 
-// 언제 송금을 알려 줄지. 'now'면 지금, { payday: d }면 다음 d일 09:00 KST(그달에 d일이 없으면 마지막 날)
+// 언제 송금을 알려 줄지. 'now'면 지금, { payday: d }면 다음 d일 09:00 KST(그달에 d일이 없으면 마지막 날), 'manual'이면 알리지 않는다(null)
 export function nextSendAt(now, sendWhen) {
+  if (sendWhen === 'manual') return null;
   if (!sendWhen?.payday) return now.toISOString();
   const kst = new Date(now.getTime() + KST);
   let y = kst.getUTCFullYear();

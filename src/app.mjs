@@ -12,6 +12,7 @@ import { seedDemoRoom } from './dev/seed.mjs';
 import { registerExpenseRoutes } from './expenses/routes.mjs';
 import { pendingActions } from './actions.mjs';
 import { createOrchestrator } from './agents/orchestrator.mjs';
+import { createAgentSettings, registerAgentSettingsRoutes } from './agents/settings.mjs';
 import { registerAgentRoutes } from './agents/routes.mjs';
 import { allocateWithGemini } from './agents/allocate.mjs';
 import { createCache } from './agents/cache.mjs';
@@ -108,11 +109,20 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     return { room, me: { uid: me.uid, name: me.name } };
   }
 
-  // 개발용: 데모 방 만들기. #4 방 만들기가 생기기 전까지 실제 방 화면을 열어 보는 용도
-  routes.post('/api/dev/seed', async () => {
+  // 방과 상관없이 내 설정을 다루는 요청의 신원 확인(#5)
+  async function whoAmI(req) {
+    const who = await identify(req, store);
+    if (!who) throw new HttpError(401, '누구인지 알려 주세요');
+    return who;
+  }
+
+  // 개발용: 데모 방 만들기. #4 방 만들기가 생기기 전까지 실제 방 화면을 열어 보는 용도.
+  // { freshUser: true }면 '나'를 비서 설정 전의 새 사용자로 둔다(처음 설정 흐름을 확인할 때)
+  routes.post('/api/dev/seed', async ({ req }) => {
     if (env.DEV_SEED !== '1') throw new HttpError(404, 'not found');
     const id = `demo-${randomUUID().slice(0, 8)}`;
-    await seedDemoRoom(store, { id });
+    const { freshUser } = await readJson(req);
+    await seedDemoRoom(store, { id, freshUid: freshUser ? 'me' : null });
     return { roomId: id };
   });
 
@@ -130,6 +140,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       invoices,
       disputes,
       transfers: transfers.map((t) => redactTransfer(t, me.uid)),
+      myAgent: await agentSettings.summary(me.uid, room.id),
       ledger: ledger(room, expenses, room.policy),
       actions: pendingActions({ room, expenses, invoices, disputes, transfers }).filter((x) => x.for === me.uid),
     };
@@ -143,6 +154,8 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   registerExpenseRoutes(routes, { ...ctx, member });
   const orchestrator = createOrchestrator({ store, gemini, clock, evidenceFor, counterFor });
   registerAgentRoutes(routes, { orchestrator, member, overLimit });
+  const agentSettings = createAgentSettings({ store, clock, orchestrator });
+  registerAgentSettingsRoutes(routes, { settings: agentSettings, orchestrator, whoAmI, member });
 
   // 때가 된 송금 알림. 배포에서는 Cloud Scheduler가 x-cron-secret을 붙여 부른다. 비밀값이 설정되지 않았으면 열지 않는다
   routes.post('/api/cron/tick', async ({ req }) => {

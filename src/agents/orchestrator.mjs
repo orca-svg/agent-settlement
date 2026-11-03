@@ -8,20 +8,22 @@ import { HttpError } from '../http.mjs';
 import { isFlagged, awaitsSender } from '../actions.mjs';
 import { evaluateInvoice, nextSendAt } from './rules.mjs';
 import { tossSendLink, payoutFallback } from '../payments/toss.mjs';
-import { signQrToken, QR_TTL_MS } from '../payments/qr.mjs';
+import { signQrToken, revokeQrLink, QR_TTL_MS } from '../payments/qr.mjs';
 import { mediateWithGemini } from './mediate.mjs';
 import { findBank } from '../../public/banks.js';
+import { ON_DISPUTE, sendWhenLabel } from '../../public/agent-rules.js';
+import { normalizeSettings } from './settings.mjs';
+import { roomMemory } from './memory.mjs';
 
 const OPEN = ['open', 'proposed'];
 const STALE = '지출이 바뀌었어요. 청구서를 다시 보낸 뒤 새 금액으로 보내 주세요';
-const DEFAULT_RULES = { autoAccept: 0, sendWhen: 'now', onDispute: 'ask' };
 // 보냈어요 뒤 받는 사람이 답이 없으면 다시 묻는 때(sentAt 기준). 1일 뒤, 3일 뒤 두 번. 그 뒤로는 할 일 카드만 남는다
 const DAY_MS = 24 * 3600_000;
 const RECEIPT_REMINDERS = [1 * DAY_MS, 3 * DAY_MS];
 
 export function createOrchestrator({ store, gemini = null, clock = () => new Date(), evidenceFor = async () => [], counterFor = async () => [] }) {
   const say = (roomId, ev) => store.appendEvent(roomId, ev);
-  const settingsOf = async (uid) => (await store.get('agents', uid)) ?? { uid, memory: [], rules: DEFAULT_RULES, payout: null };
+  const settingsOf = async (uid) => normalizeSettings(await store.get('agents', uid), uid);
 
   async function load(roomId) {
     const room = await store.get('rooms', roomId);
@@ -82,11 +84,11 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
         await say(roomId, { from: m.uid, to: actorUid, kind: 'invoice_accepted', text: acceptedText(r.net), meta: `규칙 · ${reasons.join(' · ')}` });
       } else if (decision === 'ask') {
         await say(roomId, {
-          from: m.uid, to: m.uid, kind: 'invoice_asked', text: `${won(-r.net)} 청구서가 왔어요. ${reasons[0]}`,
+          from: m.uid, to: m.uid, kind: 'invoice_asked', text: `${won(-r.net)} 청구서가 왔어요. ${reasons[0]}`, meta: '규칙 · 자동 수락 한도 초과',
           action: { type: 'answer_invoice', ref: invoice.id, for: m.uid },
         });
       } else {
-        await raiseDispute(roomId, { by: m.uid, expenseId: found.exp.id, claim: claimFrom(name(m.uid), found), evidence: found.evidence });
+        await raiseDispute(roomId, { by: m.uid, expenseId: found.exp.id, claim: claimFrom(name(m.uid), found), evidence: found.evidence, byRule: true });
       }
     }
     await settleIfReady(roomId);
@@ -110,7 +112,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
   }
 
   // 같은 사람이 같은 지출에 이미 낸 이의가 열려 있으면 그것을 쓴다(다시 보내도 중복 없음)
-  async function raiseDispute(roomId, { by, expenseId, claim, evidence = [] }) {
+  async function raiseDispute(roomId, { by, expenseId, claim, evidence = [], byRule = false }) {
     const { expenses } = await load(roomId);
     const exp = expenses.find((e) => e.id === expenseId);
     if (!exp) throw new HttpError(400, '이의를 제기할 지출을 골라 주세요');
@@ -121,10 +123,14 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     await store.put('disputes', dispute);
     await say(roomId, {
       from: by, to: exp.payer, kind: 'dispute_raised', text: `${obj(`‘${exp.title}’`)} 다시 나누자고 이의를 제기했어요`,
-      ...(evidence.length ? { meta: `근거: ${evidence.map((e) => e.summary).join(' · ')}` } : {}),
+      ...(evidence.length ? { meta: `${byRule ? `규칙 · ${ON_DISPUTE.evidence} · ` : ''}근거: ${evidence.map((e) => e.summary).join(' · ')}` } : {}),
     });
     // 지출을 낸 사람이 이의를 중재 비서에게 맡겨 두었으면 바로 중재한다. 아니면 낸 사람에게 묻는다(pendingActions)
-    if ((await settingsOf(exp.payer)).rules.onDispute === 'mediator') return mediate(roomId, dispute.id, exp.payer);
+    if ((await settingsOf(exp.payer)).rules.onDispute === 'mediator') return mediate(roomId, dispute.id, exp.payer, { byRule: true });
+    await say(roomId, {
+      from: exp.payer, to: exp.payer, kind: 'dispute_asked', text: `${obj(`‘${exp.title}’`)} 어떻게 할지 주인에게 물어요`, meta: '규칙 · 이의가 오면 주인에게 묻기',
+      action: { type: 'agree_dispute', ref: dispute.id, for: exp.payer },
+    });
     return dispute;
   }
 
@@ -143,19 +149,19 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
   };
 
   // 중재 비서가 양쪽 주장·근거·영수증 주문 시각으로 나누는 법을 제안한다
-  async function mediate(roomId, disputeId, actorUid) {
+  async function mediate(roomId, disputeId, actorUid, { byRule = false } = {}) {
     const { dispute, room, exp, parties } = await disputeOf(roomId, disputeId);
     if (!parties.includes(actorUid)) throw new HttpError(403, '이의 당사자만 중재를 맡길 수 있어요');
     if (dispute.status !== 'open') throw new HttpError(409, '이미 중재안이 나왔어요');
     if (!exp.items?.length) throw new HttpError(409, '영수증 줄이 없어 중재할 수 없어요. 지출을 고쳐 줄을 넣어 주세요');
-    const memoryByUid = Object.fromEntries(await Promise.all(room.members.map(async (m) => [m.uid, (await settingsOf(m.uid)).memory ?? []])));
+    const memoryByUid = await roomMemory(store, room); // 이 방에 공유한 기억만 중재 비서에게 보여 준다
     const started = Date.now();
     const out = await mediateWithGemini(gemini, { exp, room, dispute, counter: await counterFor(exp, room), memoryByUid });
     const proposed = { ...dispute, status: 'proposed', proposal: { summary: out.summary, alloc: out.alloc, source: out.source } };
     await store.put('disputes', proposed);
     await say(roomId, {
       from: 'mediator', to: 'all', kind: 'dispute_proposed', text: out.summary,
-      meta: `mediate · ${out.source === 'rules' ? '규칙' : out.source} · ${((Date.now() - started) / 1000).toFixed(1)}초`,
+      meta: `${byRule ? `규칙 · ${ON_DISPUTE.mediator} · ` : ''}mediate · ${out.source === 'rules' ? '규칙' : out.source} · ${((Date.now() - started) / 1000).toFixed(1)}초`,
     });
     // 이의를 낸 비서는 '근거가 있으면 이의'를 맡았으므로, 제안이 그 근거와 맞으면 스스로 동의한다
     if ((await settingsOf(dispute.by)).rules.onDispute === 'evidence' && matchesEvidence(exp, dispute, out.alloc)) {
@@ -205,6 +211,11 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return `${dayLabel(kst.slice(0, 10))} 09:00`;
   };
 
+  const remindText = (remindAt, now) => {
+    if (!remindAt) return '직접 보낼 때까지 따로 알리지 않을게요';
+    return new Date(remindAt) > now ? `${whenText(remindAt)}에 알려 드릴게요` : '곧 알려 드릴게요';
+  };
+
   // 지금 version의 송금을 한 번만 만든다. 이전 version의 아직 보내지 않은 송금은 대체한다
   async function createTransfers(roomId) {
     const { room, expenses, name } = await load(roomId);
@@ -225,11 +236,10 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       };
       await store.put('transfers', transfer);
       out.push(transfer);
-      const later = new Date(transfer.remindAt) > now;
       await say(roomId, {
         from: edge.from, to: edge.from, kind: 'transfer_scheduled',
-        text: `${name(edge.to)}에게 ${won(edge.amount)}을 보내요. ${later ? `${whenText(transfer.remindAt)}에 알려 드릴게요` : '곧 알려 드릴게요'}`,
-        meta: later ? '규칙 · 월급날에 보내기' : '규칙 · 바로 보내기',
+        text: `${name(edge.to)}에게 ${won(edge.amount)}을 보내요. ${remindText(transfer.remindAt, now)}`,
+        meta: `규칙 · ${sendWhenLabel(sender.rules.sendWhen)}`,
       });
       if (!transfer.link) {
         await say(roomId, {
@@ -241,17 +251,45 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return out;
   }
 
-  // 받을 계좌를 정하면 나에게 오는 아직 끝나지 않은 송금에 링크를 채운다
+  // 주인이 보낼 시기를 바꾸면 아직 보내지 않은 송금의 알림 시각을 옮긴다(모든 방).
+  // 이미 때가 되어 알린 송금(due)은 더 늦추는 쪽으로만 옮긴다. 송금 앱을 연 뒤(opened)로는 돈이 오갔을 수 있어 건드리지 않는다
+  async function applySendWhen(uid, sendWhen) {
+    const now = clock();
+    const remindAt = nextSendAt(now, sendWhen);
+    const later = !remindAt || new Date(remindAt) > now;
+    let moved = 0;
+    for (const t of await store.list('transfers', { from: uid })) {
+      if (t.status !== 'scheduled' && !(t.status === 'due' && later)) continue;
+      const { room, name } = await load(t.roomId);
+      if (t.version !== room.version) continue;
+      const { dueAt, ...rest } = t;
+      await store.put('transfers', { ...rest, status: 'scheduled', remindAt });
+      await say(t.roomId, {
+        from: uid, to: uid, kind: 'transfer_rescheduled',
+        text: `${name(t.to)}에게 보낼 ${won(t.amount)}, ${remindText(remindAt, now)}`,
+        meta: `규칙 변경 · ${sendWhenLabel(sendWhen)}`,
+      });
+      moved++;
+    }
+    return moved;
+  }
+
+  // 받을 계좌는 사람마다 하나다. 정하거나 바꾸면 그 사람이 받을 모든 방의 아직 끝나지 않은 송금에 링크를 다시 채운다.
+  // 방 안에서 부르면 그 방에도 알리고(roomId), 설정 화면에서 부르면 송금이 걸린 방에만 알린다(roomId null)
   async function setPayout(roomId, actorUid, { bank, accountNo, holder } = {}) {
     if (!String(bank ?? '').trim() || !/\d{6,}/.test(String(accountNo ?? '').replace(/\D/g, ''))) throw new HttpError(400, '은행과 계좌번호를 확인해 주세요');
     const agent = await settingsOf(actorUid);
     // 은행은 목록의 이름으로 통일해 저장한다('국민은행' → 'KB국민은행'). 목록에 없으면 쓴 그대로
     const payout = { bank: (findBank(bank)?.label ?? String(bank).trim()).slice(0, 30), accountNo: String(accountNo).replace(/[^\d-]/g, '').slice(0, 30), holder: String(holder ?? '').trim().slice(0, 30) };
     await store.put('agents', { ...agent, id: actorUid, uid: actorUid, payout });
-    for (const t of (await store.list('transfers', { roomId })).filter((x) => x.to === actorUid && ['scheduled', 'due', 'opened'].includes(x.status))) {
+    const rooms = new Set(roomId ? [roomId] : []);
+    for (const t of (await store.list('transfers', { to: actorUid })).filter((x) => ['scheduled', 'due', 'opened'].includes(x.status))) {
+      if (t.link) revokeQrLink(t.link);
       await store.put('transfers', { ...t, ...paymentOf(payout, t.amount) });
+      rooms.add(t.roomId);
     }
-    await say(roomId, { from: actorUid, to: 'all', kind: 'payout_set', text: '받을 계좌를 알려 줬어요. 이제 바로 보낼 수 있어요' });
+    const text = agent.payout ? '받을 계좌를 바꿨어요. 아직 보내지 않은 송금에는 새 계좌가 들어가요' : '받을 계좌를 알려 줬어요. 이제 바로 보낼 수 있어요';
+    for (const id of rooms) await say(id, { from: actorUid, to: 'all', kind: 'payout_set', text });
     return { ok: true };
   }
 
@@ -334,7 +372,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       const { room, name } = await load(t.roomId);
       if (['scheduled', 'due', 'opened'].includes(t.status) && t.version !== room.version) {
         await store.put('transfers', { ...t, status: 'superseded' });
-      } else if (t.status === 'scheduled' && new Date(t.remindAt) <= now) {
+      } else if (t.status === 'scheduled' && t.remindAt && new Date(t.remindAt) <= now) { // remindAt이 없으면 직접 보내기라 알리지 않는다
         await store.put('transfers', { ...t, status: 'due', dueAt: now.toISOString() });
         await say(t.roomId, {
           from: t.from, to: t.from, kind: 'transfer_due', text: `${name(t.to)}에게 ${won(t.amount)}을 보낼 때예요`,
@@ -357,5 +395,5 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return { due, reminded };
   }
 
-  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers, setPayout, approveTransfer, qrFor, markSent, reportNotReceived, confirmReceipt, tick };
+  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, createTransfers, applySendWhen, setPayout, approveTransfer, qrFor, markSent, reportNotReceived, confirmReceipt, tick };
 }

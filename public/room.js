@@ -6,6 +6,8 @@ import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
 import { BANKS } from './banks.js';
+import { createAgentPanel } from './agent-panel.js';
+import { notifies } from './agent-rules.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
@@ -35,6 +37,7 @@ const logPop = createLogPop({
     ...opts,
   }),
   timeOf: (e) => timeOf(e.at),
+  counts: (e) => notifies(e, currentUid(), state.data?.myAgent?.notify),
   todosHtml: () => (state.data?.actions ?? []).map((a) => `<div class="pop-todo"><b>${esc(state.data.me.name)}의 할 일</b><p>${esc(a.text)}</p>
     <div class="actions">${actionButtons(a, 'sm')}<button class="btn sm plain" data-action="close-log">나중에</button></div></div>`).join(''),
   seen: {
@@ -321,6 +324,7 @@ function closePhoto() {
 const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit) || 0), 0);
 
 async function act(name, d) {
+  if (agentPanel.handles(name)) return agentPanel.act(name, d);
   if (AGENT_ACTIONS.has(name)) return agentAct(name, d); // 송금 링크는 이 호출 안에서 동기적으로 연다
   if (name === 'show-receipt') {
     showReceipt(d.id);
@@ -410,7 +414,7 @@ async function act(name, d) {
     watch();
   } else if (name === 'seed') {
     try {
-      const { roomId: id } = await api('/api/dev/seed', { method: 'POST' });
+      const { roomId: id } = await api('/api/dev/seed', { method: 'POST', body: d.fresh ? { freshUser: true } : {} });
       location.search = `?room=${encodeURIComponent(id)}`;
     } catch {
       state.error = { status: 'seed' };
@@ -426,7 +430,7 @@ function noRoom() {
     <p class="sub">실제 방 만들기·참가하기는 #4에서 생겨요. 그전까지는 개발용 데모 방으로 확인해요.</p></section>
     <section class="next"><p class="eyebrow">개발용</p><h2>데모 방 만들기</h2>
       <p>${failed ? '서버가 개발용 시드를 막았어요. <code>DEV_SEED=1 npm start</code>로 서버를 다시 켜 주세요.' : '오사카 2박 3일 지출 7건과 4명의 비서 설정이 들어간 방을 만들어요.'}</p>
-      <div class="actions"><button class="btn" data-action="seed">데모 방 만들기</button></div></section>`;
+      <div class="actions"><button class="btn" data-action="seed">데모 방 만들기</button><button class="btn secondary" data-action="seed" data-fresh="1">'나'를 새 사용자로</button></div></section>`;
 }
 
 function whoPicker() {
@@ -485,7 +489,7 @@ function transfersSection() {
   const live = transfers.filter((t) => t.status !== 'superseded');
   const list = live.length ? live : settle(ledger).map((t) => ({ ...t, status: 'preview' }));
   const me = currentUid();
-  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: '송금 앱 열림', sent: !t.notReceivedAt ? '보냈어요' : t.to === me ? '확인을 부탁했어요' : '아직 못 받았대요', confirmed: '받았어요' })[t.status] ?? t.status;
+  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: !t.remindAt ? '직접 보내기' : new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: '송금 앱 열림', sent: !t.notReceivedAt ? '보냈어요' : t.to === me ? '확인을 부탁했어요' : '아직 못 받았대요', confirmed: '받았어요' })[t.status] ?? t.status;
   const rows = list.map((t) => {
     const mine = t.id && (t.from === me || t.to === me);
     const tag = mine ? `button type="button" class="row" data-action="open-transfer" data-id="${esc(t.id)}"` : 'div class="row"';
@@ -568,6 +572,7 @@ function renderSheet() {
     $('#sheet-title').textContent = title;
     body.innerHTML = html;
     body.scrollTop = top;
+    mountSegs(body);
     mountSliders(body, { onCommitGesture: (d) => sendGesture(d.id) });
     return;
   }
@@ -663,6 +668,12 @@ function settlingCard(addButtons) {
       <div class="actions"><button class="btn" data-action="send-invoices">비서들에게 청구서 보내기</button>${addButtons}</div></section>`;
   }
   const live = transfers.filter((t) => t.version === room.version);
+  // 직접 보내기로 정한 송금은 알림을 띄우지 않는다. 대신 방을 열었을 때 내 차례임을 보여 준다
+  const manual = live.find((t) => t.from === state.data.me.uid && t.status === 'scheduled' && !t.remindAt);
+  if (manual) {
+    return `<section class="next"><p class="eyebrow">직접 보내기</p><h2>${esc(nameOf(manual.to))}에게 ${won(manual.amount)}을 보내면 돼요</h2>
+      <p>직접 보내기로 정해서 비서가 따로 알리지 않아요. 편할 때 보내 주세요.</p><div class="actions"><button class="btn" data-action="open-transfer" data-id="${esc(manual.id)}">보내러 가기</button>${addButtons}</div></section>`;
+  }
   const done = live.length ? live.every((t) => t.status === 'confirmed') : current.every((i) => i.status === 'accepted');
   if (done) {
     return `<section class="next done"><p class="eyebrow">정산 완료</p><h2>정산이 끝났어요</h2>
@@ -827,11 +838,11 @@ function transferSheet() {
     actions = `<p class="group-note">${esc(nameOf(t.from))}에게 다시 확인해 달라고 했어요. 그 사이 들어왔다면 알려 주세요.</p>
       <button class="btn" style="width:100%;margin-top:10px" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>`;
   } else {
-    actions = `<p class="group-note">${{ scheduled: `${whenText(t.remindAt)}에 ${esc(nameOf(t.from))}에게 알려요.`, due: `${esc(subj(nameOf(t.from)))} 보낼 차례예요.`, opened: `${esc(subj(nameOf(t.from)))} 송금 앱을 열었어요.`, sent: t.notReceivedAt ? `${esc(subj(toName))} 아직 못 받았대요. ${esc(subj(nameOf(t.from)))} 확인하고 있어요.` : `${esc(subj(nameOf(t.from)))} 보냈어요. 받는 사람의 확인을 기다려요.`, confirmed: '받았다고 확인했어요. 이 송금은 끝났어요.', superseded: '지출이 바뀌어 대체된 송금이에요.' }[t.status] ?? ''}</p>`;
+    actions = `<p class="group-note">${{ scheduled: t.remindAt ? `${whenText(t.remindAt)}에 ${esc(nameOf(t.from))}에게 알려요.` : `${esc(subj(nameOf(t.from)))} 직접 보내기로 했어요.`, due: `${esc(subj(nameOf(t.from)))} 보낼 차례예요.`, opened: `${esc(subj(nameOf(t.from)))} 송금 앱을 열었어요.`, sent: t.notReceivedAt ? `${esc(subj(toName))} 아직 못 받았대요. ${esc(subj(nameOf(t.from)))} 확인하고 있어요.` : `${esc(subj(nameOf(t.from)))} 보냈어요. 받는 사람의 확인을 기다려요.`, confirmed: '받았다고 확인했어요. 이 송금은 끝났어요.', superseded: '지출이 바뀌어 대체된 송금이에요.' }[t.status] ?? ''}</p>`;
   }
   return {
     title: '송금',
-    html: `<div class="big"><div class="amt">${won(t.amount)}</div><p class="sub">${esc(nameOf(t.from))} → ${esc(toName)}${t.status === 'scheduled' && new Date(t.remindAt) > Date.now() ? ` · ${whenText(t.remindAt)} 예약` : ''}</p></div>
+    html: `<div class="big"><div class="amt">${won(t.amount)}</div><p class="sub">${esc(nameOf(t.from))} → ${esc(toName)}${t.status === 'scheduled' && t.remindAt && new Date(t.remindAt) > Date.now() ? ` · ${whenText(t.remindAt)} 예약` : ''}</p></div>
       ${note ? `<p class="preview-note" style="margin-bottom:14px">${esc(note)}</p>` : ''}
       ${account}${formError()}${actions}`,
   };
@@ -856,7 +867,30 @@ function payoutSheet() {
   };
 }
 
-const AGENT_SHEETS = { invoice: invoiceSheet, dispute: disputeSheet, transfer: transferSheet, payout: payoutSheet };
+// 개인 비서 설정(#5). 받을 계좌는 위 payoutSheet를 그대로 쓴다
+const agentPanel = createAgentPanel({
+  api,
+  roomId,
+  summary: () => state.data?.myAgent,
+  meName: () => state.data?.me.name ?? '',
+  rerender: () => renderSheet(),
+  openSheet: (kind) => openAgentSheet(kind),
+  closeSheet: () => sheet.close(),
+  reload: () => load(),
+  openPayout: (payout) => openPayoutSheet(payout),
+});
+
+const AGENT_SHEETS = { invoice: invoiceSheet, dispute: disputeSheet, transfer: transferSheet, payout: payoutSheet, ...agentPanel.sheets };
+
+// 방의 할 일에서 열면 비어 있고, 내 비서 설정에서 열면 저장된 계좌를 채워 고치게 한다
+function openPayoutSheet(saved = null) {
+  const known = saved && BANKS.some((b) => b.label === saved.bank);
+  state.payoutDraft = saved
+    ? { bank: saved.bank, accountNo: saved.accountNo, holder: saved.holder, other: !known }
+    : { bank: BANKS[0].label, accountNo: '', holder: state.data.me.name, other: false };
+  state.payoutFromAgent = Boolean(saved) || state.sheet === 'agent';
+  openAgentSheet('payout');
+}
 
 function openAgentSheet(kind, ref = null) {
   state.sheet = kind;
@@ -972,11 +1006,21 @@ async function agentAct(name, d) {
   } else if (name === 'not-received') {
     await post(`/transfers/${enc(d.id)}/not-received`);
   } else if (name === 'open-payout') {
-    const mine = state.data.me;
-    state.payoutDraft = { bank: BANKS[0].label, accountNo: '', holder: mine.name, other: false };
-    openAgentSheet('payout');
+    openPayoutSheet();
   } else if (name === 'save-payout') {
-    if (await post('/payout', state.payoutDraft)) sheet.close();
+    if (state.payoutFromAgent) {
+      // 내 비서 설정에서 연 계좌는 방 없이 사람 단위로 저장하고 설정으로 돌아간다
+      try {
+        await api('/api/me/agent/payout', { method: 'POST', body: state.payoutDraft });
+        state.payoutFromAgent = false;
+        state.formError = '';
+        await load();
+        agentPanel.open();
+      } catch (e) {
+        state.formError = e.message;
+        renderSheet();
+      }
+    } else if (await post('/payout', state.payoutDraft)) sheet.close();
   } else if (name === 'copy') {
     copyText(d.text, d.key);
   }
@@ -1009,7 +1053,7 @@ function render() {
   $('#nav-add').hidden = false;
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
-  main.innerHTML = [hero(), whoPicker(), nextCard(), expensesSection(), transfersSection()].join('');
+  main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), nextCard(), agentPanel.rowHtml(), expensesSection(), transfersSection()].join('');
   mountSegs(main);
   if (['exp', 'dispute', 'transfer'].includes(state.sheet) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
 }
@@ -1039,6 +1083,7 @@ document.addEventListener('input', (e) => {
     if (send) send.disabled = !(state.disputeDraft.expenseId && state.disputeDraft.claim.trim());
   }
   if (e.target.dataset?.pf && state.payoutDraft) state.payoutDraft[e.target.dataset.pf] = e.target.value;
+  agentPanel.onInput(e.target);
   const f = e.target.dataset?.field;
   if (f && state.draft) state.draft[f] = e.target.value;
   const i = e.target.dataset?.item;
@@ -1053,6 +1098,7 @@ document.addEventListener('change', (e) => {
   if (e.target.matches?.('input[data-receipt]') && e.target.files?.[0]) readReceipt(e.target.files[0]);
 });
 document.addEventListener('change', (e) => {
+  agentPanel.onChange(e.target);
   const f = e.target.dataset?.field;
   if (f && state.draft) state.draft[f] = e.target.value;
   // 받을 계좌의 은행 선택. '목록에 없어요'(빈 값)면 직접 쓰는 칸을 보여 주려고 다시 그린다
@@ -1068,6 +1114,7 @@ const sheet = createSheet($('#sheet-root'), {
     state.editing = null;
     state.ref = null;
     state.disputeDraft = null;
+    state.payoutFromAgent = false;
     state.transferNote = null;
     // QR 토큰은 버린다. 다시 열면 새로 받는다
     state.qr = null;
