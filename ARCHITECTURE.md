@@ -68,6 +68,13 @@ API 서버 (server.mjs → src/app.mjs)
 - 진짜 저장소에 `eraseUser`(#2 탈퇴)가 있으면 그대로 전달하고, 그 사람이 낀 송금의 링크만 평문으로 풀어서 돌려줘요(QR 토큰 무효화용). 풀리지 않는 링크는 어차피 지울 값이라 건너뛰어요.
 - `FirestoreStore`(#3)도 같은 자리에서 감싸면 돼요. 다만 `tick()`은 모든 방의 송금을 풀어 보므로, 열쇠가 바뀌거나 값 하나가 망가지면 모든 방의 알림이 멈춰요. 그래서 열쇠는 바꾸지 않아요.
 
+**왜 잠그나.** 「개인정보의 안전성 확보조치 기준」(개인정보보호위원회고시 제2025-9호) 제7조제2항은 이용자의 계좌번호를 안전한 암호 알고리즘으로 암호화해서 저장하라고 정해요. 이 서비스에 받을 계좌를 등록하는 사람이 여기서 말하는 이용자예요. AES-256은 개인정보보호위원회 안내서(2024.10)가 권장 예시로 드는 알고리즘이에요. 조사한 내용은 PR #22 코멘트에 정리했어요.
+
+- 지금 저장소는 서버 메모리라서 이 잠금이 실제로 막는 건 거의 없어요. 효과는 #3 Firestore에 계좌가 계속 남기 시작할 때부터예요. 그래도 먼저 넣은 건, 평문이 쌓인 뒤에 잠그면 기존 값을 다시 잠그는 이전 작업이 생기기 때문이에요.
+- 인터넷 구간으로 주고받을 때의 암호화(같은 조 제4항)는 Cloud Run·GitHub Pages의 HTTPS가 맡아요. QR에도 계좌가 아니라 15분짜리 토큰만 담아요.
+- 열쇠 관리 절차(같은 조 제6항)는 정보주체 10만 명 이상인 대기업·중견기업·공공기관, 100만 명 이상인 중소기업·단체의 의무라 지금 규모에는 해당하지 않아요. 그래도 열쇠는 Secret Manager에만 두고 버전 `1`로 고정해서 바꾸지 않아요.
+- **막지 못하는 것:** 이 잠금은 저장소가 샜을 때만 막아요. 서버는 아직 `x-demo-user` 헤더를 그대로 믿어서(`src/identity.mjs`), 다른 멤버의 uid를 헤더에 넣으면 그 사람에게 보이는 계좌·토스 링크를 평문으로 받을 수 있어요. 이건 #2에서 `identify`를 Firebase ID 토큰 검증으로 바꿔야 막혀요.
+
 ## 컬렉션과 Firestore 경로
 
 | 컬렉션 | 문서 타입 | Firestore 경로(제안) |
@@ -88,7 +95,7 @@ API 서버 (server.mjs → src/app.mjs)
 - **uid:** ASCII 문자열이에요(#2 이후 Firebase uid). 화면에는 `Member.name`만 보여요.
 - **금액·날짜:** 금액은 정수예요(원·엔은 보조 단위가 없어요). 날짜는 `YYYY-MM-DD`, 시각은 `HH:MM`, 서버 일정은 `Asia/Seoul` 기준이에요.
 - **`Room`:** 멤버, 환율 표 `fx`(원/100 단위, 결제일별 매매기준율·카드 수수료·사람별 현찰 환율), 합의한 환율 정책, `version`을 가져요. `version`은 지출이 바뀔 때마다 올라가고, 청구서·송금은 이 version에 묶여요.
-- **`Expense`:** `split`이 `'items'`면 영수증 줄(`items`)마다 `alloc`의 `consumers`가 나눠 내요.
+- **`Expense`:** `split`이 `'items'`면 영수증 줄(`items`)마다 `alloc`의 `consumers`가 나눠 내요. `allocMemory`는 배분할 때 쓴 비서 기억의 지문이고, 방 응답의 `allocFresh`는 그 지문이 지금 기억과 같은지예요(같으면 화면이 '다시 나누기'를 막아요).
 - **`AgentSettings`:**
   - `memory`: 정산에 쓰라고 공유한 기억이에요. 무료 요금제는 5개까지예요.
   - `rules`: 자동 수락 한도, 보낼 시기(`'now'` 또는 `{ payday: 25 }`), 이의 처리예요.
@@ -111,7 +118,7 @@ API 서버 (server.mjs → src/app.mjs)
 | GET | `/api/rooms/:id/expenses/:eid/receipt` | 저장된 영수증 사진 `{ mimeType, data }`(방 멤버만) |
 | POST | `/api/rooms/:id/expenses/:eid` | 지출 고치기. 같은 검증을 거쳐 덮어써요. 영수증 줄이나 함께한 사람이 바뀌면 메뉴 배분을 지워 다시 나누게 해요 |
 | POST | `/api/rooms/:id/receipts/extract` | 영수증 사진(긴 변 1600px JPEG, base64) → 초안. **저장하지 않아요** |
-| POST | `/api/rooms/:id/expenses/:eid/allocate` | 비서들이 공유한 기억으로 영수증 줄 배분. 근거 없는 줄은 지출을 남긴 사람에게 물어요. 응답 `{ expense, source, how, latencyMs }` |
+| POST | `/api/rooms/:id/expenses/:eid/allocate` | 비서들이 공유한 기억으로 영수증 줄 배분. 근거 없는 줄은 지출을 남긴 사람에게 물어요. 응답 `{ expense, source, how, latencyMs }`. 이미 나눴고 비서 기억이 그대로면 409이고 아무것도 바꾸지 않아요(버전·확인한 줄 유지) |
 | POST | `/api/rooms/:id/expenses/:eid/lines/:itemId` | 줄 하나를 사람이 확정(`{ consumers }`) |
 
 | POST | `/api/rooms/:id/invoices/send` | 지금 방 `version`으로 청구서 보내기. 같은 version이면 다시 만들지 않아요(멱등). 각자의 비서가 규칙대로 수락·질문·이의를 정해요 |

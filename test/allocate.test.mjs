@@ -77,3 +77,31 @@ test('영수증 줄이 없는 지출은 나눌 수 없어 400', async () => {
   const res = await call(`/api/rooms/${roomId}/expenses/${roomId}-hotel/allocate`, 'me', {});
   assert.equal(res.status, 400);
 });
+
+test('바뀐 게 없으면 다시 나누지 않는다: 409이고 버전·확인한 줄·비서 기록은 그대로', async () => {
+  const roomId = await seed();
+  const eid = `${roomId}-izakaya`;
+  await call(`/api/rooms/${roomId}/expenses/${eid}/allocate`, 'me', {});
+  await call(`/api/rooms/${roomId}/expenses/${eid}/lines/ochazuke`, 'cs', { consumers: ['yh'], confirm: true });
+  const version = (await store.get('rooms', roomId)).version;
+  const events = (await store.listEvents(roomId)).length;
+  const res = await call(`/api/rooms/${roomId}/expenses/${eid}/allocate`, 'me', {});
+  assert.equal(res.status, 409);
+  assert.equal((await store.get('rooms', roomId)).version, version); // 버전이 오르면 보낸 청구서가 밀려난다
+  assert.equal((await store.get('expenses', eid)).alloc.ochazuke.confirmed, true);
+  assert.equal((await store.listEvents(roomId)).length, events);
+});
+
+test('방 응답의 allocFresh: 나누기 전 false, 나눈 뒤 true, 비서의 기억이 바뀌면 false', async () => {
+  const roomId = await seed();
+  const eid = `${roomId}-izakaya`;
+  const fresh = async () => (await (await call(`/api/rooms/${roomId}`, 'me')).json()).expenses.find((e) => e.id === eid).allocFresh;
+  assert.equal(await fresh(), false);
+  await call(`/api/rooms/${roomId}/expenses/${eid}/allocate`, 'me', {});
+  assert.equal(await fresh(), true);
+  const yh = await store.get('agents', 'yh');
+  await store.put('agents', { ...yh, memory: [...yh.memory, '요즘 디저트를 끊었어요'] });
+  assert.equal(await fresh(), false);
+  assert.equal((await call(`/api/rooms/${roomId}/expenses/${eid}/allocate`, 'me', {})).status, 200);
+  assert.equal(await fresh(), true);
+});
