@@ -1,12 +1,14 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, flaggedLines, blockedNotice, nudge, COMPUTER_QUERY } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, flaggedLines, blockedNotice, nudge, COMPUTER_QUERY } from './ui.js';
 import { reduceMotion } from './motion.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
+import { initAuth, authOptions, onSessionChange } from './auth.js';
 import { BANKS } from './banks.js';
+import { readVisits, departure, timelineSummary, expenseWindow, kstTime, keepForSettlement } from './timeline.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
@@ -14,21 +16,25 @@ const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
-const nameOf = (uid) => ({ system: '시스템', mediator: '중재 비서', all: '모두' })[uid] ?? members().find((m) => m.uid === uid)?.name ?? uid;
+const nameOf = (uid) => ({ system: '정산방', mediator: '중재 비서', all: '모두' })[uid] ?? members().find((m) => m.uid === uid)?.name ?? uid;
 const agentName = (uid) => (uid === 'system' || uid === 'mediator' ? nameOf(uid) : `${nameOf(uid)}의 비서`);
 const colorOf = (uid) => {
+  const profileColor = members().find(m => m.uid === uid)?.color;
+  if (/^#[0-9a-f]{6}$/i.test(profileColor)) return profileColor;
   const i = members().findIndex((m) => m.uid === uid);
   return i < 0 ? '#8e8e93' : `var(--p${i % 4})`;
 };
 const avatar = (uid, cls = '') => avatarHtml(nameOf(uid)[0], colorOf(uid), cls);
-const timeOf = (iso) => new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Seoul' });
+// 기록 시각은 분까지만(로그가 아니라 대화)
+const timeOf = (iso) => new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Seoul' });
 
 // 좁은 화면에서 상단바 종으로 여는 비서끼리 기록. 마지막으로 본 기록은 방·사람마다 기억한다
 const seenKey = () => `agent-settlement.seen.${roomId}.${currentUid()}`;
 const logPop = createLogPop({
   itemHtml: (e, opts) => logItemHtml({
     avatar: avatar(e.from, 'agent'),
-    who: `${agentName(e.from)} → ${nameOf(e.to)}`,
+    who: agentName(e.from),
+    to: nameOf(e.to),
     time: timeOf(e.at),
     text: e.text,
     meta: e.meta,
@@ -91,6 +97,32 @@ function remember(d) {
     localStorage.setItem(LAST_KEY, JSON.stringify({ currency: d.currency, payer: d.payer, method: d.method, present: d.present }));
   } catch {}
 }
+// 정산당 한 번 올린 타임라인(#7). 이 정산 지출 시간대의 방문 시각만 이 브라우저에 7일 두고 서버로는 보내지 않는다.
+// 저장이 막힌 브라우저에서도 지금 화면에서는 쓰도록 메모리에도 둔다. 로그아웃하면 지운다(auth.js)
+const TIMELINE_DAYS = 7;
+const timelineKey = () => `agent-settlement.timeline.${roomId}.${state.data?.me.uid}`;
+const visitsInMemory = {};
+function savedVisits() {
+  const key = timelineKey();
+  try {
+    const saved = JSON.parse(localStorage.getItem(key));
+    if (saved && Date.now() - saved.savedAt < TIMELINE_DAYS * 86400_000) return saved.visits;
+    localStorage.removeItem(key);
+  } catch {}
+  return visitsInMemory[key] ?? null;
+}
+function saveVisits(visits) {
+  visitsInMemory[timelineKey()] = visits;
+  try {
+    localStorage.setItem(timelineKey(), JSON.stringify({ savedAt: Date.now(), visits }));
+  } catch {}
+}
+function forgetVisits() {
+  delete visitsInMemory[timelineKey()];
+  try {
+    localStorage.removeItem(timelineKey());
+  } catch {}
+}
 // 외화는 환율이 있는 날짜만 고를 수 있다
 const fxDates = () => Object.keys(state.data.room.fx?.base ?? {}).sort();
 function fitDate(d) {
@@ -99,7 +131,7 @@ function fitDate(d) {
 }
 function newDraft() {
   const { room, me } = state.data;
-  const uids = room.members.map((m) => m.uid);
+  const uids = room.members.filter(m => !m.deleted).map((m) => m.uid);
   const last = lastUsed();
   const currencies = ['KRW', room.fx?.currency].filter(Boolean);
   return fitDate({
@@ -428,6 +460,7 @@ async function act(name, d) {
 
 // ---------------------------------------------------------------- 화면
 function noRoom() {
+  if (!authOptions().dev) return '<section class="hero"><h1>내 정산 방</h1><p><a class="btn" href="account.html">로그인·내 방 목록</a></p></section>';
   const failed = state.error?.status === 'seed';
   return `<section class="hero"><h1>열 방이 없어요</h1>
     <p class="sub">실제 방 만들기·참가하기는 #4에서 생겨요. 그전까지는 개발용 데모 방으로 확인해요.</p></section>
@@ -437,10 +470,11 @@ function noRoom() {
 }
 
 function whoPicker() {
+  if (!authOptions().dev) return '';
   const me = currentUid();
-  return `<section class="group"><h2 class="group-label"><span>누구로 볼까요?</span><span>개발용 · 로그인(#2)이 생기면 사라져요</span></h2>
+  return `<section class="group"><h2 class="group-label"><span>누구로 볼까요?</span><span>개발용 시드 신원</span></h2>
     <div class="seg" role="radiogroup" aria-label="보는 사람" data-seg="who"><span class="seg-thumb"></span>
-      ${members().map((m) => `<button type="button" role="radio" aria-checked="${m.uid === me}" data-action="who" data-id="${esc(m.uid)}">${esc(m.name)}</button>`).join('')}
+      ${members().filter(m => !m.deleted).map((m) => `<button type="button" role="radio" aria-checked="${m.uid === me}" data-action="who" data-id="${esc(m.uid)}">${esc(m.name)}</button>`).join('')}
     </div></section>`;
 }
 
@@ -511,7 +545,7 @@ const seg = (key, field, options, value) => `<div class="seg" role="radiogroup" 
 
 function addSheetHtml() {
   const d = state.draft;
-  const { room } = state.data;
+  const room = { ...state.data.room, members: state.data.room.members.filter(m => !m.deleted) };
   const currencies = ['KRW', room.fx?.currency].filter(Boolean);
   const dateField = d.currency === 'KRW'
     ? `<input type="date" data-field="date" value="${esc(d.date)}" aria-label="날짜">`
@@ -603,10 +637,12 @@ function revealLine(body) {
 }
 
 function renderChannel() {
+  const times = minuteLabels(state.events.map((e) => timeOf(e.at)));
   const items = state.events.map((e, i) => logItemHtml({
     avatar: avatar(e.from, 'agent'),
-    who: `${agentName(e.from)} → ${nameOf(e.to)}`,
-    time: timeOf(e.at),
+    who: agentName(e.from),
+    to: nameOf(e.to),
+    time: times[i],
     text: e.text,
     meta: e.meta,
     tagHtml: e.action ? chip(`${nameOf(e.action.for)}의 확인 필요`, 'warn') : '',
@@ -736,17 +772,108 @@ function invoiceSheet() {
         ${dd.expenseId === e.id ? chip('고름', 'ok') : ''}</button>`).join('')}</div></section>
     <section class="group"><div class="list"><label class="row field"><span class="grow">맞지 않는 점</span>
       <input data-dd="claim" value="${esc(dd.claim)}" maxlength="200" placeholder="예: 리무진은 타지 않았어요"></label></div></section>
+    ${dd.expenseId ? timelineSection(byId('expenses', dd.expenseId), dd.timeline) : ''}
     ${formError()}
     <button class="btn" style="width:100%" id="dispute-send" data-action="answer-invoice" data-decision="dispute" ${dd.expenseId && dd.claim.trim() ? '' : 'disabled'}>이의 보내기</button>` : '';
   return {
     title: '청구서',
     html: `<div class="big"><div class="amt">${won(Math.max(0, -inv.net))}</div>
-        <p class="sub">낸 돈 ${won(inv.paid)} · 내 몫 ${won(inv.owed)} · 방 version ${inv.version}</p></div>
+        <p class="sub">낸 돈 ${won(inv.paid)} · 내 몫 ${won(inv.owed)} · 방 version ${inv.version}</p>
+        ${inv.hasLocationSummary ? `<p class="badges">${chip('위치 요약 · 확인 전')}</p>` : ''}</div>
       <p class="how">${esc(inv.reasons.join(' · '))}</p>
       ${answering && !dd ? `${formError()}<div style="display:grid;gap:8px"><button class="btn" data-action="answer-invoice" data-decision="accept">이대로 받기</button>
         <button class="btn secondary" data-action="start-dispute">맞지 않는 지출이 있어요</button></div>` : ''}
       ${answering ? form : `<p class="group-note">${inv.status === 'accepted' ? '받기로 했어요.' : inv.status === 'disputed' ? '이의를 제기했어요.' : '지출이 바뀌어 대체된 청구서예요.'}</p>`}`,
   };
+}
+
+const rowText = (title, meta = '', end = '') => `<span class="grow"><span class="title">${esc(title)}</span>${meta ? `<span class="meta" style="display:block">${esc(meta)}</span>` : ''}</span>${end}`;
+
+// #7 정산당 한 번: 여행이 끝난 뒤 Google 지도 타임라인 파일을 한 번 고르면, 이의를 낼 때마다 그 지출 시간대를 여기 남긴 방문에서 찾는다
+function locationSection() {
+  const { expenses, me } = state.data;
+  if (!expenses.some((e) => e.present.includes(me.uid))) return '';
+  const visits = savedVisits();
+  const body = state.timelineReading
+    ? `<div class="list" aria-busy="true"><div class="row">${tile('pin')}${rowText('파일에서 이 정산 기간만 찾는 중…')}</div></div>`
+    : visits
+    ? `<div class="list"><div class="row">${tile('pin')}${rowText('Google 지도 타임라인을 올렸어요', visits.length ? `이 정산 기간 방문 ${visits.length}곳 · 이의를 낼 때 자동으로 찾아요` : '이 정산 기간의 기록이 없어요')}
+        <button type="button" class="text-btn" data-action="timeline-forget">지우기</button></div></div>`
+    : `<div class="list"><button type="button" class="row" data-action="timeline-pick">${tile('pin')}${rowText('Google 지도 타임라인 올리기', '여행이 끝난 뒤 한 번만 올리면 돼요', CHEVRON)}</button></div>`;
+  return `<section class="group"><h2 class="group-label"><span>내 위치 기록</span><span>선택</span></h2>${body}
+    ${state.timelineError ? `<p class="form-error" role="alert">${esc(state.timelineError)}</p>` : ''}
+    <p class="group-note">파일은 이 기기에서만 읽어요. 이 정산 기간의 방문 시각만 이 브라우저에 ${TIMELINE_DAYS}일 두고, 이의를 낼 때 내가 켠 한 줄만 상대에게 가요.</p></section>`;
+}
+
+// 이의를 낼 때 고른 지출의 시간대(첫 주문~결제). 올려 둔 타임라인이 있으면 바로 찾아 채우고, 없으면 여기서 올린다.
+// 찾은 결과는 사용자가 스위치를 켜야만 이의 상대와 중재 비서에게 간다(public/timeline.js)
+function timelineSection(exp, tl) {
+  const { from, until } = expenseWindow(exp);
+  const r = tl?.result;
+  const found = r && (r.stayedUntil
+    ? rowText(`결제(${r.stayedUntil})까지 머물렀어요`, `첫 주문 ${kstTime(from)}부터 같은 곳`)
+    : rowText(`${r.leftAt}에 떠났어요`, `첫 주문 ${kstTime(from)} 때 있던 곳 · ${r.nextAt ? `${r.nextAt} ${r.nextHome ? '집' : '다른 장소'} 도착` : '도착 기록 없음'}`));
+  const body = !tl
+    ? `<div class="list"><button type="button" class="row" data-action="timeline-pick">${tile('pin')}${rowText('Google 지도 타임라인 올리기', `이 지출 시간대(${kstTime(from)}~${kstTime(until)})를 찾아요`, CHEVRON)}</button></div>
+      <p class="group-note">휴대폰 Google 지도에서 내보낸 타임라인 파일(JSON)을 골라요. 한 번 올리면 이 정산의 다른 이의에도 다시 고르지 않고 써요.</p>`
+    : tl.state === 'reading' ? `<div class="list" aria-busy="true"><div class="row">${tile('pin')}${rowText('이 시간대만 찾는 중…')}</div></div>`
+    : tl.state === 'none' ? `<div class="list"><div class="row">${tile('pin')}${rowText('이 시간대 기록이 없어요', '위치 요약 없이 이의를 보내요')}</div></div>`
+    : tl.state === 'error' ? `<p class="form-error" role="alert">${esc(tl.message)}</p>`
+    : `<div class="list"><div class="row">${tile('pin')}${found}</div>
+        <label class="row" style="--inset:16px;cursor:pointer">${rowText('이의에 붙이기', '이의 상대와 중재 비서만 봐요')}<input type="checkbox" role="switch" class="switch" data-timeline-agree ${tl.agree ? 'checked' : ''}></label></div>
+      <p class="group-note">${tl.saved ? '올려 둔 타임라인에서 찾았어요. ' : ''}시각만 보내고 파일·좌표·장소 이름은 보내지 않아요. 7일 뒤 지워지고, 그 전에도 지울 수 있어요.</p>`;
+  const again = tl && tl.state !== 'reading' ? '<button type="button" class="text-btn" data-action="timeline-pick">다른 파일 고르기</button>' : '';
+  const sample = authOptions().dev && tl?.state !== 'reading' ? '<button type="button" class="text-btn" data-action="timeline-sample">개발용 가짜 기록</button>' : '';
+  return `<section class="group"><h3 class="group-label"><span>위치 기록</span><span>선택</span></h3>${body}
+    ${again || sample ? `<div class="group-actions">${again}${sample}</div>` : ''}</section>`;
+}
+
+function applyTimeline(visits, exp, saved = false) {
+  const result = departure(visits, exp);
+  state.disputeDraft.timeline = result ? { state: 'found', result, summary: timelineSummary(result, exp), agree: false, saved } : { state: 'none', saved };
+}
+
+// 파일 고르기. 문서에 붙인 입력은 다시 그릴 때 사라지므로 고를 때마다 만든다
+function pickTimeline() {
+  const input = Object.assign(document.createElement('input'), { type: 'file', accept: '.json,application/json', hidden: true });
+  input.addEventListener('change', () => {
+    if (input.files?.[0]) readTimeline(input.files[0]);
+    input.remove();
+  });
+  document.body.append(input);
+  input.click();
+}
+
+// 파일은 여기서만 읽는다. 이 정산 지출 시간대의 방문만 남기고, 이의를 쓰는 중이면 고른 지출 시간대를 바로 찾는다
+async function readTimeline(file) {
+  const dd = state.disputeDraft;
+  const exp = dd?.expenseId && byId('expenses', dd.expenseId);
+  const redraw = () => { render(); if (dd) renderSheet(); };
+  state.timelineReading = true;
+  state.timelineError = '';
+  if (exp) dd.timeline = { state: 'reading' };
+  redraw();
+  try {
+    const mine = state.data.expenses.filter((e) => e.present.includes(state.data.me.uid));
+    const visits = keepForSettlement(readVisits(JSON.parse(await file.text())), mine);
+    saveVisits(visits);
+    if (exp && state.disputeDraft === dd && dd.expenseId === exp.id) applyTimeline(visits, exp, true); // 읽는 사이 다른 지출을 골랐으면 그 지출은 dispute-pick이 찾는다
+  } catch (e) {
+    const message = e instanceof SyntaxError ? 'JSON 파일이 아니에요. 휴대폰 Google 지도에서 내보낸 타임라인 파일을 골라 주세요.' : e.message;
+    if (exp) dd.timeline = { state: 'error', message };
+    else state.timelineError = message;
+  }
+  state.timelineReading = false;
+  redraw();
+}
+
+// 개발용: 고른 지출에 맞춘 가짜 타임라인. 첫 주문 20분 전부터 머물다 결제 전에 떠나 13분 뒤 다른 곳에 도착한다
+function sampleTimeline(exp) {
+  const { from, until } = expenseWindow(exp);
+  const iso = (ms) => new Date(ms + 9 * 3600_000).toISOString().replace('Z', '+09:00');
+  const left = from + Math.round((until - from) * 0.6);
+  const visit = (start, end) => ({ startTime: iso(start), endTime: iso(end), visit: { hierarchyLevel: 0, probability: 0.9, topCandidate: { semanticType: 'UNKNOWN' } } });
+  return { semanticSegments: [visit(from - 20 * 60_000, left), visit(left + 13 * 60_000, left + 8 * 3600_000)] };
 }
 
 // 이의와 중재안. 중재안은 줄마다 누구 몫인지와 사람별 몫이 어떻게 바뀌는지 보여 준다
@@ -756,8 +883,11 @@ function disputeSheet() {
   if (!exp) return notFound('이의');
   const { room, me } = state.data;
   const party = [exp.payer, d.by].includes(me.uid);
+  // 이의를 낸 사람이 붙인 타임라인 요약은 본인이 언제든 지울 수 있다(동의 철회). 지우면 미확정 중재안은 다시 열린 이의가 된다
+  const mine = d.by === me.uid && d.evidence.some((e) => e.locationId);
   const evidence = d.evidence.length
-    ? `<div class="list">${d.evidence.map((e) => `<div class="row"><span class="grow">${esc(e.summary)}</span>${e.time ? chip(e.time) : ''}</div>`).join('')}</div>` : '';
+    ? `<div class="list">${d.evidence.map((e) => `<div class="row"><span class="grow">${esc(e.summary)}</span>${e.time ? chip(e.time) : ''}</div>`).join('')}</div>
+      ${mine ? '<div class="actions" style="margin-top:8px"><button type="button" class="text-btn" data-action="revoke-location">내 위치 요약 지우기</button></div>' : ''}` : '';
   let body = '';
   if (d.status === 'open') {
     body = party
@@ -955,7 +1085,7 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
+const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'timeline-pick', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
 
 async function agentAct(name, d) {
   const base = `/api/rooms/${enc(roomId)}`;
@@ -1002,9 +1132,27 @@ async function agentAct(name, d) {
     renderSheet();
   } else if (name === 'dispute-pick') {
     state.disputeDraft.expenseId = d.id;
+    state.disputeDraft.timeline = null; // 다른 지출이면 시간대가 달라서 다시 찾는다
+    const visits = savedVisits();
+    if (visits) applyTimeline(visits, byId('expenses', d.id), true);
     renderSheet();
+  } else if (name === 'timeline-pick') {
+    pickTimeline();
+  } else if (name === 'timeline-forget') {
+    forgetVisits();
+    render();
+  } else if (name === 'timeline-sample') {
+    const exp = byId('expenses', state.disputeDraft?.expenseId);
+    if (exp) applyTimeline(readVisits(sampleTimeline(exp)), exp);
+    renderSheet();
+  } else if (name === 'revoke-location') {
+    await post('/location/revoke');
   } else if (name === 'answer-invoice') {
-    const body = d.decision === 'dispute' ? { decision: 'dispute', ...state.disputeDraft } : { decision: 'accept' };
+    const dd = state.disputeDraft;
+    // 사용자가 체크한 타임라인 요약을 먼저 붙인다. 그러면 이의에 근거로 함께 들어간다
+    if (d.decision === 'dispute' && dd.timeline?.state === 'found' && dd.timeline.agree
+      && !(await post('/location/timeline', { agree: true, expenseId: dd.expenseId, ...dd.timeline.result }))) return;
+    const body = d.decision === 'dispute' ? { decision: 'dispute', expenseId: dd.expenseId, claim: dd.claim } : { decision: 'accept' };
     if (await post(`/invoices/${enc(state.ref)}/answer`, body)) {
       state.disputeDraft = null;
       sheet.close();
@@ -1048,17 +1196,19 @@ function render() {
     return;
   }
   if (state.error?.status === 404) {
+    if (!authOptions().dev) { main.innerHTML = '<section class="hero"><h1>방을 찾을 수 없어요</h1><a href="account.html">내 방 목록</a></section>'; return; }
     main.innerHTML = `<section class="hero"><h1>방을 찾을 수 없어요</h1>
       <p class="sub">서버를 다시 켜면 메모리에 있던 방이 사라져요. 개발용 데모 방을 다시 만들어 주세요.</p></section>
       <section class="next"><div class="actions"><button class="btn" data-action="seed">데모 방 만들기</button></div></section>`;
     return;
   }
   if (!state.data) {
+    if (!authOptions().dev) { main.innerHTML = `<section class="hero"><h1>방을 열 수 없어요</h1><p>${esc(state.error?.message || '연결을 확인해 주세요')}</p><a href="account.html">내 계정으로 돌아가기</a></section>`; return; }
     // 아직 누구인지 모르거나(401) 이 방 멤버가 아니면(403) 방 정보 없이 멤버 목록도 모른다.
     // 개발용 시드 방의 uid로 고르게 한다.
     const seedMembers = [['me', '나'], ['cs', '철수'], ['yh', '영희'], ['ms', '민수']];
     main.innerHTML = `<section class="hero"><h1>누구로 볼까요?</h1>
-      <p class="sub">개발용 데모 방의 멤버 중 한 명을 골라 주세요. 로그인(#2)이 생기면 이 단계는 사라져요.</p></section>
+      <p class="sub">개발용 데모 방의 멤버 중 한 명을 골라 주세요. 실제 계정으로 로그인한 경우에는 본인으로만 참여해요.</p></section>
       <section class="group"><div class="list">${seedMembers.map(([uid, name]) => `<button class="row" data-action="who" data-id="${uid}">
         ${avatarHtml(name[0], '#8e8e93')}<span class="grow">${name}</span></button>`).join('')}</div></section>`;
     return;
@@ -1067,7 +1217,7 @@ function render() {
   $('#nav-add').hidden = false;
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
-  main.innerHTML = [hero(), whoPicker(), nextCard(), expensesSection(), transfersSection()].join('');
+  main.innerHTML = [hero(), whoPicker(), nextCard(), expensesSection(), transfersSection(), locationSection()].join('');
   mountSegs(main);
   if (['exp', 'dispute', 'transfer'].includes(state.sheet) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
 }
@@ -1109,6 +1259,8 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', (e) => {
   if (e.target.matches?.('input[data-receipt]') && e.target.files?.[0]) readReceipt(e.target.files[0]);
+  // 체크만 기억한다(다시 그리면 초점을 잃는다)
+  if (e.target.matches?.('input[data-timeline-agree]') && state.disputeDraft?.timeline) state.disputeDraft.timeline.agree = e.target.checked;
 });
 document.addEventListener('change', (e) => {
   const f = e.target.dataset?.field;
@@ -1160,9 +1312,14 @@ async function loadConfig() {
 }
 
 loadConfig();
-if (roomId) {
-  load();
-  if (currentUid()) watch(); // 누구인지 정해진 뒤에만 기록을 받아 온다
-} else {
-  render();
-}
+try {
+  await initAuth();
+  if (roomId) {
+    if (!authOptions().dev && !currentUid()) location.replace('account.html');
+    else { await load(); if (currentUid()) watch(); }
+  } else render();
+  const sessionUid = currentUid();
+  onSessionChange(user => {
+    if (!user || user.uid !== sessionUid) { unsubscribe(); state.data = null; state.events = []; location.replace('account.html'); }
+  });
+} catch (e) { state.error = e; render(); }

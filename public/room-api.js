@@ -1,11 +1,14 @@
 // 실제 방 화면이 서버와 이야기하는 곳. 팀원 확장 지점:
-//   #2 로그인: currentUid()/setCurrentUid()와 api()의 신원 헤더를 Firebase 로그인·ID 토큰으로 바꾼다
+//   #2 로그인: initAuth 이후 currentUid()는 Firebase uid. api()만 ID 토큰을 붙인다.
+//   setCurrentUid()는 명시적인 비운영 시드 모드에서만 동작한다.
 //   #3 Firestore: subscribeRoom()을 onSnapshot으로 바꾼다
 import { API_BASE } from './api.js';
+import { initAuth, currentUser, authOptions, token } from './auth.js';
 
 const UID_KEY = 'agent-settlement.uid';
 
 export function currentUid() {
+  if (!authOptions().dev) return currentUser()?.uid || null;
   try {
     return localStorage.getItem(UID_KEY);
   } catch {
@@ -14,6 +17,7 @@ export function currentUid() {
 }
 
 export function setCurrentUid(uid) {
+  if (!authOptions().dev) return;
   try {
     localStorage.setItem(UID_KEY, uid);
   } catch {}
@@ -21,10 +25,12 @@ export function setCurrentUid(uid) {
 
 // 신원 헤더는 여기서만 붙인다. 다른 곳에서 fetch로 서버를 직접 부르지 않는다.
 export async function api(path, { method = 'GET', body, signal, keepalive = false } = {}) {
+  await initAuth();
+  const idToken = await token();
   const uid = currentUid();
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(uid ? { 'x-demo-user': uid } : {}) },
+    headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(idToken ? { authorization: `Bearer ${idToken}` } : authOptions().dev && uid ? { 'x-demo-user': uid } : {}) },
     body: body ? JSON.stringify(body) : undefined,
     signal,
     keepalive, // 송금 앱으로 넘어가 페이지가 숨어도 요청이 끝나게

@@ -23,3 +23,15 @@ test('style.css: QR 칸(.qr-desktop)을 CSS로 숨기지 않는다', () => {
   assert.ok(rules.length > 0);
   for (const body of rules) assert.doesNotMatch(body, /display:\s*none/);
 });
+
+// 표준 개인정보 보호지침 제20조①: '개인정보 처리방침'은 글자 크기·색상 등으로 다른 고지사항과 구분해 쉽게 찾게 한다.
+// 꼬리말 안내 글은 흐린 색(--label-3, 배경과 대비 1.8:1)이라, 링크가 그 색을 물려받으면 안내 글과 밑줄 하나만 다르다
+// 다만 요구는 '구분'이지 '가장 눈에 띄게'가 아니다. 본문색을 65%만 섞어 대비를 밝은 화면 6.7:1·어두운 화면 8.6:1로 두면
+// 글자 대비 기준(4.5:1)은 넉넉히 넘고, 흐린 안내 글과는 색·굵기·밑줄로 구분되며, 혼자 가장 밝게 튀지 않는다
+test('style.css: 꼬리말의 처리방침 링크는 본문색을 65% 섞은 색에 굵은 글씨와 밑줄이다', () => {
+  const link = css.match(/\.foot a\s*\{([^}]*)\}/)?.[1];
+  assert.ok(link, '.foot a 규칙이 없어요');
+  assert.match(link, /(^|[;\s])color:\s*color-mix\(in srgb, var\(--label\) 65%, var\(--bg\)\)\s*;/);
+  assert.ok(Number(link.match(/font-weight:\s*(\d+)/)?.[1]) >= 600, '링크가 굵지 않아요');
+  assert.match(link, /text-decoration:\s*underline/);
+});

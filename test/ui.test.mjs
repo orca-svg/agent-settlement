@@ -55,6 +55,19 @@ test('logItemHtml: 안 읽은 기록 표시와 덧붙일 내용', () => {
   assert.match(html, /<details><\/details>/);
 });
 
+// 비서끼리 기록은 시스템 로그가 아니라 비서들의 대화처럼 보인다: 받는 사람은 '→' 대신 '○○에게',
+// 근거(규칙·수치)는 말풍선 밖 '왜 그렇게 했나요'를 눌러야 펼쳐지고, 같은 분의 시각은 한 번만 보인다
+test('logItemHtml: 받는 사람은 문장처럼, 근거는 펼쳐 보기로, 빈 시각은 그리지 않는다', () => {
+  const html = logItemHtml({ avatar: '', who: '민수의 비서', to: '중재 비서', time: '9:01', text: '동의할게요', meta: '규칙: 근거와 맞으면 <동의>' });
+  assert.match(html, /<span class="to">중재 비서에게<\/span>/);
+  assert.doesNotMatch(html, /→/);
+  assert.match(html, /<p class="text">동의할게요<\/p>/);
+  assert.match(html, /<details class="why"><summary>왜 그렇게 했나요<\/summary><p>규칙: 근거와 맞으면 &lt;동의&gt;<\/p><\/details>/);
+  const quiet = logItemHtml({ avatar: '', who: '나의 비서', time: '', text: '다음 말' });
+  assert.doesNotMatch(quiet, /<time>/);
+  assert.doesNotMatch(quiet, /class="why"|class="to"/);
+});
+
 test('qrImageUrl: 데이터를 인코딩해 QR 이미지 주소를 만든다', () => {
   assert.equal(
     qrImageUrl('supertoss://send?bank=토스뱅크&accountNo=1&amount=1'),
