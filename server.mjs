@@ -22,7 +22,7 @@ try {
 
 const KEY = process.env.GEMINI_API_KEY || '';
 const PORT = Number(process.env.PORT || 4500);
-// 계좌가 들어가는 칸은 저장소에 넣을 때 잠근다(#8, #10). 배포에서 PAYOUT_ENC_KEY가 없으면 여기서 멈춘다
+// 계좌·위치 요약이 들어가는 칸은 저장소에 넣을 때 잠근다(#8, #10). 배포에서 PAYOUT_ENC_KEY가 없으면 여기서 멈춘다
 const PAYOUT_KEY = resolvePayoutKey(process.env);
 const MODEL = KEY ? await resolveModel(KEY, process.env.GEMINI_MODEL) : null;
 

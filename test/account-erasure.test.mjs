@@ -79,3 +79,29 @@ test('authenticated deletion unlinks a room member, invalidates QR and rejects s
   assert.equal((await req('/api/me', 'POST')).status, 401);
   assert.deepEqual(await (await req('/api/me/deletion')).json(), { pending: true });
 });
+
+// #10: 위치 근거·중재안을 잠그는 저장소에서도 탈퇴가 막히지 않는다.
+// 탈퇴 처리는 래퍼를 거치지 않고 진짜 저장소에 evidence = []를 쓰고 proposal을 지운다
+test('encrypted store: erasing a user empties dispute evidence and proposals without unreadable values', async () => {
+  const inner = new MemoryStore();
+  const store = encryptedStore(inner, Buffer.alloc(32, 7));
+  await seedDemoRoom(store, { id: 'one' });
+  const summary = '첫 주문(17:45) 때 머물던 곳을 20:15에 떠났어요 · Google 지도 타임라인(본인 제출)';
+  await store.put('locationEvidence', { id: 'loc', roomId: 'one', uid: 'me', expenseId: 'one-izakaya', source: 'timeline_export', leftAt: '20:15', summary });
+  for (const status of ['proposed', 'resolved']) {
+    await store.put('disputes', {
+      id: `one:d-${status}`, roomId: 'one', expenseId: 'one-izakaya', by: 'me', status, claim: '확인 요청', agreedBy: ['me'],
+      evidence: [{ kind: 'left_at', time: '20:15', summary, locationId: 'loc' }],
+      proposal: { summary: '20:15 이전 주문은 넷이 나눠요.', alloc: {}, source: 'rules' },
+    });
+  }
+  await store.eraseUser('me');
+  for (const status of ['proposed', 'resolved']) {
+    const d = await store.get('disputes', `one:d-${status}`);
+    assert.deepEqual(d.evidence, []);
+    assert.equal(d.proposal, undefined);
+  }
+  assert.deepEqual(await store.list('locationEvidence'), []);
+  const raw = JSON.stringify([...inner.cols].map(([name, docs]) => [name, [...docs.values()]]));
+  assert.ok(!raw.includes('떠났어요') && !raw.includes('이전 주문은'));
+});

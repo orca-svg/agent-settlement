@@ -1,22 +1,34 @@
-// 계좌가 들어가는 칸만 잠그는 Store 래퍼(#8, #10). 넣을 때 잠그고 꺼낼 때 풀어서,
-// 송금·정산 코드는 평문을 넣고 평문을 받는다. 진짜 저장소(MemoryStore, 이후 FirestoreStore)에는 잠긴 글자만 남는다.
-// 잠긴 칸이 평문이거나 풀리지 않으면 에러를 낸다(평문 가짜 계좌를 몰래 넣는 것, 저장소 손상을 숨기지 않는다).
+// 계좌·위치 요약이 들어가는 칸만 잠그는 Store 래퍼(#8, #10). 넣을 때 잠그고 꺼낼 때 풀어서,
+// 송금·정산·이의 코드는 평문을 넣고 평문을 받는다. 진짜 저장소(MemoryStore, 이후 FirestoreStore)에는 잠긴 글자만 남는다.
+// 잠긴 칸이 평문이거나 풀리지 않으면 에러를 낸다(평문 가짜 값을 몰래 넣는 것, 저장소 손상을 숨기지 않는다).
 // 주의: 잠긴 값은 '컬렉션/문서id/칸' 이름표에 묶인다. 잠긴 문서의 id를 바꾸는 코드는 이 래퍼로 풀었다가 다시 넣어야 한다.
 import { seal, unseal } from '../security/seal.mjs';
 
-// 컬렉션별로 잠그는 칸: 받는 계좌 원본과, 송금 건마다 복사되는 토스 링크·복사용 계좌 정보
-export const SEALED_FIELDS = { agents: ['payout'], transfers: ['link', 'fallback'] };
+// 컬렉션별로 잠그는 칸
+// - 받는 계좌 원본과, 송금 건마다 복사되는 토스 링크·복사용 계좌 정보(#8)
+// - 위치 근거(#7): 본인 제출 시각과 그것으로 만든 요약 문장. 찾는 데 쓰는 uid·roomId·expenseId는 평문
+// - 이의: 위치 요약을 베낀 근거와, 그것을 보고 중재 비서가 쓴 중재안(src/app.mjs redactDispute가 가리는 칸)
+export const SEALED_FIELDS = {
+  agents: ['payout'],
+  transfers: ['link', 'fallback'],
+  locationEvidence: ['summary', 'leftAt', 'stayedUntil', 'nextAt', 'nextHome'],
+  disputes: ['evidence', 'proposal'],
+};
 
 export function encryptedStore(inner, key) {
   if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error('암호화 열쇠는 32바이트여야 해요');
   const fieldsOf = (col) => SEALED_FIELDS[col] ?? [];
   const label = (col, id, field) => `${col}/${id}/${field}`;
 
-  // null·undefined는 "계좌 없음"이라는 뜻이라 잠그지 않는다
+  // 비어 있는 값(null·undefined·빈 목록)은 "없음"이라 잠그지 않는다.
+  // 빈 목록은 탈퇴 처리(erase-user.mjs)가 래퍼를 거치지 않고 disputes.evidence에 직접 써 넣는 값이기도 하다
+  const empty = (v) => v == null || (Array.isArray(v) && v.length === 0);
+
+  // 비어 있는 값은 그대로 둔다(empty 참고)
   const lock = (col, doc) => {
     const out = { ...doc };
     for (const f of fieldsOf(col)) {
-      if (out[f] == null) continue;
+      if (empty(out[f])) continue;
       if (doc.id == null) throw new Error(`id가 없는 문서는 잠글 수 없어요: ${col}.${f}`);
       out[f] = seal(out[f], key, label(col, doc.id, f));
     }
@@ -26,7 +38,7 @@ export function encryptedStore(inner, key) {
   const open = (col, doc) => {
     if (!doc) return doc;
     const out = { ...doc };
-    for (const f of fieldsOf(col)) if (out[f] != null) out[f] = unseal(out[f], key, label(col, doc.id, f));
+    for (const f of fieldsOf(col)) if (!empty(out[f])) out[f] = unseal(out[f], key, label(col, doc.id, f));
     return out;
   };
 
@@ -47,7 +59,7 @@ export function encryptedStore(inner, key) {
       if (sealedKey) throw new Error(`잠긴 칸(${col}.${sealedKey})으로는 찾을 수 없어요`);
       return (await inner.list(col, where)).map((doc) => open(col, doc));
     },
-    // 비서 기록 문장에는 계좌번호가 들어가지 않는다
+    // 비서 기록 문장에는 계좌번호·위치 요약이 들어가지 않는다(위치 근거면 orchestrator·location이 일반 문구만 쓴다)
     appendEvent: (roomId, ev) => inner.appendEvent(roomId, ev),
     listEvents: (roomId, afterSeq) => inner.listEvents(roomId, afterSeq),
   };
