@@ -25,8 +25,21 @@ export class MemoryStore {
     return structuredClone(doc);
   }
 
+  // 없을 때만 넣는다. 이미 있으면 있던 문서를 그대로 돌려준다(동시에 불러도 처음 것 하나만 남는다)
+  async putIfAbsent(col, doc) {
+    if (!this.#col(col).has(doc.id)) this.#col(col).set(doc.id, structuredClone(doc));
+    return structuredClone(this.#col(col).get(doc.id));
+  }
+
   async delete(col, id) {
     this.#col(col).delete(id);
+  }
+
+  // uid가 탈퇴하지 않은 멤버인 방(내 방 목록). FirestoreStore는 모든 방을 읽지 않고 색인으로 찾는다
+  async roomsOf(uid) {
+    return [...this.#col('rooms').values()]
+      .filter((room) => (room.members ?? []).some((m) => m.uid === uid && !m.deleted))
+      .map((room) => structuredClone(room));
   }
 
   // where는 필드 동등 비교만 한다(Firestore의 == 조건과 같은 범위)

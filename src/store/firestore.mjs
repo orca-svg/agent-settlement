@@ -10,11 +10,11 @@ const ORDER = '_order';
 const MEMBERS = '_memberUids';
 const ROOM_COLS = ['expenses', 'invoices', 'disputes', 'transfers'];
 
-// Firestore 문서 id 규칙. '/'가 들어가면 다른 경로에 조용히 써지므로 막는다
+// Firestore 문서 id 규칙. '/'가 들어가면 다른 경로에 조용히 써지므로 넣기는 막는다.
+// 읽기·지우기는 그런 id를 '없음'으로 다룬다(요청에서 온 id가 이상해도 MemoryStore처럼 null → 404)
+const validId = (id) => typeof id === 'string' && Boolean(id) && !id.includes('/') && id !== '.' && id !== '..' && !/^__.*__$/.test(id);
 function checkId(id) {
-  if (typeof id !== 'string' || !id || id.includes('/') || id === '.' || id === '..' || /^__.*__$/.test(id)) {
-    throw new Error(`Firestore에 쓸 수 없는 id예요: ${JSON.stringify(id)}`);
-  }
+  if (!validId(id)) throw new Error(`Firestore에 쓸 수 없는 id예요: ${JSON.stringify(id)}`);
   return id;
 }
 
@@ -59,7 +59,12 @@ export class FirestoreStore {
     return this.bucket.file(`receipts/${checkId(id)}`);
   }
 
+  #sorted(snap) {
+    return snap.docs.sort((a, b) => (a.get(ORDER) ?? 0) - (b.get(ORDER) ?? 0));
+  }
+
   async get(col, id) {
+    if (!validId(id)) return null;
     if (col === 'receipts') {
       try {
         const file = this.#receipt(id);
@@ -91,9 +96,22 @@ export class FirestoreStore {
     return structuredClone(doc);
   }
 
+  // 없을 때만 넣는다. 트랜잭션이라 동시에 불러도 처음 것 하나만 남고, 나머지는 그것을 돌려받는다
+  async putIfAbsent(col, doc) {
+    if (col === 'receipts') throw new Error('영수증 사진은 putIfAbsent로 넣지 않아요');
+    const ref = this.db.collection(col).doc(checkId(doc.id));
+    return this.db.runTransaction(async (tx) => {
+      const old = await tx.get(ref);
+      if (old.exists) return this.#read(col, old);
+      tx.set(ref, this.#stored(col, structuredClone(doc)));
+      return structuredClone(doc);
+    });
+  }
+
   async delete(col, id) {
+    if (!validId(id)) return;
     if (col === 'receipts') return void (await this.#receipt(id).delete({ ignoreNotFound: true }));
-    await this.db.collection(col).doc(checkId(id)).delete();
+    await this.db.collection(col).doc(id).delete();
   }
 
   // where는 필드 동등 비교만 한다. 동등 조건끼리는 Firestore가 단일 필드 색인을 합쳐 쓰므로 복합 색인이 필요 없다
@@ -101,8 +119,12 @@ export class FirestoreStore {
     if (col === 'receipts') throw new Error('영수증 사진은 목록으로 읽지 않아요(Cloud Storage에 있어요)');
     let q = this.db.collection(col);
     for (const [k, v] of Object.entries(where)) q = q.where(k, '==', v);
-    const snap = await q.get();
-    return snap.docs.sort((a, b) => (a.get(ORDER) ?? 0) - (b.get(ORDER) ?? 0)).map((s) => this.#read(col, s));
+    return this.#sorted(await q.get()).map((s) => this.#read(col, s));
+  }
+
+  // uid가 탈퇴하지 않은 멤버인 방. 모든 방을 읽지 않고 _memberUids 색인(array-contains)으로 그 방만 읽는다
+  async roomsOf(uid) {
+    return this.#sorted(await this.db.collection('rooms').where(MEMBERS, 'array-contains', uid).get()).map((s) => this.#read('rooms', s));
   }
 
   // seq는 방마다 카운터 문서를 트랜잭션으로 올려 매긴다. 동시에 불러도 1부터 빈틈없이 하나씩
@@ -119,6 +141,7 @@ export class FirestoreStore {
   }
 
   async listEvents(roomId, afterSeq = 0) {
+    if (!validId(roomId)) return [];
     const snap = await this.#events(roomId).where('seq', '>', afterSeq).orderBy('seq').get();
     return snap.docs.map((s) => s.data());
   }

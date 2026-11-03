@@ -74,4 +74,35 @@ for (const [name, make] of IMPLS) {
     assert.equal(await store.get('rooms', 'r1'), null);
     await store.delete('rooms', 'nope');
   });
+
+  // 내 방 목록·프로필 변경이 서비스의 모든 방을 읽지 않게(#3)
+  test(`[${name}] roomsOf(uid)는 그 사람이 탈퇴하지 않은 멤버인 방만, 처음 넣은 순서로`, async () => {
+    const store = make();
+    await store.put('rooms', { id: 'r2', members: [{ uid: 'a' }, { uid: 'b' }] });
+    await store.put('rooms', { id: 'r1', members: [{ uid: 'b' }] });
+    await store.put('rooms', { id: 'r3', members: [{ uid: 'a', deleted: true }] });
+    await store.put('rooms', { id: 'r4', name: '둘째', members: [{ uid: 'a' }] });
+    assert.deepEqual((await store.roomsOf('a')).map((r) => r.id), ['r2', 'r4']);
+    assert.deepEqual((await store.roomsOf('a'))[1], await store.get('rooms', 'r4'));
+    assert.deepEqual(await store.roomsOf('nobody'), []);
+  });
+
+  // 처음 들어온 사람의 프로필처럼 '없을 때만 만들기'가 동시에 와도 하나만 남게
+  test(`[${name}] putIfAbsent는 없을 때만 넣고, 있으면 있던 문서를 돌려준다`, async () => {
+    const store = make();
+    const results = await Promise.all(['#111111', '#222222', '#333333'].map((color) => store.putIfAbsent('users', { id: 'u', color })));
+    const saved = await store.get('users', 'u');
+    assert.ok(results.every((r) => r.color === saved.color), JSON.stringify(results));
+    assert.deepEqual(await store.putIfAbsent('users', { id: 'u', color: '#444444' }), saved);
+  });
+
+  // 요청에서 온 id가 이상해도 '없음'으로 다룬다(넣을 수 없는 id로는 문서가 있을 수 없다). 넣기만 거부한다
+  test(`[${name}] 넣을 수 없는 id로 get·delete·listEvents하면 없음으로 다룬다`, async () => {
+    const store = make();
+    for (const id of [undefined, 123, 'a/b', '__x__', '..']) {
+      assert.equal(await store.get('expenses', id), null, String(id));
+      await store.delete('expenses', id);
+      assert.deepEqual(await store.listEvents(id), [], String(id));
+    }
+  });
 }
