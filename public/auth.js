@@ -32,17 +32,12 @@ export async function login() {
   if (!instance) throw new Error('Google 로그인을 준비 중이에요. 지금은 데모를 이용할 수 있어요');
   return sdk.signInWithPopup(instance, new sdk.GoogleAuthProvider());
 }
-export async function reauthenticate() {
-  if (!currentUser()) throw new Error('로그인이 필요해요');
-  await sdk.reauthenticateWithPopup(currentUser(), new sdk.GoogleAuthProvider());
-  await currentUser().getIdToken(true);
-}
-export async function logout() {
+export async function logout(to = './') {
   if (instance) await sdk.signOut(instance);
   localStorage.removeItem('agent-settlement.uid');
   // 정산당 한 번 올린 타임라인 방문 시각도 이 기기에서 지운다(room.js)
   for (const key of Object.keys(localStorage)) if (key.startsWith('agent-settlement.timeline.')) localStorage.removeItem(key);
-  location.href = './';
+  location.href = to;
 }
 export function onSessionChange(callback) {
   return instance ? sdk.onAuthStateChanged(instance, callback) : () => {};
