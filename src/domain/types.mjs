@@ -58,11 +58,12 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
  * }} AgentSettings
  */
 
-/**
+/** 청구서는 방 사람 모두가 읽는다. 위치 요약 글은 담지 않고 붙었다는 사실만 hasLocationSummary로 둔다.
  * @typedef {{
  *   id: string, roomId: string, version: number, to: string, owed: number, paid: number, net: number,
  *   status: 'pending'|'accepted'|'asked'|'disputed'|'superseded',
  *   decidedBy: 'agent'|'human'|null, reasons: string[],
+ *   hasLocationSummary?: boolean,
  * }} Invoice
  */
 

@@ -68,11 +68,15 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       const base = { id: `${roomId}:v${room.version}:${m.uid}`, roomId, version: room.version, to: m.uid, owed: r.owed, paid: r.paid, net: r.net };
       const found = await firstEvidence(m.uid, room, expenses, resolved);
       const { decision, reasons } = evaluateInvoice({ invoice: base, settings: await settingsOf(m.uid), evidence: found?.evidence ?? [] });
+      // 청구서는 방 사람 모두가 읽고 위치 요약을 지워도 남으므로 요약 글은 빼고, 붙었다는 사실만 hasLocationSummary로 둔다
+      const hidden = new Set((found?.evidence ?? []).filter(e => e.locationId).map(e => e.summary));
+      const shown = reasons.filter(r => !hidden.has(r));
       const invoice = {
         ...base,
         status: { accept: 'accepted', ask: 'asked', dispute: 'disputed' }[decision],
         decidedBy: decision === 'ask' ? null : 'agent',
-        reasons: found?.evidence.some(e => e.locationId) ? ['위치 요약을 확인해 주세요'] : reasons,
+        reasons: shown.length ? shown : ['근거가 있는 지출에 이의를 냈어요'],
+        ...(hidden.size ? { hasLocationSummary: true } : {}),
       };
       await store.put('invoices', invoice);
       invoices.push(invoice);

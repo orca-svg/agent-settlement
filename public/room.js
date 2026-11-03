@@ -693,7 +693,8 @@ function invoiceSheet() {
   return {
     title: '청구서',
     html: `<div class="big"><div class="amt">${won(Math.max(0, -inv.net))}</div>
-        <p class="sub">낸 돈 ${won(inv.paid)} · 내 몫 ${won(inv.owed)} · 방 version ${inv.version}</p></div>
+        <p class="sub">낸 돈 ${won(inv.paid)} · 내 몫 ${won(inv.owed)} · 방 version ${inv.version}</p>
+        ${inv.hasLocationSummary ? `<p class="badges">${chip('위치 요약 · 확인 전')}</p>` : ''}</div>
       <p class="how">${esc(inv.reasons.join(' · '))}</p>
       ${answering && !dd ? `${formError()}<div style="display:grid;gap:8px"><button class="btn" data-action="answer-invoice" data-decision="accept">이대로 받기</button>
         <button class="btn secondary" data-action="start-dispute">맞지 않는 지출이 있어요</button></div>` : ''}
@@ -702,25 +703,30 @@ function invoiceSheet() {
 }
 
 // #7 위치 근거: 이의를 낼 때 고른 지출의 시간대(첫 주문~결제)만 Google 지도 타임라인 파일에서 찾아 본다.
-// 파일은 이 화면에서만 읽고 올리지 않는다. 찾은 한 줄은 사용자가 체크해야만 이의 상대와 중재 비서에게 간다(public/timeline.js)
+// 파일은 이 화면에서만 읽고 올리지 않는다. 찾은 결과는 사용자가 스위치를 켜야만 이의 상대와 중재 비서에게 간다(public/timeline.js)
 function timelineSection(exp, tl) {
   const { from, until } = expenseWindow(exp);
-  const result = !tl
-    ? `<p class="group-note">휴대폰 Google 지도의 타임라인 설정에서 '타임라인 데이터 내보내기'로 받은 파일을 고르면, 이 지출 시간대(${kstTime(from)}~${kstTime(until)})의 기록만 읽어요. 파일은 올리지 않아요.</p>`
-    : tl.state === 'reading' ? '<p class="group-note">파일에서 이 지출 시간대만 찾는 중이에요…</p>'
-    : tl.state === 'none' ? '<p class="group-note">이 지출 시간대의 기록을 찾지 못했어요. 위치 근거 없이 이의를 보내요.</p>'
-    : tl.state === 'error' ? `<p class="form-error">${esc(tl.message)}</p>`
-    : `<div class="list"><div class="row"><span class="grow">${esc(tl.summary)}</span></div>
-        <label class="row field"><span class="grow">이 한 줄을 이의 상대와 중재 비서에게 보내요</span><input type="checkbox" data-timeline-agree ${tl.agree ? 'checked' : ''}></label></div>
-      <p class="group-note">파일과 좌표는 보내지 않아요. 보낸 요약은 7일 뒤나 지우기를 누르면 사라져요.</p>`;
-  const pick = `<label class="btn secondary sm" style="display:inline-flex;align-items:center">${tl ? '다른 파일 고르기' : '타임라인 파일 고르기'}
-      <input type="file" accept=".json,application/json" data-timeline hidden></label>`;
-  const sample = authOptions().dev ? '<button type="button" class="text-btn" data-action="timeline-sample">개발용 가짜 기록으로 해 보기</button>' : '';
-  return `<section class="group"><h3 class="group-label"><span>위치 기록으로 확인</span><span>선택</span></h3>${result}
-    <div class="actions" style="align-items:center;margin-top:8px">${pick}${sample}</div></section>`;
+  const row = (title, meta, end = '') => `<span class="grow"><span class="title">${esc(title)}</span>${meta ? `<span class="meta" style="display:block">${esc(meta)}</span>` : ''}</span>${end}`;
+  const r = tl?.result;
+  const found = r && (r.stayedUntil
+    ? row(`결제(${r.stayedUntil})까지 머물렀어요`, `첫 주문 ${kstTime(from)}부터 같은 곳`)
+    : row(`${r.leftAt}에 떠났어요`, `첫 주문 ${kstTime(from)} 때 있던 곳 · ${r.nextAt ? `${r.nextAt} ${r.nextHome ? '집' : '다른 장소'} 도착` : '도착 기록 없음'}`));
+  const body = !tl
+    ? `<div class="list"><button type="button" class="row" data-action="timeline-pick">${tile('pin')}${row('Google 지도 타임라인에서 찾기', `이 지출 시간대(${kstTime(from)}~${kstTime(until)})만 읽어요`, CHEVRON)}</button></div>
+      <p class="group-note">휴대폰 Google 지도에서 내보낸 타임라인 파일(JSON)을 골라요. 파일은 이 기기에서만 읽고 올리지 않아요.</p>`
+    : tl.state === 'reading' ? `<div class="list" aria-busy="true"><div class="row">${tile('pin')}${row('이 시간대만 찾는 중…', '')}</div></div>`
+    : tl.state === 'none' ? `<div class="list"><div class="row">${tile('pin')}${row('이 시간대 기록이 없어요', '위치 요약 없이 이의를 보내요')}</div></div>`
+    : tl.state === 'error' ? `<p class="form-error" role="alert">${esc(tl.message)}</p>`
+    : `<div class="list"><div class="row">${tile('pin')}${found}</div>
+        <label class="row" style="--inset:16px;cursor:pointer">${row('이의에 붙이기', '이의 상대와 중재 비서만 봐요')}<input type="checkbox" role="switch" class="switch" data-timeline-agree ${tl.agree ? 'checked' : ''}></label></div>
+      <p class="group-note">시각만 보내고 파일·좌표·장소 이름은 보내지 않아요. 7일 뒤 지워지고, 그 전에도 지울 수 있어요.</p>`;
+  const again = tl && tl.state !== 'reading' ? '<button type="button" class="text-btn" data-action="timeline-pick">다른 파일 고르기</button>' : '';
+  const sample = authOptions().dev && tl?.state !== 'reading' ? '<button type="button" class="text-btn" data-action="timeline-sample">개발용 가짜 기록</button>' : '';
+  return `<section class="group"><h3 class="group-label"><span>위치 기록</span><span>선택</span></h3>${body}
+    <input type="file" accept=".json,application/json" data-timeline hidden>
+    ${again || sample ? `<div class="group-actions">${again}${sample}</div>` : ''}</section>`;
 }
 
-// 타임라인 방문에서 고른 지출의 결과를 찾아 미리보기에 둔다. 기록이 없거나 확신이 낮으면 아무것도 넣지 않는다
 function applyTimeline(visits, exp) {
   const result = departure(visits, exp);
   state.disputeDraft.timeline = result ? { state: 'found', result, summary: timelineSummary(result, exp), agree: false } : { state: 'none' };
@@ -945,7 +951,7 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'open-payout', 'save-payout', 'copy']);
+const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'timeline-pick', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'open-payout', 'save-payout', 'copy']);
 
 async function agentAct(name, d) {
   const base = `/api/rooms/${enc(roomId)}`;
@@ -984,6 +990,8 @@ async function agentAct(name, d) {
     state.disputeDraft.expenseId = d.id;
     state.disputeDraft.timeline = null; // 다른 지출이면 시간대가 달라서 다시 찾는다
     renderSheet();
+  } else if (name === 'timeline-pick') {
+    document.querySelector('input[data-timeline]')?.click();
   } else if (name === 'timeline-sample') {
     const exp = byId('expenses', state.disputeDraft?.expenseId);
     if (exp) applyTimeline(readVisits(sampleTimeline(exp)), exp);

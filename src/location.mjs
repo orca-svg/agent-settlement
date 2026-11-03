@@ -23,6 +23,10 @@ export function createLocationService({ store, clock }) {
       delete next.proposal;
       await store.put('disputes', next);
     }
+    // 청구서에는 요약 글이 없고 붙었다는 표시만 있으니 그 표시도 거둔다
+    if (docs.length) for (const i of await store.list('invoices', { roomId })) {
+      if (i.to === uid && i.hasLocationSummary) await store.put('invoices', { ...i, hasLocationSummary: false });
+    }
     if (docs.length) await store.appendEvent(roomId, {
       at: clock().toISOString(), from: 'system', to: 'all', kind: 'location_removed',
       text: '보관 기간이 끝났거나 동의를 철회해 위치 요약을 지웠어요. 열린 이의를 다시 확인해 주세요.',

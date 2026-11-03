@@ -147,6 +147,23 @@ test('a record without a leaving time still reaches the counterparty and revocat
   assert.deepEqual((await seen(exp.payer)).evidence, []);
 });
 
+// 청구서는 방 사람 모두가 읽으므로 위치 요약을 담지 않는다. 원래 이유는 그대로 두고, 요약이 붙었다는 사실만 표시한다
+test('an invoice keeps its own reason and only flags that a location summary is attached', async t => {
+  const { request, exp, store } = await setup(t);
+  await attach(request, exp);
+  const summary = (await store.list('locationEvidence'))[0].summary;
+  assert.equal((await request('/api/rooms/room-one/invoices/send', { body: {} })).status, 200);
+  const invoices = await store.list('invoices', { roomId: 'room-one' });
+  const mine = invoices.find(i => i.to === 'me');
+  assert.equal(mine.hasLocationSummary, true);
+  assert.ok(mine.reasons.length);
+  assert.doesNotMatch(JSON.stringify(invoices), /위치 요약을 확인해 주세요/);
+  assert.ok(!JSON.stringify(invoices).includes(summary));
+  assert.ok(invoices.filter(i => i.to !== 'me').every(i => !i.hasLocationSummary));
+  await request('/api/rooms/room-one/location/revoke', { body: {} });
+  assert.equal((await store.get('invoices', mine.id)).hasLocationSummary, false);
+});
+
 test('revocation removes attached summaries and reopens an unconfirmed proposal', async t => {
   const { request, exp, store } = await setup(t);
   await attach(request, exp);
