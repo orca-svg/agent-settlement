@@ -87,7 +87,7 @@ test('받을 계좌가 없으면 QR을 만들지 않는다(409)', async () => {
 test('HTTP: 보내는 사람이 QR을 요청하면 새 토큰을 주고, 그 토큰 주소는 토스 링크로 보낸다', async () => {
   const { store, transfers } = await setup();
   const t = pair(await transfers(), 'cs', 'me');
-  const server = createApp({ store, env: {} });
+  const server = createApp({ store, env: { DEV_SEED: '1' } });
   await new Promise((r) => server.listen(0, r));
   const base = `http://localhost:${server.address().port}`;
   const qr = (uid) => fetch(`${base}/api/rooms/demo-t/transfers/${encodeURIComponent(t.id)}/qr`, { method: 'POST', headers: { 'x-demo-user': uid } });
@@ -300,7 +300,8 @@ test('아직 안 들어왔어요: 상태는 sent 그대로 두고 표시만 붙�
 test('HTTP: 받는 사람이 not-received를 부르면 sent에 표시가 붙고, 보내는 사람은 403', async () => {
   const ctx = await setup();
   const id = await sentCsYh(ctx);
-  const server = createApp({ store: ctx.store, env: {} });
+  // x-demo-user 신원은 개발 모드(DEV_SEED=1)에서만 받는다(#2)
+  const server = createApp({ store: ctx.store, env: { DEV_SEED: '1' } });
   await new Promise((r) => server.listen(0, r));
   const call = (uid) => fetch(`http://localhost:${server.address().port}/api/rooms/demo-t/transfers/${encodeURIComponent(id)}/not-received`, { method: 'POST', headers: { 'x-demo-user': uid } });
   try {

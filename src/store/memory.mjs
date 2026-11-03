@@ -1,6 +1,8 @@
 // Store의 메모리 구현. 서버를 다시 켜면 사라진다. #3에서 같은 메서드를 가진 FirestoreStore로 바꾼다.
 // 컬렉션: rooms, expenses, agents, invoices, disputes, transfers. 비서 기록(이벤트)은 방마다 seq가 1부터 늘어난다.
 
+import { eraseUserSnapshot } from './erase-user.mjs';
+
 export class MemoryStore {
   constructor({ now = () => new Date() } = {}) {
     this.now = now;
@@ -45,5 +47,13 @@ export class MemoryStore {
 
   async listEvents(roomId, afterSeq = 0) {
     return (this.events.get(roomId) ?? []).filter((e) => e.seq > afterSeq).map((e) => structuredClone(e));
+  }
+
+  // #2 optional account-erasure capability. Existing CRUD contracts are intact.
+  async eraseUser(uid) {
+    const result = eraseUserSnapshot(this.cols, this.events, uid, this.now());
+    this.cols = result.cols;
+    this.events = result.events;
+    return { removedLinks: result.removedLinks };
   }
 }

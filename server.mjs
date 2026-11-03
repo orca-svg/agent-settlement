@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { createApp } from './src/app.mjs';
 import { createGemini, resolveModel, withMonthlyBudget } from './src/gemini.mjs';
 import { MemoryStore } from './src/store/memory.mjs';
+import { firebaseAuth } from './src/firebase.mjs';
 import { encryptedStore } from './src/store/encrypted.mjs';
 import { resolvePayoutKey } from './src/security/seal.mjs';
 
@@ -30,6 +31,7 @@ const GEMINI_MONTHLY_LIMIT = Number(process.env.GEMINI_MONTHLY_LIMIT || 2000);
 
 const app = createApp({
   store: encryptedStore(new MemoryStore(), PAYOUT_KEY),
+  auth: await firebaseAuth(process.env),
   gemini: withMonthlyBudget(createGemini({ key: KEY, model: MODEL }), { maxCalls: GEMINI_MONTHLY_LIMIT }),
   env: process.env,
 });
