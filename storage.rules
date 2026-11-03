@@ -1,0 +1,9 @@
+rules_version = '2';
+// 영수증 사진은 서버(Admin SDK)만 읽고 쓴다. 화면은 GET /api/rooms/:id/expenses/:eid/receipt로 받는다(방 멤버만).
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

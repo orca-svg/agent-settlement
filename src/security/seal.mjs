@@ -1,4 +1,4 @@
-// 계좌처럼 민감한 값을 저장소에 넣기 전에 잠그고, 꺼낼 때 푸는 자물쇠(#8, #10).
+// 계좌·위치 요약처럼 민감한 값을 저장소에 넣기 전에 잠그고, 꺼낼 때 푸는 자물쇠(#8, #10).
 // - AES-256-GCM: 호출마다 무작위 IV라 같은 값도 매번 다르게 잠기고, 인증 태그로 변조를 잡는다.
 // - label('컬렉션/문서id/칸')을 AAD로 묶는다. 잠긴 값을 다른 문서·칸에 옮겨 붙이면 풀리지 않는다.
 // - 형식: 'enc:v1:' + base64url(iv 12바이트 ‖ tag 16바이트 ‖ 암호문). v1은 나중에 열쇠·방식을 바꿀 때 구분용.
@@ -42,6 +42,7 @@ export function unseal(text, key, label) {
 const DEV_KEY = crypto.createHash('sha256').update('agent-settlement-dev-payout-key').digest();
 
 // 열쇠 고르기. PAYOUT_ENC_KEY(base64, 32바이트)가 있으면 그것, 없으면 로컬에서만 개발용 열쇠.
+// 이름은 계좌용이지만 위치 요약(#7)도 이 열쇠로 잠근다(배포 설정을 늘리지 않으려고 같은 열쇠를 쓴다).
 // 배포(NODE_ENV=production)에서 없으면 에러를 내서 서버가 시작하지 않게 한다(공개된 열쇠로 조용히 돌지 않게)
 export function resolvePayoutKey(env = {}, { warn = console.warn } = {}) {
   const raw = String(env.PAYOUT_ENC_KEY ?? '').trim();
@@ -51,6 +52,6 @@ export function resolvePayoutKey(env = {}, { warn = console.warn } = {}) {
     return key;
   }
   if (env.NODE_ENV === 'production') throw new Error('PAYOUT_ENC_KEY가 없어요. 배포에서는 Secret Manager로 넣어 주세요');
-  warn('[payout] PAYOUT_ENC_KEY가 없어 개발용 열쇠로 계좌를 잠가요. 배포에서는 꼭 설정해야 해요');
+  warn('[payout] PAYOUT_ENC_KEY가 없어 개발용 열쇠로 계좌·위치 요약을 잠가요. 배포에서는 꼭 설정해야 해요');
   return Buffer.from(DEV_KEY);
 }

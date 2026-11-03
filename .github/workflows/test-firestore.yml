@@ -1,0 +1,26 @@
+# Firestore·Storage·Auth 에뮬레이터를 띄우고 전체 테스트를 돌린다(#3). 진짜 Firebase 프로젝트·비밀값은 쓰지 않는다.
+# 에뮬레이터 없이 도는 기본 테스트는 test.yml이 맡는다.
+name: Test (Firebase emulators)
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4 # firebase-tools 에뮬레이터는 Java 21 이상이 필요하다
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci --ignore-scripts
+      - run: npx -y -p firebase-tools@15 npm run test:emulators
+        env:
+          RUN_FIREBASE_EMULATOR_TESTS: '1'

@@ -8,7 +8,7 @@ const SAFE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 
 export function validateExpense(input, room) {
   const errors = [];
-  const uids = room.members.map((m) => m.uid);
+  const uids = room.members.filter(m => !m.deleted).map((m) => m.uid);
   const nameOf = (uid) => room.members.find((m) => m.uid === uid)?.name ?? uid;
   const title = String(input?.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 40) || '지출';
 

@@ -141,17 +141,17 @@ export function createAgentSettings({ store, clock = () => new Date() }) {
   };
 }
 
-export function registerAgentSettingsRoutes(routes, { settings, whoAmI, member }) {
+export function registerAgentSettingsRoutes(routes, { settings, authenticate, member }) {
   const body = async (req) => {
     const json = await readJson(req);
     return json && typeof json === 'object' ? json : {}; // 'null' 같은 본문도 500이 아니라 검증 오류로 끝나게
   };
   const mine = (path, fn) => routes.post(`/api/me/agent${path}`, async ({ req }) => {
-    const { uid } = await whoAmI(req);
+    const { uid } = await authenticate(req);
     return fn(uid, await body(req));
   });
 
-  routes.get('/api/me/agent', async ({ req }) => settings.get((await whoAmI(req)).uid));
+  routes.get('/api/me/agent', async ({ req }) => settings.get((await authenticate(req)).uid));
   mine('/rules', (uid, input) => settings.updateRules(uid, input));
   mine('/onboarding', (uid, input) => settings.finishOnboarding(uid, input));
   mine('/memory', (uid, { text }) => settings.addMemory(uid, text));

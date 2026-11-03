@@ -12,10 +12,10 @@ function sweep(now) {
   for (const [token, entry] of tokens) if (entry.exp <= now) tokens.delete(token);
 }
 
-export function signQrToken(link, { now = Date.now } = {}) {
+export function signQrToken(link, { now = Date.now, subjectUids = [] } = {}) {
   sweep(now());
   const token = crypto.randomBytes(16).toString('base64url');
-  tokens.set(token, { link, exp: now() + QR_TTL_MS });
+  tokens.set(token, { link, exp: now() + QR_TTL_MS, subjectUids: [...subjectUids] });
   return token;
 }
 
@@ -27,4 +27,14 @@ export function verifyQrToken(token, { now = Date.now } = {}) {
     return null;
   }
   return entry.link;
+}
+
+// Account erasure must also invalidate already-issued account-bearing links.
+export function revokeQrLinks(links) {
+  const removed = new Set(links);
+  for (const [token, entry] of tokens) if (removed.has(entry.link)) tokens.delete(token);
+}
+
+export function revokeUserQr(uid) {
+  for (const [token, entry] of tokens) if (entry.subjectUids.includes(uid)) tokens.delete(token);
 }

@@ -180,33 +180,33 @@ test('규칙 적용 근거가 비서 기록에 남는다: 자동 수락, 묻기,
   await ctx.settings.updateRules('cs', { autoAccept: 200_000, sendWhen: { payday: 25 } });
   await ctx.settings.updateRules('ms', { autoAccept: 0 });
   await ctx.orch.sendInvoices(ROOM, 'me');
-  assert.ok((await ctx.metas('invoice_accepted')).includes('규칙 · 자동 수락 한도 ₩200,000 안이에요'));
-  assert.deepEqual(await ctx.metas('invoice_asked'), ['규칙 · 자동 수락 한도 초과']);
+  assert.ok((await ctx.metas('invoice_accepted')).includes('정해 둔 규칙: 자동 수락 한도 ₩200,000 안이에요'));
+  assert.deepEqual(await ctx.metas('invoice_asked'), ['정해 둔 규칙: 자동 수락 한도 초과']);
   await ctx.orch.answerInvoice(ROOM, (await ctx.invoiceOf('ms')).id, 'ms', { decision: 'accept' });
   const scheduled = await ctx.metas('transfer_scheduled');
-  assert.ok(scheduled.includes('규칙 · 매달 25일에 보내기'));
-  assert.ok(scheduled.includes('규칙 · 바로 보내기'));
+  assert.ok(scheduled.includes('정해 둔 규칙: 매달 25일에 보내기'));
+  assert.ok(scheduled.includes('정해 둔 규칙: 바로 보내기'));
 });
 
 test('규칙 적용 근거: 직접 보내기, 이의 처리(근거 이의·중재 맡기기·묻기)', async () => {
   const manual = await setup();
   await manual.settings.updateRules('cs', { sendWhen: 'manual' });
   await manual.orch.sendInvoices(ROOM, 'me');
-  assert.ok((await manual.metas('transfer_scheduled')).includes('규칙 · 직접 보내기'));
+  assert.ok((await manual.metas('transfer_scheduled')).includes('정해 둔 규칙: 직접 보내기'));
 
   const med = await setup({ evidence: true });
   await med.settings.updateRules('ms', { onDispute: 'evidence' });
   await med.settings.updateRules('me', { onDispute: 'mediator' });
   await med.orch.sendInvoices(ROOM, 'me');
   const applied = await med.metas('rule_applied');
-  assert.ok(applied.includes('규칙 · 근거가 있으면 이의 제기'));
-  assert.ok(applied.includes('규칙 · 중재 비서에게 맡기기'));
+  assert.ok(applied.includes('정해 둔 규칙: 근거가 있으면 이의 제기'));
+  assert.ok(applied.includes('정해 둔 규칙: 중재 비서에게 맡기기'));
 
   const ask = await setup({ evidence: true });
   await ask.settings.updateRules('ms', { onDispute: 'evidence' });
   await ask.orch.sendInvoices(ROOM, 'me');
   const [e] = (await ask.store.listEvents(ROOM)).filter((x) => x.kind === 'dispute_asked');
-  assert.equal(e.meta, '규칙 · 이의가 오면 주인에게 묻기');
+  assert.equal(e.meta, '정해 둔 규칙: 이의가 오면 주인에게 묻기');
   assert.deepEqual([e.action.type, e.action.for], ['agree_dispute', 'me']);
 });
 
@@ -537,4 +537,54 @@ test('normalizeSettings: 빈 문서와 옛 문서(notify 없음)를 기본값으
   assert.deepEqual(old.rules, { autoAccept: 5, sendWhen: { payday: 3 }, onDispute: 'evidence', notify: 'actions' });
   assert.deepEqual(old.memory, ['m']);
   assert.equal(ruleChangeText('notify', 'actions', 'all'), '알림: 확인할 일만 → 모든 진행 상황');
+});
+
+// ---------------------------------------------------------------- 로그인(#2)과 함께
+test('로그인: 내 설정은 토큰의 본인 것만 다루고, x-demo-user는 믿지 않으며, 탈퇴한 사람은 막는다', async () => {
+  const store = new MemoryStore();
+  const auth = { async verifyIdToken(token) { if (!['a', 'b'].includes(token)) throw new Error('invalid'); return { uid: token, name: token, auth_time: Date.now() / 1000 }; } };
+  const server = createApp({ store, auth });
+  await new Promise((r) => server.listen(0, r));
+  const url = `http://localhost:${server.address().port}`;
+  const call = (path, headers, body) => fetch(url + path, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined });
+  try {
+    assert.equal((await call('/api/me/agent', { 'x-demo-user': 'a' })).status, 401, '데모 헤더는 믿지 않는다');
+    assert.equal((await call('/api/me/agent/rules', { 'x-demo-user': 'a' }, { autoAccept: 1 })).status, 401);
+    assert.equal((await call('/api/me/agent', { authorization: 'Bearer nope' })).status, 401);
+    assert.equal((await call('/api/me/agent/rules', { authorization: 'Bearer a' }, { autoAccept: 7000 })).status, 200);
+    assert.equal((await store.get('agents', 'a')).rules.autoAccept, 7000);
+    assert.equal(await store.get('agents', 'b'), null, '다른 사람 문서는 건드리지 않는다');
+    assert.equal((await (await call('/api/me/agent', { authorization: 'Bearer b' })).json()).rules.autoAccept, 0);
+    await store.put('deletedUsers', { id: 'a' });
+    assert.equal((await call('/api/me/agent', { authorization: 'Bearer a' })).status, 401, '탈퇴 중인 사람은 읽지 못한다');
+    assert.equal((await call('/api/me/agent/memory', { authorization: 'Bearer a' }, { text: '기억' })).status, 401, '탈퇴 중인 사람은 쓰지 못한다');
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+test('탈퇴: 비서 설정(기억·규칙·기록·공유 선택·계좌)이 함께 지워진다', async () => {
+  const { settings, store, orch } = await setup();
+  await settings.addMemory('yh', '지워질 기억');
+  await settings.shareMemory('yh', ROOM, '지워질 기억', false);
+  await settings.updateRules('yh', { autoAccept: 1234 });
+  await orch.setPayout(ROOM, 'yh', NEW_ACCOUNT);
+  await store.eraseUser('yh');
+  assert.equal(await store.get('agents', 'yh'), null);
+});
+
+test('서버의 주기 작업(server.tick)이 돌아 때가 된 송금을 알린다', async () => {
+  const store = new MemoryStore();
+  await seedDemoRoom(store, { id: ROOM });
+  for (const uid of ['me', 'cs', 'yh', 'ms']) {
+    const a = await store.get('agents', uid);
+    await store.put('agents', { ...a, rules: { autoAccept: 1_000_000, sendWhen: 'now', onDispute: 'ask' } });
+  }
+  const server = createApp({ store, env: {} });
+  const orch = createOrchestrator({ store });
+  await orch.sendInvoices(ROOM, 'me');
+  const { due } = await server.tick();
+  assert.ok(due > 0);
+  assert.ok((await store.list('transfers', { roomId: ROOM })).every((t) => t.status === 'due'));
 });
