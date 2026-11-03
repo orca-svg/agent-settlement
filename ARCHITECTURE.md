@@ -16,7 +16,7 @@
         ▼
 API 서버 (server.mjs → src/app.mjs)
   ├─ src/identity.mjs     Firebase 신원 검증 (#2)
-  ├─ src/store/           Store 인터페이스, 지금은 MemoryStore (#3이 교체). encryptedStore가 계좌 칸을 잠가 저장
+  ├─ src/store/           Store 인터페이스, 지금은 MemoryStore (#3이 교체). encryptedStore가 계좌·위치 요약 칸을 잠가 저장
   ├─ src/gemini.mjs       Gemini 호출 (키는 Secret Manager·로컬 .env에만)
   ├─ src/agents/          메뉴 배분·중재, 이후 규칙 판단·청구·송금 안내
   └─ public/core.js       돈 계산(환율·몫·차액·송금 경로). 화면·서버·테스트가 같은 코드를 씀
@@ -43,7 +43,7 @@ API 서버 (server.mjs → src/app.mjs)
 | #5 비서 설정 | `agents` 문서의 `memory`·`rules` | 시드 기본값 | 설정 화면과 저장 |
 | #7 위치 | `src/agents/evidence.mjs`의 provider | `createEvidenceProvider()`가 동일한 `(uid, expense, room)` 계약으로 위치 요약 반환. 고정 근거는 개발용 시드에서만 사용 | 타임라인 파일 파서는 장치별 형식 확인 후 별도 연동 |
 | #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs`, `public/banks.js` | 받는 계좌 설정 화면(은행 선택 목록), `supertoss://send?…` 링크(실기기 검증 완료, 은행은 실기기로 확인한 표기로 바꿔 넣음), 데스크톱 QR 핸드오프(`src/payments/qr.mjs`), 계좌 칸 암호화 저장(`src/store/encrypted.mjs`), 송금 확인(받는 사람의 "아직 안 들어왔어요", 다시 알림 1일·3일) | iPhone 은행 표기 확인 |
-| #10 보안 | `src/http.mjs`, `src/store/encrypted.mjs`, Firestore 보안 규칙 | 신원당 호출 제한, 계좌 칸 암호화 저장(`PAYOUT_ENC_KEY`) | 토큰 필수, 보안 규칙 테스트 |
+| #10 보안 | `src/http.mjs`, `src/store/encrypted.mjs`, Firestore 보안 규칙 | 신원당 호출 제한, 계좌·위치 요약 칸 암호화 저장(`PAYOUT_ENC_KEY`) | 토큰 필수, 보안 규칙 테스트 |
 
 ## Store 인터페이스
 
@@ -64,13 +64,14 @@ API 서버 (server.mjs → src/app.mjs)
 탈퇴 확장 계약은 `test/account-erasure.test.mjs`로 확인해요. 프로필·비서 설정·위치 요약·본인이 등록/결제한 영수증 사진을 삭제하고, 공동 금액·분담·환율·이벤트 순번은 유지해요. `Member.deleted=true`인 익명 참여자는 새 지출에 넣을 수 없어요. 배분 사유·이의 근거·이벤트 문구에 복제된 개인정보는 지우고 열린 중재안은 다시 확인하게 해요. 원 계정과 익명 UID의 역매핑을 저장하지 않아요. 이미 발급한 QR은 무효화하고 AI 응답 캐시도 비워요. 최소 `deletedUsers/{uid}` 표식은 접근 차단·삭제 재시도용으로 유지해요. 이미 다른 참여자가 별도로 복사한 기록은 회수할 수 없어요.
 
 메모리 프로토타입에서는 방·계정 API와 tick을 한 큐로 직렬화해 AI 요청 도중 탈퇴/철회로 데이터가 되살아나는 경쟁을 막아요. 여러 인스턴스를 쓰는 #3 저장소에서는 같은 보장을 트랜잭션과 삭제 작업으로 구현해야 해요. 해당 능력이 없는 저장소에 탈퇴 기능을 조용히 활성화하지 않아요.
-### 계좌 칸 암호화 (`src/store/encrypted.mjs`)
+### 계좌·위치 요약 칸 암호화 (`src/store/encrypted.mjs`)
 
-`server.mjs`는 Store를 `encryptedStore(store, key)`로 감싸요. 계좌번호가 들어가는 칸(`agents.payout`, `transfers.link`, `transfers.fallback`)은 넣을 때 AES-256-GCM으로 잠그고(`enc:v1:…`, `src/security/seal.mjs`) 꺼낼 때 풀어요. 그래서 다른 코드는 평문을 넣고 평문을 받고, 저장소에는 잠긴 글자만 남아요.
+`server.mjs`는 Store를 `encryptedStore(store, key)`로 감싸요. 계좌번호가 들어가는 칸(`agents.payout`, `transfers.link`, `transfers.fallback`)과 위치 요약이 들어가는 칸(`locationEvidence`의 `summary`·`leftAt`·`stayedUntil`·`nextAt`·`nextHome`, 요약을 베낀 `disputes.evidence`, 요약을 보고 쓴 `disputes.proposal`)은 넣을 때 AES-256-GCM으로 잠그고(`enc:v1:…`, `src/security/seal.mjs`) 꺼낼 때 풀어요. 그래서 다른 코드는 평문을 넣고 평문을 받고, 저장소에는 잠긴 글자만 남아요.
 
 - 잠긴 값에는 `컬렉션/문서id/칸` 이름표가 묶여 있어서 다른 문서로 옮겨 붙이면 풀리지 않아요. 그래서 잠긴 문서의 `id`를 바꾸는 코드는 이 래퍼로 풀었다가 다시 넣어야 해요.
 - 잠긴 칸이 평문이거나 풀리지 않으면 오류를 내요. 잠긴 칸으로는 `list` 검색을 할 수 없어요.
-- 열쇠는 `PAYOUT_ENC_KEY`(base64, 32바이트)예요. 배포(`NODE_ENV=production`, `Dockerfile`이 넣어 줌)에서 없으면 서버가 시작하지 않고, 로컬에서는 개발용 열쇠를 써요.
+- 비어 있는 값(`null`, 빈 목록 `[]`)은 잠그지 않아요. 탈퇴 처리(`src/store/erase-user.mjs`)가 래퍼를 거치지 않고 `disputes.evidence`를 `[]`로 비우기 때문이에요. 잠그는 칸을 늘릴 때는 탈퇴 처리가 그 칸에 무엇을 쓰는지 같이 확인해요.
+- 열쇠는 `PAYOUT_ENC_KEY`(base64, 32바이트) 하나예요. 이름은 계좌용이지만 위치 요약도 이 열쇠로 잠가요. 배포(`NODE_ENV=production`, `Dockerfile`이 넣어 줌)에서 없으면 서버가 시작하지 않고, 로컬에서는 개발용 열쇠를 써요.
 - 진짜 저장소에 `eraseUser`(#2 탈퇴)가 있으면 그대로 전달하고, 그 사람이 낀 송금의 링크만 평문으로 풀어서 돌려줘요(QR 토큰 무효화용). 풀리지 않는 링크는 어차피 지울 값이라 건너뛰어요.
 - `FirestoreStore`(#3)도 같은 자리에서 감싸면 돼요. 다만 `tick()`은 모든 방의 송금을 풀어 보므로, 열쇠가 바뀌거나 값 하나가 망가지면 모든 방의 알림이 멈춰요. 그래서 열쇠는 바꾸지 않아요.
 
