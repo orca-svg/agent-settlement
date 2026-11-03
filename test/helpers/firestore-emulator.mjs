@@ -41,6 +41,14 @@ export function rulesClient(host = process.env.FIRESTORE_EMULATOR_HOST) {
       if (res.status !== 200) throw new Error(`규칙을 올리지 못했어요: ${res.status} ${await res.text()}`);
     },
     get: async (path, uid) => status(await fetch(`${docs}/${path}`, { headers: headers(uid) })),
+    // 목록 조회. parent가 ''이면 최상위 컬렉션, 'rooms/ra'이면 그 아래 컬렉션
+    async query(parent, structuredQuery, uid) {
+      const res = await fetch(`${docs}${parent ? `/${parent}` : ''}:runQuery`, { method: 'POST', headers: headers(uid), body: JSON.stringify({ structuredQuery }) });
+      // runQuery는 결과를 배열로 흘려보내는 요청이라, 거절이 HTTP 상태 대신 배열 안의 error로 올 수도 있다
+      const body = await res.json().catch(() => null);
+      const error = Array.isArray(body) ? body.find((r) => r.error)?.error : null;
+      return error ? error.code : res.status;
+    },
     // fields는 평범한 객체. mask를 주면 그 칸만 고친다(updateMask)
     async write(path, uid, fields, mask) {
       const qs = mask ? `?${mask.map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`).join('&')}` : '';

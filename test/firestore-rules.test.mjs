@@ -7,6 +7,11 @@ import assert from 'node:assert/strict';
 
 const skip = !process.env.FIRESTORE_EMULATOR_HOST && 'Firestore 에뮬레이터 없음';
 
+// runQuery용 structuredQuery 조각(Firestore REST 형식)
+const from = (collectionId, extra = {}) => ({ from: [{ collectionId }], ...extra });
+const eq = (field, value) => ({ fieldFilter: { field: { fieldPath: field }, op: 'EQUAL', value: { stringValue: value } } });
+const contains = (field, value) => ({ fieldFilter: { field: { fieldPath: field }, op: 'ARRAY_CONTAINS', value: { stringValue: value } } });
+
 // 방 A(ra): alice·bob, 방 B(rb): sam.
 // firestore.test.mjs의 규칙 테스트(rr, a, b, x …)와 같은 (default) 데이터베이스를 쓰므로 이름이 겹치지 않게 한다.
 // 서버 길(Admin SDK, 규칙을 거치지 않음)로 심어야 rooms의 _memberUids가 실제와 같이 채워진다.
@@ -69,4 +74,20 @@ test('규칙: 다른 방 멤버는 이 방의 문서를 읽지도, 쓰지도, �
   assert.equal((await store.db.doc('expenses/ra-e').get()).get('amount'), 100);
   assert.equal((await store.db.doc('expenses/ra-new').get()).exists, false);
   assert.equal((await store.db.doc('rooms/ra/events/2').get()).exists, false);
+});
+
+test('규칙: 목록 조회로도 남의 방을 못 본다(화면의 기록 구독, 조건 없는 조회, 모든 방 기록, 남이 있는 방 목록)', { skip }, async () => {
+  const { api } = await setup();
+  // public/room-api.js의 onSnapshot(query(collection(db, 'rooms', roomId, 'events'), orderBy('seq')))과 같은 조회
+  const events = from('events', { orderBy: [{ field: { fieldPath: 'seq' }, direction: 'ASCENDING' }] });
+  assert.equal(await api.query('rooms/ra', events, 'alice'), 200, '대조군 alice: 방 A 기록 목록');
+  assert.equal(await api.query('rooms/ra', events, 'sam'), 403, '방 B의 sam: 방 A 기록 목록');
+  assert.equal(await api.query('rooms/ra', events, null), 403, '비로그인: 방 A 기록 목록');
+
+  const raExpenses = from('expenses', { where: eq('roomId', 'ra') });
+  assert.equal(await api.query('', raExpenses, 'alice'), 200, '대조군 alice: roomId == ra 지출 목록');
+  assert.equal(await api.query('', raExpenses, 'sam'), 403, '방 B의 sam: roomId == ra 지출 목록');
+  assert.equal(await api.query('', from('expenses'), 'alice'), 403, 'alice: 조건 없이 모든 방 지출');
+  assert.equal(await api.query('', { from: [{ collectionId: 'events', allDescendants: true }] }, 'alice'), 403, 'alice: 모든 방 기록 한 번에(컬렉션 그룹)');
+  assert.equal(await api.query('', from('rooms', { where: contains('_memberUids', 'sam') }), 'alice'), 403, 'alice: sam이 있는 방 목록');
 });
