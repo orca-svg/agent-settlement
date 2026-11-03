@@ -48,6 +48,9 @@ test('영수증 사진은 문서 한도(1MiB)보다 커도 Cloud Storage에 저�
   await store.delete('receipts', 'r1-big');
   assert.equal(await store.get('receipts', 'r1-big'), null);
   await store.delete('receipts', 'r1-big');
+  // 요청에서 온 이상한 id는 다른 문서처럼 '없음'
+  assert.equal(await store.get('receipts', 'a/b'), null);
+  await store.delete('receipts', 'a/b');
 });
 
 test('eraseUser: 메모리 구현과 같은 결과를 한 트랜잭션으로(금액 유지, 개인정보·사진·링크 삭제, 다시 불러도 같음)', { skip }, async () => {
@@ -169,4 +172,39 @@ test('서버 계산이 Firestore 위에서도 맞다: 몫의 합 = 결제액, �
     server.closeAllConnections();
     server.close();
   }
+});
+
+// #7 위치 근거 흐름이 Firestore에서도 같게: 두 조건 조회(uid·roomId), 이의에 붙이기, 청구서 표시, 7일 뒤 방을 열 때 정리(purge)
+test('위치 요약: 붙이기 → 이의·청구서 → 7일 뒤 방을 열면 Firestore에서도 지워진다', { skip }, async (t) => {
+  const { emulatorStore, seedDemoRoom, encryptedStore, createApp } = await load();
+  const { expenseWindow } = await import('../public/timeline.js');
+  const store = encryptedStore(emulatorStore(), KEY);
+  await seedDemoRoom(store, { id: 'room-one' });
+  const exp = (await store.list('expenses', { roomId: 'room-one' })).find((e) => e.items?.length);
+  await store.put('expenses', { ...exp, date: '2026-11-01' });
+  let now = new Date('2026-11-01T12:00:00Z');
+  const auth = { verifyIdToken: async (uid) => ({ uid, name: '테스트 사용자', auth_time: now.getTime() / 1000 }) };
+  const server = createApp({ store, auth, clock: () => now });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const call = (path, body) => fetch(base + path, { method: body ? 'POST' : 'GET', headers: { authorization: 'Bearer me' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const kst = (ms) => new Date(ms + 9 * 3600000).toISOString().slice(11, 16);
+  const { until } = expenseWindow({ ...exp, date: '2026-11-01' });
+
+  assert.equal((await call('/api/rooms/room-one/location/timeline', { agree: true, expenseId: exp.id, leftAt: kst(until - 30 * 60000), nextAt: kst(until - 17 * 60000), nextHome: false })).status, 200);
+  assert.equal((await store.list('locationEvidence', { uid: 'me', roomId: 'room-one' })).length, 1);
+  assert.equal((await call('/api/rooms/room-one/disputes', { expenseId: exp.id, claim: '참석 근거를 확인해 주세요' })).status, 200);
+  assert.equal((await store.list('disputes', { roomId: 'room-one' }))[0].evidence.length, 1);
+  assert.equal((await call('/api/rooms/room-one/invoices/send', {})).status, 200);
+  const mine = (await store.list('invoices', { roomId: 'room-one' })).find((i) => i.to === 'me');
+  assert.equal(mine.hasLocationSummary, true);
+
+  now = new Date(now.getTime() + 7 * 86400000 + 1000);
+  assert.equal((await call('/api/rooms/room-one')).status, 200);
+  assert.deepEqual(await store.list('locationEvidence', { uid: 'me', roomId: 'room-one' }), []);
+  assert.deepEqual(await store.list('locationConsents', { roomId: 'room-one' }), []);
+  assert.deepEqual((await store.list('disputes', { roomId: 'room-one' }))[0].evidence, []);
+  assert.equal((await store.get('invoices', mine.id)).hasLocationSummary, false);
+  assert.equal((await store.listEvents('room-one')).at(-1).kind, 'location_removed');
 });
