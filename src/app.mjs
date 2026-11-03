@@ -152,7 +152,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   registerExpenseRoutes(routes, { ...ctx, member });
   const orchestrator = createOrchestrator({ store, gemini, clock, evidenceFor, counterFor });
   registerAgentRoutes(routes, { orchestrator, member, overLimit });
-  // 방과 상관없이 내 설정을 다루는 요청의 신원 확인(#5)
+  // 방과 상관없이 내 설정을 다루는 요청의 신원 확인(#5). #2 로그인이 들어오면 탈퇴한 사람도 막는 authenticate로 바꾼다
   const whoAmI = async (req) => {
     const who = await identify(req, store);
     if (!who) throw new HttpError(401, '누구인지 알려 주세요');

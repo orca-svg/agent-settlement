@@ -112,6 +112,7 @@ API 서버 (server.mjs → src/app.mjs)
 | GET | `/api/config` | Gemini 연결 상태 |
 | POST | `/api/allocate`, `/api/mediate` | 데모 화면용 메뉴 배분·중재 |
 | POST | `/api/dev/seed` | 개발용 데모 방 만들기(`DEV_SEED=1`일 때만) |
+| POST | `/api/dev/seed/new-user` | 같은 방을 만들고 `나`의 비서 설정을 지워 처음 설정 흐름을 볼 수 있게 함(막는 조건은 위와 같음) |
 | GET | `/api/rooms/:id` | 방, 지출, 청구서, 이의, 송금, 사람별 차액, 그리고 **내가 처리할 일(`actions`)** |
 | GET | `/api/rooms/:id/events?after=n` | 비서 기록 |
 | POST | `/api/rooms/:id/expenses` | 지출 남기기(직접 입력, 또는 확인을 마친 영수증 줄). 영수증 지출은 `receipt: { mimeType, data }`로 줄인 사진을 함께 저장해요. 방 `version`이 올라가요 |
