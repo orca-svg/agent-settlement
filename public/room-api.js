@@ -83,12 +83,17 @@ export function subscribeRoom(roomId, onEvents, { intervalMs = 2000 } = {}) {
 
 const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/13.1.0';
 let realtimeStarting;
-// 로그인(#2)이 만든 Firebase 앱에 Firestore를 붙인다. 실시간을 못 쓰면 null
+// 로그인(#2)이 만든 Firebase 앱에 Firestore를 붙인다. 실시간을 못 쓰면 null.
+// 서버가 Firestore가 아니라는 답만 기억하고, 아직 로그인 전이거나 설정·SDK를 못 받았으면 다음 구독 때 다시 본다
 function realtimeDb() {
   return realtimeStarting ??= (async () => {
     await initAuth();
     const config = await (await fetch(`${API_BASE}/api/config`)).json();
-    if (!config.realtime?.firestore || !currentUser()) return null;
+    if (!config.realtime?.firestore) return null;
+    if (!currentUser()) {
+      realtimeStarting = undefined;
+      return null;
+    }
     const [{ getApp }, sdk] = await Promise.all([import(`${FIREBASE_SDK}/firebase-app.js`), import(`${FIREBASE_SDK}/firebase-firestore.js`)]);
     const instance = sdk.getFirestore(getApp());
     const emulator = config.realtime.emulator;
@@ -97,5 +102,8 @@ function realtimeDb() {
       sdk.connectFirestoreEmulator(instance, host, Number(port));
     }
     return { sdk, instance };
-  })();
+  })().catch((error) => {
+    realtimeStarting = undefined; // 잠깐의 네트워크·CDN 실패가 다음 구독까지 막지 않게(auth.js initAuth와 같다)
+    throw error;
+  });
 }
