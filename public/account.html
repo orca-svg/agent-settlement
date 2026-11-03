@@ -8,18 +8,20 @@
   <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="solo-page">
   <header class="nav">
     <div class="nav-inner">
-      <span class="nav-title" aria-hidden="true">내 계정</span>
-      <div class="nav-actions"><a class="nav-btn" href="./">데모 보기</a></div>
+      <a class="nav-brand" href="./">정산은 비서끼리</a>
     </div>
   </header>
-  <main class="main" style="max-width:640px">
-    <section class="hero"><h1>내 계정</h1><p class="sub">내 방과 비서 설정을 어느 기기에서든 이어 봐요.</p></section>
-    <p id="message" class="group-note" role="status">연결을 확인하는 중이에요…</p>
-    <div id="account"></div>
+  <main class="solo">
+    <section class="hero"><h1>내 계정</h1><p class="sub" id="hello">로그인하면 내 방과 비서 설정을 어느 기기에서든 이어 봐요.</p></section>
+    <div id="account"><p id="message" class="group-note" role="status">연결을 확인하는 중이에요…</p></div>
   </main>
+  <footer class="foot">
+    <p>GDGoC DevFest 2026 「Tell the Vision」 · Team 06 Money is Our Life</p>
+    <p><a href="https://github.com/orca-svg/agent-settlement/blob/main/PRIVACY.md" target="_blank" rel="noopener">개인정보 처리방침</a></p>
+  </footer>
   <script type="module" src="account.js"></script>
 </body>
 </html>

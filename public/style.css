@@ -298,6 +298,30 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 /* 링크로 만든 행(계정 화면의 내 방·데모)도 버튼 행과 같은 글자색으로. 눌리는 곳임은 화살표(›)가 알린다 */
 a.row { color: inherit; text-decoration: none; cursor: pointer; }
 a.row:active { background: var(--fill); }
+/* 목록 안의 명령 행(로그아웃·탈퇴). 화살표 없이 글자색이 눌리는 곳임을 알린다 */
+.row.act { --inset: 16px; color: var(--tint); cursor: pointer; }
+.row.act.danger { color: var(--danger); }
+
+/* 한 단 화면(내 계정). 넓은 화면에서도 가운데에 읽기 좋은 폭으로 */
+.solo { max-width: 520px; margin: 0 auto; padding: 24px 20px 40px; }
+.solo .group-note a, .solo .form-error a { color: var(--tint); text-decoration: none; }
+.nav-brand { font-weight: 600; color: var(--label); text-decoration: none; }
+/* 상단바·꼬리말도 본문과 같은 폭에 맞춰 왼쪽 선을 하나로 */
+.solo-page .nav-inner, .solo-page .foot { max-width: 520px; }
+#message:empty { display: none; }
+
+/* Google 로그인 버튼: 흰(어두우면 짙은) 바탕에 G 로고. 다른 파란 버튼과 헷갈리지 않게 브랜드 모양을 따른다 */
+.btn.google {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--card);
+  color: var(--label);
+  box-shadow: inset 0 0 0 1px var(--sep);
+}
+.btn.google svg { width: 18px; height: 18px; flex: none; }
 .row + .row::before {
   content: "";
   position: absolute;
