@@ -23,3 +23,12 @@ test('style.css: QR 칸(.qr-desktop)을 CSS로 숨기지 않는다', () => {
   assert.ok(rules.length > 0);
   for (const body of rules) assert.doesNotMatch(body, /display:\s*none/);
 });
+
+// 표준 개인정보 보호지침 제20조①: '개인정보 처리방침'은 글자 크기·색상 등으로 다른 고지사항과 구분해 쉽게 찾게 한다.
+// 꼬리말 안내 글은 흐린 색(--label-3, 배경과 대비 1.8:1)이라, 링크가 그 색을 물려받으면 안내 글과 밑줄 하나만 다르다
+test('style.css: 꼬리말의 처리방침 링크는 본문 글자색(--label)에 굵은 글씨다', () => {
+  const link = css.match(/\.foot a\s*\{([^}]*)\}/)?.[1];
+  assert.ok(link, '.foot a 규칙이 없어요');
+  assert.match(link, /(^|[;\s])color:\s*var\(--label\)\s*;/);
+  assert.ok(Number(link.match(/font-weight:\s*(\d+)/)?.[1]) >= 600, '링크가 굵지 않아요');
+});
