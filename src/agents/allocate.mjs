@@ -3,6 +3,7 @@ import { ruleAllocate } from '../../public/core.js';
 import { memoryText, receiptTable, presentNames, lineSchema, cleanLines, inline, DATA_NOT_INSTRUCTIONS } from './lines.mjs';
 import { promptKey } from './cache.mjs';
 import { whose } from '../../public/ui.js';
+import { isFlagged } from '../actions.mjs';
 
 export function allocatePrompt(exp, room, memoryByUid) {
   const system = [
@@ -42,6 +43,16 @@ export function obviousAlloc(exp, room, memoryByUid) {
     return { alloc: all(`줄이 하나라 함께 있던 ${present.length}명이 똑같이 나눠요.`, 0.9), why: `줄이 하나라 함께 있던 ${present.length}명이 똑같이 나눴어요.` };
   }
   return null;
+}
+
+// 방 사람 모두가 보는 줄 이유. 모델이나 규칙이 쓴 이유는 기억을 인용하거나 풀어 쓸 수 있어서 저장하지 않고,
+// 누구 몫인지와 확인이 필요한지만으로 코드가 다시 쓴다. 기억 내용은 본인의 '내 비서'와 이의 중재에서만 보인다(#5)
+export function publicReason(it, line, exp, room) {
+  if (isFlagged(line)) return '누구 몫인지 비서들의 기억에 근거가 없어요. 확인이 필요해요.';
+  const present = room.members.map((m) => m.uid).filter((u) => exp.present.includes(u));
+  if (present.every((u) => line.consumers.includes(u))) return it.tags?.includes('나눠 먹는 안주') ? '함께 있던 사람이 나눠 먹는 안주예요.' : '함께 있던 사람 모두의 몫이에요.';
+  const names = line.consumers.map((u) => room.members.find((m) => m.uid === u)?.name ?? u).join('·');
+  return `${names}의 몫이에요. 수량과 비서들의 기억으로 정했어요.`;
 }
 
 // → { alloc: Record<itemId, LineAlloc>, source: 모델 이름 | 'rules', how, why?, error? }

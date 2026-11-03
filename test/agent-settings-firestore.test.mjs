@@ -11,17 +11,17 @@ import { roomMemory } from '../src/agents/memory.mjs';
 const skip = !(process.env.FIRESTORE_EMULATOR_HOST && process.env.FIREBASE_STORAGE_EMULATOR_HOST) && 'Firestore·Storage 에뮬레이터 없음';
 const load = () => import('./helpers/firestore-emulator.mjs');
 
-test('Firestore: 규칙·기억·방별 공유·변경 기록이 저장되고 계좌만 잠긴다', { skip }, async () => {
+test('Firestore: 규칙·기억·방별 사용·변경 기록이 저장되고 계좌만 잠긴다', { skip }, async () => {
   const { emulatorStore } = await load();
   const inner = emulatorStore();
   const store = encryptedStore(inner, Buffer.alloc(32, 5));
   const settings = createAgentSettings({ store, clock: () => new Date('2026-11-10T03:00:00Z') });
   await settings.finishOnboarding('u1', { rules: { autoAccept: 30_000, sendWhen: { payday: 10 }, onDispute: 'mediator', notify: 'all' } });
   await settings.addMemory('u1', '술을 마시지 않아요');
-  await settings.shareMemory('u1', 'room-a', '술을 마시지 않아요', false);
+  await settings.shareMemory('u1', 'room-b', '술을 마시지 않아요', true);
   const v = await settings.get('u1');
   assert.deepEqual(v.rules, { autoAccept: 30_000, sendWhen: { payday: 10 }, onDispute: 'mediator', notify: 'all' });
-  assert.deepEqual(v.memoryHidden, { 'room-a': ['술을 마시지 않아요'] });
+  assert.deepEqual(v.memoryShared, { 'room-b': ['술을 마시지 않아요'] });
   assert.equal(v.ruleHistory.length, 4);
   const room = (id) => ({ id, members: [{ uid: 'u1', name: '가' }] });
   assert.deepEqual((await roomMemory(store, room('room-a'))).u1, []);

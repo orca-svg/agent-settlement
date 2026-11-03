@@ -1,11 +1,11 @@
 // 비서들이 공유한 기억(#5의 agents 문서). 메뉴 배분의 입력이다.
 import { createHash } from 'node:crypto';
 
-// 이 방에 공유한 기억. 기본은 모두 공유이고, 주인이 이 방에서 끈 기억(memoryHidden)만 뺀다.
-// 모델에게 가는 기억은 모두 여기를 거친다. 끈 기억은 배분에도 중재에도 쓰이지 않는다
+// 이 방 정산에 쓰기로 고른 기억(memoryShared). 기본은 어느 방에도 쓰지 않고, 주인이 방마다 고른 것만 쓴다.
+// 모델에게 가는 기억은 모두 여기를 거친다. 정산에 쓰는 것과 방 사람에게 보이는 것은 다르다: 배분 이유에는 기억 내용을 싣지 않는다(allocate.mjs의 publicReason)
 export function sharedMemory(agent, roomId) {
-  const hidden = new Set(agent?.memoryHidden?.[roomId] ?? []);
-  return (agent?.memory ?? []).filter((m) => !hidden.has(m));
+  const chosen = new Set(agent?.memoryShared?.[roomId] ?? []);
+  return (agent?.memory ?? []).filter((m) => chosen.has(m));
 }
 
 // 방 멤버별 기억 { uid: string[] }

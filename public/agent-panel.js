@@ -63,18 +63,19 @@ export function disputeHtml(d) {
     ${note(DISPUTE_NOTES[d.onDispute])}`;
 }
 
-// 기억 한 줄에는 글과 공유 여부만 둔다. 글을 누르면 그 줄에서 고치거나 지운다
+// 기억 한 줄에는 글과 이 방 정산에 쓰는지만 둔다. 글을 누르면 그 줄에서 고치거나 지운다.
+// 기본은 쓰지 않는다. 써도 방 사람에게 기억 내용이 보이지는 않는다(배분 이유에 싣지 않고, 이의 중재에서만 근거로 쓰인다)
 export function memoryRowsHtml(view, roomId, ui = {}) {
-  const hidden = new Set(view.memoryHidden?.[roomId] ?? []);
+  const chosen = new Set(view.memoryShared?.[roomId] ?? []);
   if (!view.memory.length) return '<p class="empty">아직 기억이 없어요.</p>';
   return view.memory.map((m, i) => {
     if (ui.editing === m) {
       return `<div class="row agent-mem editing"><input data-mem-edit value="${esc(ui.editText ?? m)}" maxlength="${MEMORY_MAX_CHARS}" aria-label="기억 고치기">
         <button type="button" class="btn sm" data-action="mem-edit-save">저장</button><button type="button" class="btn sm plain danger-text" data-action="mem-del" data-i="${i}">지우기</button></div>`;
     }
-    const shared = !hidden.has(m);
+    const used = chosen.has(m);
     return `<div class="row agent-mem"><button type="button" class="agent-mem-text" data-action="mem-edit" data-i="${i}" aria-label="‘${esc(m)}’ 고치거나 지우기">${esc(m)}</button>
-      <button type="button" class="pick" aria-pressed="${shared}" data-action="mem-share" data-i="${i}" aria-label="이 방에 ‘${esc(m)}’ 공유">${shared ? '공유 중' : '공유 안 함'}</button></div>`;
+      <button type="button" class="pick" aria-pressed="${used}" data-action="mem-share" data-i="${i}" aria-label="이 방 정산에 ‘${esc(m)}’ 쓰기">${used ? '이 방에 씀' : '안 씀'}</button></div>`;
   }).join('');
 }
 
@@ -164,7 +165,7 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
           ${full ? `<p class="group-note">무료 요금제는 ${v.memoryLimit}개까지예요. 기억을 눌러 지우면 더할 수 있어요.</p>`
             : `<div class="mem-add"><input data-mem value="${esc(ui.memDraft)}" maxlength="${MEMORY_MAX_CHARS}" placeholder="예: 술을 마시지 않아요" aria-label="새 기억"><button type="button" class="btn sm" data-action="mem-add">더하기</button></div>`}
           ${errorHtml('memory')}${noticeHtml('memory')}
-          <p class="group-note">기억을 누르면 고치거나 지울 수 있어요. 공유한 기억만 이 방의 배분과 중재에 쓰이고, 방 사람들도 배분 이유에서 볼 수 있어요.</p></section>
+          <p class="group-note">‘이 방에 씀’으로 고른 기억만 이 방의 배분과 중재에 쓰여요. 방 사람들에게 기억 내용은 보이지 않고, 이의를 중재할 때만 근거로 인용될 수 있어요. 기억을 누르면 고치거나 지울 수 있어요.</p></section>
         <section class="group"><h3 class="group-label"><span>받을 계좌</span></h3><div class="list">${payout}</div>
           <p class="group-note">바꾸면 내가 받을 모든 방의 대기 중 송금에 적용돼요.</p></section>
         ${historyHtml(v)}`,
@@ -190,8 +191,9 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
     };
   }
 
+  // 새 기억은 어느 방에도 쓰지 않는 것이 기본이라, 더한 자리에서 바로 이 방에 쓸지 고르게 알린다
   const addMemory = async () => {
-    if (await send('/api/me/agent/memory', { text: ui.memDraft })) ui.memDraft = '';
+    if (await send('/api/me/agent/memory', { text: ui.memDraft }, { notice: '더했어요. 이 방 정산에 쓰려면 ‘안 씀’을 눌러 켜 주세요.' })) ui.memDraft = '';
     rerender();
   };
   const saveEdit = async () => {
@@ -229,9 +231,9 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
     }
     if (name === 'mem-share') {
       const text = mem(d.i);
-      const hidden = (ui.view.memoryHidden?.[roomId] ?? []).includes(text);
-      // 끌 때만 안내한다. 이미 나눈 지출의 이유 글은 다시 나누기 전까지 남는다
-      return send(`/api/rooms/${encodeURIComponent(roomId)}/agent/shared`, { text, shared: hidden }, { notice: hidden ? '' : '이미 나눈 지출의 이유 글은 다시 나누기 전까지 남아요.' });
+      const used = (ui.view.memoryShared?.[roomId] ?? []).includes(text);
+      // 이미 나눈 지출은 그대로라, 바꾼 기억은 다시 나눌 때부터 반영된다
+      return send(`/api/rooms/${encodeURIComponent(roomId)}/agent/shared`, { text, shared: !used }, { notice: '이미 나눈 지출은 다시 나눌 때부터 반영돼요.' });
     }
     if (name === 'agent-payout') return openPayout(ui.view.payout);
     if (name === 'setup-next' || name === 'setup-back') {
