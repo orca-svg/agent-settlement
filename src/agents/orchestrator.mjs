@@ -18,16 +18,23 @@ const DEFAULT_RULES = { autoAccept: 0, sendWhen: 'now', onDispute: 'ask' };
 // 보냈어요 뒤 받는 사람이 답이 없으면 다시 묻는 때(sentAt 기준). 1일 뒤, 3일 뒤 두 번. 그 뒤로는 할 일 카드만 남는다
 const DAY_MS = 24 * 3600_000;
 const RECEIPT_REMINDERS = [1 * DAY_MS, 3 * DAY_MS];
+// tick이 할 일이 있는 송금 상태. 아직 안 보냈으면 때가 됐는지·지출이 바뀌었는지, 보냈으면 받았나요 다시 알림
+const TICK_STATUSES = ['scheduled', 'due', 'opened', 'sent'];
 
 export function createOrchestrator({ store, gemini = null, clock = () => new Date(), evidenceFor = async () => [], counterFor = async () => [] }) {
   const say = (roomId, ev) => store.appendEvent(roomId, ev);
   const settingsOf = async (uid) => (await store.get('agents', uid)) ?? { uid, memory: [], rules: DEFAULT_RULES, payout: null };
 
-  async function load(roomId) {
+  async function loadRoom(roomId) {
     const room = await store.get('rooms', roomId);
     if (!room) throw new HttpError(404, '방을 찾을 수 없어요');
-    const expenses = await store.list('expenses', { roomId });
     const name = (uid) => room.members.find((m) => m.uid === uid)?.name ?? uid;
+    return { room, name };
+  }
+
+  async function load(roomId) {
+    const { room, name } = await loadRoom(roomId);
+    const expenses = await store.list('expenses', { roomId });
     return { room, expenses, name };
   }
 
@@ -337,13 +344,21 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return saved;
   }
 
-  // 주기적으로 부른다(로컬 30초, 배포는 Cloud Scheduler). 때가 된 송금을 알리고, 보냈는데 확인이 없으면 1일·3일 뒤에 다시 묻는다
+  // 주기적으로 부른다(로컬 30초, 배포는 Cloud Scheduler). 때가 된 송금을 알리고, 보냈는데 확인이 없으면 1일·3일 뒤에 다시 묻는다.
+  // Firestore에서는 읽은 문서 수가 비용이라(#3) 끝난 송금(confirmed·superseded)은 읽지 않고, 방은 tick 한 번에 방마다 한 번만 읽는다.
+  // 처리할 송금은 고치기 전에 한꺼번에 받아 둔다(이번 tick에 due가 된 송금을 다시 보지 않게)
   async function tick() {
     const now = clock();
     let due = 0;
     let reminded = 0;
-    for (const t of await store.list('transfers')) {
-      const { room, name } = await load(t.roomId);
+    const rooms = new Map();
+    const roomOf = (roomId) => {
+      if (!rooms.has(roomId)) rooms.set(roomId, loadRoom(roomId));
+      return rooms.get(roomId);
+    };
+    const active = (await Promise.all(TICK_STATUSES.map((status) => store.list('transfers', { status })))).flat();
+    for (const t of active) {
+      const { room, name } = await roomOf(t.roomId);
       if (['scheduled', 'due', 'opened'].includes(t.status) && t.version !== room.version) {
         await store.put('transfers', { ...t, status: 'superseded' });
       } else if (t.status === 'scheduled' && new Date(t.remindAt) <= now) {

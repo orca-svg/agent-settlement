@@ -53,6 +53,13 @@ export function encryptedStore(inner, key) {
     async delete(col, id) {
       return inner.delete(col, id);
     },
+    // 있던 문서가 돌아올 수 있으니 돌려받은 것을 푼다
+    async putIfAbsent(col, doc) {
+      return open(col, await inner.putIfAbsent(col, lock(col, doc)));
+    },
+    async roomsOf(uid) {
+      return (await inner.roomsOf(uid)).map((doc) => open('rooms', doc));
+    },
     // 잠긴 글자로는 같은 값을 찾을 수 없으니, 잠긴 칸으로 거르는 건 막는다
     async list(col, where = {}) {
       const sealedKey = fieldsOf(col).find((f) => f in where);

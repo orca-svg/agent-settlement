@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { createApp } from './src/app.mjs';
 import { createGemini, resolveModel, withMonthlyBudget } from './src/gemini.mjs';
 import { MemoryStore } from './src/store/memory.mjs';
+import { createFirestoreStore } from './src/store/firestore.mjs';
 import { firebaseAuth } from './src/firebase.mjs';
 import { encryptedStore } from './src/store/encrypted.mjs';
 import { resolvePayoutKey } from './src/security/seal.mjs';
@@ -29,8 +30,11 @@ const MODEL = KEY ? await resolveModel(KEY, process.env.GEMINI_MODEL) : null;
 // 요금이 갑자기 느는 걸 막는 안전장치. 한도를 넘으면 그 달은 규칙 모드로만 동작한다(#10)
 const GEMINI_MONTHLY_LIMIT = Number(process.env.GEMINI_MONTHLY_LIMIT || 2000);
 
+// STORE=firestore면 Firestore(#3, docs/firestore-setup.md), 아니면 서버 메모리(재시작하면 사라짐). 어느 쪽이든 계좌 칸은 잠가서 넣는다
+const baseStore = process.env.STORE === 'firestore' ? await createFirestoreStore(process.env) : new MemoryStore();
+
 const app = createApp({
-  store: encryptedStore(new MemoryStore(), PAYOUT_KEY),
+  store: encryptedStore(baseStore, PAYOUT_KEY),
   auth: await firebaseAuth(process.env),
   gemini: withMonthlyBudget(createGemini({ key: KEY, model: MODEL }), { maxCalls: GEMINI_MONTHLY_LIMIT }),
   env: process.env,
