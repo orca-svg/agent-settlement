@@ -61,7 +61,7 @@ API 서버 (server.mjs → src/app.mjs)
 | `listEvents(roomId, afterSeq = 0)` | `seq > afterSeq`인 기록 |
 | `eraseUser(uid)` (선택 확장) | 탈퇴 기능을 제공하는 저장소에서 구현. 개인정보 삭제·방별 무작위 익명 UID 치환을 원자적으로 수행하고 `{ removedLinks }` 반환. 없으면 탈퇴 API는 데이터 변경 없이 503. 래퍼를 거치지 않고 쓰므로 잠그는 칸(`SEALED_FIELDS`)에는 `null`·빈 목록 `[]`·칸 삭제만 쓴다(그 밖의 평문은 읽을 때 오류) |
 
-계약 테스트는 `test/store.test.mjs`예요. `FirestoreStore`도 에뮬레이터가 있으면 같은 테스트를 돌려요(`npm run test:emulators`). Firestore에서만 생기는 일(동시 seq, 영수증 사진, 탈퇴 트랜잭션, 보안 규칙)은 `test/firestore.test.mjs`가 봐요.
+계약 테스트는 `test/store.test.mjs`예요. `FirestoreStore`도 에뮬레이터가 있으면 같은 테스트를 돌려요(`npm run test:emulators`). Firestore에서만 생기는 일(동시 seq, 영수증 사진, 탈퇴 트랜잭션, 보안 규칙)은 `test/firestore.test.mjs`가 봐요. 화면 쪽 요청으로 다른 방의 데이터를 못 보고 못 바꾸는지(목록 조회, 다른 방 멤버, 지우기, 규칙에 적히지 않은 컬렉션)는 `test/firestore-rules.test.mjs`가 봐요(#10).
 
 `FirestoreStore`만의 약속:
 
@@ -167,6 +167,7 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | POST | `/api/rooms/:id/disputes` | 이의 제기 `{ expenseId, claim }` |
 | POST | `/api/rooms/:id/disputes/:did/mediate` | 중재 비서에게 맡기기(당사자만) |
 | POST | `/api/rooms/:id/disputes/:did/agree` | 중재안에 동의. 양쪽이 동의하면 지출을 다시 나누고 version을 올려 청구서를 다시 보내요 |
+| POST | `/api/rooms/:id/disputes/:did/reject` | 중재안 거부 `{ reason? }`(한 줄, 100자까지). 이의가 끝나고(이의를 낸 사람이 거부하면 `withdrawn`, 지출을 낸 사람이 거부하면 `dismissed`) 지출은 지금 배분 그대로 둔 채 정산이 이어져요. 당사자만(아니면 403), 중재안이 있을 때만(아니면 409). 같은 사람이 다시 보내면 처음 결과를 돌려줘요 |
 | POST | `/api/rooms/:id/payout` | 받을 계좌 `{ bank, accountNo, holder }`. 내가 받을 모든 방의 대기 중 송금에 토스 링크를 채워요. 여러 방을 고치므로 모든 방의 줄에 서요(`src/state-locks.mjs`) |
 | GET | `/api/me/agent` | 내 비서 설정 전체. 계좌번호는 끝 4자리(`payout.last4`)만 내려가요. 방 응답의 `myAgent`는 계좌 유무만 있는 요약이에요 |
 | POST | `/api/me/agent/rules` | 규칙 일부 `{ autoAccept?, sendWhen?, onDispute?, notify? }`. 바뀐 칸만 `ruleHistory`에 남아요. 다음 청구서부터 적용되고, 이미 만들어진 청구서·송금은 그대로예요 |
@@ -177,6 +178,8 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | POST | `/api/rooms/:id/transfers/:tid/qr` | 컴퓨터 송금 화면에 띄울 QR 토큰 받기(보내는 사람만). 응답 `{ qrToken, expiresAt }`, 15분 뒤 만료. 받을 계좌가 없거나 이미 보낸 송금이면 409(받는 사람이 안 들어왔다고 한 송금은 다시 보낼 수 있게 만들어 줘요) |
 | GET | `/api/qr/:token` | 휴대폰으로 QR을 찍으면 열리는 주소. 토큰을 토스 링크로 바꿔 302로 넘겨요. **신원 헤더 없이** 열려요(토큰이 곧 열쇠). 만료되었거나 잘못된 토큰은 404. 토큰은 서버 메모리에만 있어서 서버가 한 대일 때만 맞아요 |
 | POST | `/api/cron/tick` | 때가 된 송금 알림, 보낸 뒤 미확인 알림(1일·3일 뒤 두 번). `x-cron-secret`이 `CRON_SECRET`과 같을 때만(로컬 서버는 30초마다 스스로 불러요) |
+
+**이의의 상태는** `open`(이의가 왔어요) → `proposed`(중재안이 나왔어요)에서 세 갈래로 끝나요. 양쪽이 동의하면 `resolved`(지출을 중재안대로 다시 나누고 version을 올려 청구서를 다시 보내요), 당사자가 거부하면 `withdrawn`·`dismissed`(지출은 그대로, version도 그대로), 지출이 바뀌면 `superseded`. 열린 이의(`open`·`proposed`)가 하나라도 있으면 송금을 만들지 않으므로, 어느 쪽으로든 끝나야 방이 멈추지 않아요. 지출의 배분이 바뀌면(`POST /expenses/:eid`로 고치기·줄 확정·메뉴 배분 다시 하기, 지출 지우기) 그 지출의 열린 이의는 `superseded`로 닫고 `dispute_superseded` 기록을 남겨요(`src/agents/disputes.mjs`). 몫이 달라지지 않는 수정(제목·종류·결제 시각)은 이의를 그대로 둬요. 동의로 해결했거나 거부로 끝났거나 지출이 바뀌어 닫힌 이의의 지출은 다음 version 청구서에서 비서가 같은 근거로 이의를 다시 내지 않아요(사람이 지출을 직접 고쳤으니 매듭지은 것으로 봐요).
 
 `actions`는 이벤트 기록에서 세지 않고 서버가 현재 상태에서 계산해요(`src/actions.mjs`). 그래서 처리한 일은 자동으로 빠져요. 종류는 `confirm_line`(줄 확인), `answer_invoice`(한도를 넘은 청구서), `agree_dispute`(중재 맡기기·중재안 동의), `approve_transfer`(보낼 때가 된 송금, 보냈는지 다시 묻는 송금), `set_payout`(받을 계좌 없음), `confirm_receipt`(받았는지 확인)예요.
 

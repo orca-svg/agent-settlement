@@ -1,7 +1,8 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, COMPUTER_QUERY } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, CROSS, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, flaggedLines, blockedNotice, askedBy, nudge, COMPUTER_QUERY, disputeWaiting, disputeChoices, disputeNote, disputeRejected, disputeLive, disputeStatus } from './ui.js';
+import { reduceMotion } from './motion.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
@@ -13,7 +14,7 @@ import { readVisits, departure, timelineSummary, expenseWindow, kstTime, keepFor
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
-const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null };
+const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null, disputeDone: null, rejectDraft: null, sendBlocked: false, announceBlocked: false, focusLine: null };
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
@@ -291,10 +292,13 @@ function linesHtml(exp) {
     const flag = isFlagged(a);
     const picks = exp.present.map((u) => `<button type="button" class="pick" aria-pressed="${chosen.includes(u)}" ${a ? '' : 'disabled'}
         data-action="pick" data-exp="${esc(exp.id)}" data-line="${esc(it.id)}" data-p="${esc(u)}">${avatar(u)}${esc(nameOf(u))}</button>`).join('');
+    // 확인이 필요한 줄이 내 비서가 물은 게 아니면 누구의 비서가 물었는지 함께 보인다(청구서 보내기가 막혀 여기로 왔을 때 길을 잃지 않게)
+    const owner = flag && exp.createdBy !== state.data.me.uid ? chip(askedBy(exp.createdBy, { me: state.data.me.uid, nameOf }), 'warn') : '';
     const confirmBtn = a && (flag || edited)
-      ? `<div><button class="btn sm ${flag ? 'secondary' : 'plain'}" data-action="confirm-line" data-exp="${esc(exp.id)}" data-line="${esc(it.id)}">${edited ? '이대로 확인' : '비서가 짐작한 대로 확인'}</button></div>`
+      ? `<div class="line-foot"><button class="btn sm ${flag ? 'secondary' : 'plain'}" data-action="confirm-line" data-exp="${esc(exp.id)}" data-line="${esc(it.id)}">${edited ? '이대로 확인' : '비서가 짐작한 대로 확인'}</button>${owner}</div>`
       : '';
-    return `<div class="line ${flag ? 'flag' : ''}">
+    const focus = state.focusLine?.exp === exp.id && state.focusLine.line === it.id;
+    return `<div class="line ${flag ? 'flag' : ''}${focus ? ' focus' : ''}" data-line-id="${esc(it.id)}"${focus ? ' aria-current="true"' : ''}>
       <div class="line-top"><span class="line-name">${it.time ? `<small style="margin:0 6px 0 0">${esc(it.time)}</small>` : ''}${esc(it.name)}<small>×${it.qty}</small></span><span class="num">${money(it.qty * it.unit, exp.currency)}</span></div>
       <div class="picks">${picks}</div>
       <p class="reason">${a ? esc(a.confirmed ? `${a.reason ? `${a.reason} ` : ''}(확인함)` : a.reason) : '아직 나누지 않았어요.'}</p>
@@ -356,6 +360,7 @@ function closePhoto() {
 const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit) || 0), 0);
 
 async function act(name, d) {
+  if (name !== 'agree' && name !== 'reject') state.disputeDone = null; // 동의·거부 결과 한 줄은 다음 조작 전까지만 남긴다
   if (agentPanel.handles(name)) return agentPanel.act(name, d);
   if (AGENT_ACTIONS.has(name)) return agentAct(name, d); // 송금 링크는 이 호출 안에서 동기적으로 연다
   if (name === 'show-receipt') {
@@ -416,6 +421,8 @@ async function act(name, d) {
     state.expId = d.id;
     state.formError = '';
     state.sheet = 'exp';
+    // 막힌 줄에서 왔으면 그 줄로 스크롤해 강조한다(renderSheet). 그냥 지출을 연 것이면 처음부터 보인다
+    state.focusLine = d.line ? { exp: d.id, line: d.line, pending: true } : null;
     sheet.open(renderSheet);
   } else if (name === 'allocate-exp') {
     if (!state.allocating) allocateExpense(d.id);
@@ -427,6 +434,7 @@ async function act(name, d) {
     if (set.size) edits[d.line] = exp.present.filter((u) => set.has(u));
     renderSheet();
   } else if (name === 'confirm-line') {
+    if (state.focusLine?.exp === d.exp && state.focusLine.line === d.line) state.focusLine = null; // 확인했으니 강조는 거둔다
     confirmLine(d.exp, d.line);
   } else if (name === 'add-mode') {
     state.addMode = d.id;
@@ -502,6 +510,26 @@ function nextCard() {
   const first = mine[0];
   return `<section class="next warn"><p class="eyebrow">${esc(state.data.me.name)}의 할 일 ${mine.length}개</p><h2>${esc(first.text)}</h2>
     <p>${esc(actionNote(first))}</p><div class="actions">${actionButtons(first)}</div></section>`;
+}
+
+// 이의 목록. 이의를 낸 사람처럼 '할 일'이 없는 당사자도 여기서 시트로 들어가 중재안을 보고 거부할 수 있다.
+// 열린 이의를 먼저, 끝난 이의는 어떻게 끝났는지와 함께 남긴다(기각된 쪽이 결과를 다시 확인할 곳이기도 하다)
+function disputesSection() {
+  const { disputes = [], expenses } = state.data;
+  const rows = disputes.map((d) => [d, expenses.find((e) => e.id === d.expenseId)]).filter(([, e]) => e)
+    .sort(([a], [b]) => Number(disputeLive(b)) - Number(disputeLive(a)));
+  if (!rows.length) return '';
+  const live = rows.filter(([d]) => disputeLive(d)).length;
+  const items = rows.map(([d, e]) => `<button class="row" data-action="open-dispute" data-id="${esc(d.id)}">
+      ${tile(e.kind)}
+      <span class="grow"><span class="title">${esc(e.title)}</span>
+        <span class="meta" style="display:block">${esc(subj(nameOf(d.by)))} 낸 이의</span>
+        <span class="meta" style="display:block;color:var(--label)">${esc(disputeStatus(d, e, nameOf))}</span>
+        <span style="display:block;margin-top:4px">${disputeLive(d) ? chip('진행 중', 'warn') : chip('끝남')}</span></span>
+      ${CHEVRON}
+    </button>`).join('');
+  return `<section class="group"><h2 class="group-label"><span>이의 ${rows.length}건</span><span>${live ? `${live}건 진행 중` : '모두 끝났어요'}</span></h2>
+    <div class="list">${items}</div></section>`;
 }
 
 function expensesSection() {
@@ -615,6 +643,23 @@ function renderSheet() {
   body.innerHTML = exp ? expSheetHtml(exp) : addSheetHtml();
   body.scrollTop = top;
   mountSegs(body);
+  if (exp && state.focusLine?.pending) revealLine(body);
+}
+
+// 막힌 줄이 시트 가운데에 오도록 스크롤하고, 강조 테두리가 안쪽으로 내려앉게 한다.
+// 시트가 아직 올라오는 중에 미리 맞춰 두므로 그 위에 움직임을 더하지 않는다. 움직임 줄이기면 테두리만 남는다(.line.focus)
+function revealLine(body) {
+  const f = state.focusLine;
+  f.pending = false; // 이벤트로 다시 그려도 스크롤을 되돌리지 않고 테두리만 남는다
+  const el = body.querySelector(`.line[data-line-id="${CSS.escape(f.line)}"]`);
+  if (!el) return;
+  const at = el.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+  body.scrollTop = Math.max(0, at - (body.clientHeight - el.offsetHeight) / 2);
+  if (reduceMotion.matches) return;
+  el.animate(
+    [{ boxShadow: 'inset 0 0 0 8px color-mix(in srgb, var(--orange) 28%, transparent)' }, { boxShadow: 'inset 0 0 0 2px var(--orange)' }],
+    { duration: 520, delay: 240, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)', fill: 'backwards' },
+  );
 }
 
 function renderChannel() {
@@ -649,7 +694,7 @@ function actionButtons(a, size = '') {
   const id = esc(a.ref);
   switch (a.type) {
     case 'confirm_line':
-      return `<button class="${cls}" data-action="open-exp" data-id="${esc(a.expenseId)}">확인하기</button>`;
+      return `<button class="${cls}" data-action="open-exp" data-id="${esc(a.expenseId)}" data-line="${esc(a.itemId)}">확인하기</button>`;
     case 'answer_invoice':
       return `<button class="${cls}" data-action="open-invoice" data-id="${id}">청구서 보기</button>`;
     case 'agree_dispute':
@@ -677,7 +722,7 @@ function actionNote(a) {
     confirm_line: '비서들의 기억에 근거가 없는 줄이에요. 그래서 비서가 짐작으로 청구하지 않고 먼저 물어봐요.',
     answer_invoice: '자동 수락 한도를 넘어서 비서가 대신 받지 않고 먼저 물어봐요.',
     agree_dispute: byId('disputes', a.ref)?.status === 'proposed'
-      ? '양쪽이 동의하면 그 지출을 중재안대로 다시 나누고 청구서를 다시 보내요.'
+      ? '양쪽이 동의하면 그 지출을 중재안대로 다시 나누고 청구서를 다시 보내요. 거부하면 이의가 끝나고 지금 배분 그대로 정산해요.'
       : '중재 비서가 양쪽 근거와 영수증의 주문 시각을 보고 나누는 법을 제안해요.',
     approve_transfer: t?.notReceivedAt ? '토스 송금 내역을 먼저 확인해 주세요. 보냈다면 ‘보냈어요’를, 아니면 ‘다시 보내기’를 눌러요.'
       : !opened ? '밀어서 보내면 토스 송금 화면이 받는 사람·금액이 채워진 채로 열려요.'
@@ -698,10 +743,15 @@ function settlingCard(addButtons) {
   const current = invoices.filter((i) => i.version === room.version);
   if (!current.length) {
     if (!expenses.length) return '';
+    // 확인이 필요한 줄이 있으면 서버가 막는다. 미리 알리지 않고, 버튼을 눌렀을 때 그 자리에서 까닭을 알린다(agentAct의 send-invoices)
+    const notice = blockedNotice(flaggedLines(expenses, isFlagged), { me: state.data.me.uid, nameOf });
+    if (!notice) state.sendBlocked = false; // 막던 줄을 모두 확인했으면 안내는 저절로 사라진다
+    const blocked = state.sendBlocked ? notice : null;
     return `<section class="next"><p class="eyebrow">다음에 할 일</p><h2>이대로 청구서를 보낼까요?</h2>
       <p>보내면 각자의 비서가 자기 규칙대로 확인해요. 단톡방에는 아무것도 올라가지 않아요.${invoices.length ? ' 지출이 바뀌어서 다시 보내야 해요.' : ''}</p>
       ${state.formError && !state.sheet ? `<p class="form-error" role="alert">${esc(state.formError)}</p>` : ''}
-      <div class="actions"><button class="btn" data-action="send-invoices">비서들에게 청구서 보내기</button>${addButtons}</div></section>`;
+      <div class="actions"><button class="btn" data-action="send-invoices"${blocked ? ' aria-describedby="send-blocked"' : ''}>비서들에게 청구서 보내기</button>${addButtons}</div>
+      ${blocked ? blockedHtml(blocked, state.announceBlocked) : ''}</section>`;
   }
   const live = transfers.filter((t) => t.version === room.version);
   // 직접 보내기로 정한 송금은 알림을 띄우지 않는다. 대신 방을 열었을 때 내 차례임을 보여 준다
@@ -719,7 +769,26 @@ function settlingCard(addButtons) {
     <p>누가 무엇을 하고 있는지는 아래 '누가 누구에게'와 비서끼리 기록에서 볼 수 있어요. 내 차례가 되면 여기에 올려요.</p><div class="actions">${addButtons}</div></section>`;
 }
 
-const formError = () => (state.formError ? `<p class="form-error" role="alert">${esc(state.formError)}</p>` : '');
+// 청구서를 막는 줄 안내. 몇 줄인지, 어느 지출의 줄인지, 누가 확인할지를 글로 쓰고(색에만 기대지 않는다) 줄마다 그리로 가는 버튼을 둔다.
+// 스크린리더에는 눌렀을 때 한 번만 읽어 준다(announce). 이벤트로 다시 그릴 때마다 읽으면 시끄럽다
+function blockedHtml(n, announce) {
+  return `<div class="blocked" id="send-blocked"${announce ? ' role="alert"' : ''}>
+    <p class="blocked-title">${ALERT}${esc(n.title)}</p>
+    <p class="blocked-lead">${esc(n.lead)}</p>
+    <ul>${n.rows.map((r) => `<li><span class="blocked-what">${esc(r.what)}<small>${esc(r.who)}</small></span>
+      <button class="btn sm secondary" data-action="open-exp" data-id="${esc(r.expId)}" data-line="${esc(r.lineId)}" aria-label="${esc(`${r.what} ${r.label}`)}">${esc(r.label)}</button></li>`).join('')}</ul></div>`;
+}
+
+// 눌러서 막힌 버튼 자리에서 알린다. 그리는 사이 잃은 초점을 돌려주고, 안내가 화면 밖이면 보이게 한 뒤, 버튼을 흔든다
+function alertBlocked() {
+  const btn = $('[data-action="send-invoices"]');
+  if (!btn) return;
+  btn.focus({ preventScroll: true });
+  $('#send-blocked')?.scrollIntoView({ block: 'nearest', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+  nudge(btn);
+}
+
+const formError = () => (state.formError ?`<p class="form-error" role="alert">${esc(state.formError)}</p>` : '');
 const notFound = (title) => ({ title, html: '<p class="empty">찾을 수 없어요. 지출이 바뀌어 대체됐을 수 있어요.</p>' });
 
 // 한도를 넘어 비서가 물은 청구서: 이대로 받거나, 지출 하나를 골라 이의를 낸다
@@ -748,6 +817,28 @@ function invoiceSheet() {
         <button class="btn secondary" data-action="start-dispute">맞지 않는 지출이 있어요</button></div>` : ''}
       ${answering ? form : `<p class="group-note">${inv.status === 'accepted' ? '받기로 했어요.' : inv.status === 'disputed' ? '이의를 제기했어요.' : '지출이 바뀌어 대체된 청구서예요.'}</p>`}`,
   };
+}
+
+// 중재안에 할 수 있는 것: 동의하거나, 거부해서 이의를 끝낸다. 거부는 되돌릴 수 없어서
+// 한 번 누르면 까닭(선택)을 적는 칸과 확정 버튼이 열리고, 그동안 동의 버튼은 숨겨 칸이 동의에 딸린 것처럼 읽히지 않게 한다.
+// 동의와는 아이콘·글자·바탕이 달라 색만 보고 고르지 않게 한다
+function proposalChoices(d, exp, uid) {
+  const choose = disputeChoices(d, exp, uid);
+  const rd = state.rejectDraft;
+  const busy = state.busy === 'reject';
+  const waiting = disputeWaiting(d, exp);
+  const buttons = [
+    choose.agree && !rd && `<button class="btn lead" data-action="agree" data-id="${esc(d.id)}">${CHECK}중재안에 동의</button>`,
+    choose.reject && !rd && `<button class="btn secondary lead" data-action="reject-ask">${CROSS}중재안 거부하기</button>`,
+  ].filter(Boolean).join('');
+  return `${!choose.agree && waiting.length ? `<p class="group-note" style="margin-bottom:12px">${waiting.map(nameOf).map(esc).join('·')}의 동의를 기다려요.</p>` : ''}
+    ${buttons ? `<div class="stack">${buttons}</div>` : ''}
+    ${choose.reject && !rd ? '<p class="group-note">거부하면 이 이의가 끝나고, 지출은 지금 배분 그대로 정산해요.</p>' : ''}
+    ${choose.reject && rd ? `<section class="group"><div class="list"><label class="row field"><span class="grow">거부하는 까닭(선택)</span>
+        <input data-rd="reason" value="${esc(rd.reason)}" maxlength="100" placeholder="예: 술은 같이 마셨어요"></label></div>
+        <p class="group-note">까닭은 비서끼리 기록에 남아 상대도 볼 수 있어요. 거부하면 되돌릴 수 없어요.</p></section>
+      <div class="stack"><button class="btn danger lead" data-action="reject" data-id="${esc(d.id)}" ${busy ? 'disabled' : ''}>${CROSS}${busy ? '거부하는 중…' : '거부하고 지금 배분대로 정산'}</button>
+        <button class="btn plain" data-action="reject-cancel" ${busy ? 'disabled' : ''}>취소</button></div>` : ''}`;
 }
 
 const rowText = (title, meta = '', end = '') => `<span class="grow"><span class="title">${esc(title)}</span>${meta ? `<span class="meta" style="display:block">${esc(meta)}</span>` : ''}</span>${end}`;
@@ -852,7 +943,9 @@ function disputeSheet() {
     ? `<div class="list">${d.evidence.map((e) => `<div class="row"><span class="grow">${esc(e.summary)}</span>${e.time ? chip(e.time) : ''}</div>`).join('')}</div>
       ${mine ? '<div class="actions" style="margin-top:8px"><button type="button" class="text-btn" data-action="revoke-location">내 위치 요약 지우기</button></div>' : ''}` : '';
   let body = '';
-  if (d.status === 'open') {
+  if (d.status === 'superseded') {
+    body = `<p class="group-note">${esc(disputeNote(d, exp, nameOf))}</p>`;
+  } else if (d.status === 'open') {
     body = party
       ? `${formError()}<button class="btn" style="width:100%" data-action="mediate" data-id="${esc(d.id)}" ${state.busy === 'mediate' ? 'disabled' : ''}>${state.busy === 'mediate' ? '중재 비서가 보는 중…' : '중재 비서에게 맡기기'}</button>`
       : '<p class="group-note">당사자가 중재를 맡기면 중재안이 여기에 올라와요.</p>';
@@ -863,20 +956,29 @@ function disputeSheet() {
         <span class="meta" style="display:block">${esc(it.time || '')} · ${(d.proposal.alloc[it.id]?.consumers ?? []).map(nameOf).map(esc).join('·')}</span></span></div>`).join('');
     const people = exp.present.map((u) => `<div class="row" style="--inset:52px">${avatar(u)}<span class="grow">${esc(nameOf(u))}</span>
         <span class="amount num">${won(now[u] ?? 0)} → ${won(after[u] ?? 0)}</span></div>`).join('');
-    const waiting = [exp.payer, d.by].filter((u) => !d.agreedBy.includes(u));
     body = `<section class="group"><h3 class="group-label"><span>중재안</span><span>${esc(allocLabel({ source: d.proposal.source }))}</span></h3>
         <p class="how">${esc(d.proposal.summary)}</p><div class="list">${lines}</div></section>
       <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>지금 → 중재안</span></h3><div class="list">${people}</div></section>
       ${formError()}
       ${d.status === 'resolved' ? '<p class="group-note">양쪽이 동의해서 이 지출을 다시 나눴어요.</p>'
-        : party && !d.agreedBy.includes(me.uid) ? `<button class="btn" style="width:100%" data-action="agree" data-id="${esc(d.id)}">중재안에 동의</button>`
-        : `<p class="group-note">${waiting.map(nameOf).map(esc).join('·')}의 동의를 기다려요.</p>`}`;
+        : disputeRejected(d) ? `<p class="group-note">${esc(disputeNote(d, exp, nameOf))}</p>${d.rejectReason ? `<p class="group-note">까닭: ${esc(d.rejectReason)}</p>` : ''}`
+        : proposalChoices(d, exp, me.uid)}`;
   }
   return {
     title: `‘${exp.title}’ 이의`,
     html: `<p class="how"><b>${esc(nameOf(d.by))}의 비서</b> · ${esc(d.claim)}</p>
       ${evidence ? `<section class="group"><h3 class="group-label"><span>근거</span></h3>${evidence}</section>` : ''}${body}`,
   };
+}
+
+// 중재안에 동의하거나 거부하면 시트가 닫히므로, 사용자가 돌아오는 다음 할 일 카드 바로 위에 결과를 한 줄 남긴다.
+// 상대가 이어서 동의하거나 거부하면 기록을 받아 다시 그릴 때 '다시 나눴어요'·'이의가 끝났어요'로 바뀐다.
+// 거부로 끝난 한 줄은 동의의 초록 체크와 달리 회색 ✕로 그려, 색을 못 봐도 구분된다
+function disputeLine() {
+  const d = state.disputeDone && byId('disputes', state.disputeDone);
+  const exp = d && byId('expenses', d.expenseId);
+  const ended = d && disputeRejected(d);
+  return exp ? `<p class="done-note${ended ? ' ended' : ''}" id="dispute-note" role="status">${ended ? CROSS : CHECK}<span>${esc(disputeNote(d, exp, nameOf))}</span></p>` : '';
 }
 
 const copyRow = (label, value, key) => `<div class="row"><span class="grow"><span class="meta" style="display:block">${label}</span>
@@ -1064,7 +1166,8 @@ function followUp(event) {
 }
 document.addEventListener('visibilitychange', () => followUp(document.hidden ? 'hidden' : 'visible'));
 
-const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'timeline-pick', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
+const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'timeline-pick', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'reject-ask', 'reject-cancel', 'reject', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
+
 
 async function agentAct(name, d) {
   const base = `/api/rooms/${enc(roomId)}`;
@@ -1087,12 +1190,22 @@ async function agentAct(name, d) {
     if (t?.fallback) navigator.clipboard?.writeText(t.fallback.accountNo).catch(() => {});
     if (t?.link) location.href = t.link;
   } else if (name === 'send-invoices') {
-    state.busy = 'send';
-    state.formError = '';
+    const blocked = () => flaggedLines(state.data.expenses, isFlagged).length > 0;
+    // 확인이 필요한 줄이 남았으면 서버도 409로 막는다. 같은 기준으로 먼저 알아 기다림 없이 그 자리에서 알린다.
+    // 그 사이 다른 사람이 줄을 만들어 서버가 먼저 막았어도 post가 방을 다시 불러온 뒤라 같은 안내로 이어진다
+    if (!blocked()) {
+      state.busy = 'send';
+      state.formError = '';
+      render();
+      await post('/invoices/send');
+      state.busy = null;
+    }
+    state.sendBlocked = blocked();
+    state.announceBlocked = state.sendBlocked;
+    if (state.sendBlocked) state.formError = ''; // 서버의 409 문구는 안내가 대신한다
     render();
-    await post('/invoices/send');
-    state.busy = null;
-    render();
+    state.announceBlocked = false;
+    if (state.sendBlocked) alertBlocked();
   } else if (name === 'open-invoice') {
     state.disputeDraft = null;
     openAgentSheet('invoice', d.id);
@@ -1127,6 +1240,7 @@ async function agentAct(name, d) {
       sheet.close();
     }
   } else if (name === 'open-dispute') {
+    state.rejectDraft = null;
     openAgentSheet('dispute', d.id);
   } else if (name === 'mediate') {
     state.busy = 'mediate';
@@ -1135,7 +1249,37 @@ async function agentAct(name, d) {
     state.busy = null;
     renderSheet();
   } else if (name === 'agree') {
-    await post(`/disputes/${enc(d.id)}/agree`);
+    // 동의하면 시트를 닫고 결과는 방 화면에 한 줄로 남긴다. 실패(409 등)하면 시트를 그대로 두고 까닭을 보여 준다
+    if (await post(`/disputes/${enc(d.id)}/agree`)) {
+      state.disputeDone = d.id;
+      sheet.close();
+      render();
+      $('#dispute-note')?.scrollIntoView({ block: 'nearest' });
+    }
+  } else if (name === 'reject-ask') {
+    state.rejectDraft = { reason: '' };
+    state.formError = '';
+    renderSheet();
+  } else if (name === 'reject-cancel') {
+    state.rejectDraft = null;
+    state.formError = '';
+    renderSheet();
+  } else if (name === 'reject') {
+    // 거부하면 이의가 끝나므로 동의처럼 시트를 닫고 결과를 방 화면에 한 줄로 남긴다. 실패(409 등)하면 시트를 그대로 두고 까닭을 보여 준다
+    if (state.busy === 'reject') return;
+    state.busy = 'reject';
+    renderSheet();
+    const ok = await post(`/disputes/${enc(d.id)}/reject`, { reason: state.rejectDraft?.reason ?? '' });
+    state.busy = null;
+    if (ok) {
+      state.rejectDraft = null;
+      state.disputeDone = d.id;
+      sheet.close();
+      render();
+      $('#dispute-note')?.scrollIntoView({ block: 'nearest' });
+    } else {
+      renderSheet();
+    }
   } else if (name === 'open-transfer') {
     state.transferNote = null;
     openAgentSheet('transfer', d.id);
@@ -1188,9 +1332,10 @@ function render() {
   $('#nav-add').hidden = false;
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
-  main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), nextCard(), agentPanel.rowHtml(), expensesSection(), transfersSection(), locationSection()].join('');
+  main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), nextCard(), disputesSection(), agentPanel.rowHtml(), expensesSection(), transfersSection(), locationSection()].join('');
   mountSegs(main);
-  if (['exp', 'dispute', 'transfer'].includes(state.sheet) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
+  // 이의·청구서 시트는 글을 쓰는 중이면 다시 그리지 않는다(타이핑 중 초점을 잃지 않게)
+  if (['exp', 'transfer'].includes(state.sheet) || (state.sheet === 'dispute' && !state.rejectDraft) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
 }
 
 // ---------------------------------------------------------------- 이벤트
@@ -1209,6 +1354,7 @@ document.addEventListener('keydown', (e) => {
     else if (!$('#photo-modal').hidden) closePhoto();
     else sheet.close();
   }
+  else if (e.key === 'Enter' && e.target.dataset?.rd !== undefined && !e.isComposing) act('reject', { id: state.ref }); // 한글 조합 중의 Enter는 글자를 확정하는 키라 제외
   else segArrowKeys(e, (btn) => act(btn.dataset.action, btn.dataset));
 });
 // 입력칸은 다시 그리지 않고 값만 기억한다(타이핑 중 초점을 잃지 않게)
@@ -1218,6 +1364,7 @@ document.addEventListener('input', (e) => {
     const send = $('#dispute-send');
     if (send) send.disabled = !(state.disputeDraft.expenseId && state.disputeDraft.claim.trim());
   }
+  if (e.target.dataset?.rd !== undefined && state.rejectDraft) state.rejectDraft.reason = e.target.value;
   if (e.target.dataset?.pf && state.payoutDraft) state.payoutDraft[e.target.dataset.pf] = e.target.value;
   agentPanel.onInput(e.target);
   const f = e.target.dataset?.field;
@@ -1250,9 +1397,11 @@ const sheet = createSheet($('#sheet-root'), {
   onClosed: () => {
     state.sheet = null;
     state.editing = null;
+    state.focusLine = null;
     state.ref = null;
     state.disputeDraft = null;
     state.payoutFromAgent = false;
+    state.rejectDraft = null;
     state.transferNote = null;
     state.pendingSend = null; // 시트를 닫으면 송금 앱에서 돌아왔는지 더는 묻지 않는다
     // QR 토큰은 버린다. 다시 열면 새로 받는다

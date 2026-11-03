@@ -30,6 +30,46 @@ export function allocLabel({ source, how, latencyMs }) {
 // 사람별 몫 아래 한 줄. 원 단위로 나누고 남은 돈이 있을 때만 보인다(core.js의 shares().rest).
 export const restNote = (rest) => (rest ? `<p class="group-note">나누고 남은 ${won(rest)}은 낸 사람 몫에 더했어요.</p>` : '');
 
+// 이의 당사자(지출을 낸 사람·이의를 낸 사람) 중 아직 중재안에 동의하지 않은 사람. 같은 사람이면 한 번만
+export const disputeWaiting = (d, exp) => [...new Set([exp.payer, d.by])].filter((u) => !d.agreedBy.includes(u));
+
+// 아직 열린 이의(중재 전·중재안이 나온 뒤). 열린 이의가 하나라도 있으면 송금이 만들어지지 않는다
+export const disputeLive = (d) => d.status === 'open' || d.status === 'proposed';
+
+// 중재안을 거부해서 끝난 이의(이의를 낸 사람이 거두면 withdrawn, 지출을 낸 사람이 거부하면 dismissed)
+export const disputeRejected = (d) => d.status === 'withdrawn' || d.status === 'dismissed';
+
+// 이의 시트에서 이 사람이 누를 수 있는 것. 중재안이 살아 있는(proposed) 동안 당사자만 동의·거부한다.
+// 비서가 근거 규칙으로 먼저 동의해 뒀어도 사람은 거부로 물러설 수 있어서, 동의했는지와 상관없이 거부는 열어 둔다
+export function disputeChoices(d, exp, uid) {
+  const live = d.status === 'proposed' && [exp.payer, d.by].includes(uid);
+  return { agree: live && !d.agreedBy.includes(uid), reject: live };
+}
+
+// 방 화면 '이의' 목록의 한 줄(글자만, 그리는 쪽에서 esc). 열린 이의는 누구를 기다리는지, 끝난 이의는 어떻게 끝났는지
+export function disputeStatus(d, exp, nameOf) {
+  if (d.status === 'open') return '아직 중재 전이에요';
+  if (d.status === 'proposed') {
+    const waiting = disputeWaiting(d, exp);
+    return `중재안이 나왔어요${waiting.length ? `. ${waiting.map(nameOf).join('·')}의 동의를 기다려요` : ''}`;
+  }
+  if (d.status === 'resolved') return '양쪽이 동의해서 다시 나눴어요';
+  if (d.status === 'withdrawn') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부하고 이의를 거뒀어요`;
+  if (d.status === 'dismissed') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부해서 끝났어요`;
+  return '지출이 바뀌어 닫혔어요';
+}
+
+// 동의·거부해서 시트를 닫은 뒤 방 화면에 남기는 한 줄(글자만, 그리는 쪽에서 esc).
+// 상대가 나중에 동의하거나 거부해도 맞도록 그 순간이 아니라 지금 이의 상태로 만든다
+export function disputeNote(d, exp, nameOf) {
+  if (d.status === 'resolved') return `양쪽이 동의해서 ${obj(`‘${exp.title}’`)} 중재안대로 다시 나눴어요. 청구서도 다시 보냈어요.`;
+  if (d.status === 'superseded') return `지출이 바뀌어 ‘${exp.title}’ 이의가 닫혔어요.`;
+  if (d.status === 'withdrawn') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부하고 ‘${exp.title}’ 이의를 거뒀어요. 지금 배분 그대로 정산해요.`;
+  if (d.status === 'dismissed') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부해서 ‘${exp.title}’ 이의가 끝났어요. 지금 배분 그대로 정산해요.`;
+  const waiting = disputeWaiting(d, exp);
+  return `중재안에 동의했어요.${waiting.length ? ` ${waiting.map(nameOf).join('·')}의 동의를 기다려요.` : ''}`;
+}
+
 // 영수증 사진을 넣는 버튼(#6). capture가 붙은 입력은 iOS·Android 모두 고르는 메뉴 없이 카메라로 바로 가고,
 // 없으면 운영체제가 정한다(iOS는 사진 보관함·사진 찍기 메뉴, Android 14 이상 Chrome은 카메라 없는 사진 선택기).
 // 그래서 휴대폰·태블릿(touch)에는 갈 곳이 정해진 버튼 둘을 같은 크기로 두고, 컴퓨터에는 capture 없는 하나만 둔다.
@@ -53,6 +93,8 @@ const ICONS = {
 export const tile = (kind) => `<span class="tile ${ICONS[kind] ? kind : 'shop'}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICONS[kind] || ICONS.shop}</svg></span>`;
 export const CHEVRON = '<svg class="chev" width="8" height="14" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 export const CHECK = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+export const ALERT = '<svg class="alert-ico" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5l9 15.5H3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4.5M12 17.4v.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+export const CROSS = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>';
 export const ARROW = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 // 데스크톱에서 휴대폰으로 넘길 때 보여줄 QR 이미지 주소(#8).
@@ -77,6 +119,65 @@ export function allocButton({ allocated, fresh, flagged }) {
   if (!fresh) return { label: '비서에게 다시 나누기', disabled: false, hint: '' };
   if (flagged) return { label: '비서가 나누기를 마쳤어요', disabled: true, hint: `확인 필요한 ${flagged}줄만 확인하면 끝나요.` };
   return { label: '나누기를 모두 마쳤어요', disabled: true, hint: '지출을 고치거나 비서의 기억이 바뀌면 다시 나눌 수 있어요.' };
+}
+
+// 청구서를 막는 줄(비서가 근거 없이 짐작하지 않고 사람에게 물은 줄)을 지출별로 모은다.
+// 서버의 sendInvoices가 409로 막는 기준(src/actions.mjs의 isFlagged)을 받아 쓴다. 화면이 서버를 기다리지 않고 같은 판단을 하려는 것이다
+export function flaggedLines(expenses, isFlagged) {
+  return expenses.flatMap((e) => {
+    const lines = (e.items ?? []).filter((it) => isFlagged(e.alloc?.[it.id])).map((it) => ({ id: it.id, name: it.name }));
+    return lines.length ? [{ expId: e.id, title: e.title, owner: e.createdBy, lines }] : [];
+  });
+}
+
+// 확인이 필요한 줄을 누구의 비서가 물었는지. 청구서가 막혔다는 안내와 지출 시트의 그 줄 칩이 같은 말을 쓴다.
+// '누가 확인해야 한다'가 아니라 '누구의 비서가 물어봤다'고 쓴다: 서버는 방 멤버 누구나 줄을 확인하게 두므로 철수만 할 수 있다는 말이 되면 안 된다.
+// 데모 방에는 이름이 '나'인 사람이 있어 내가 보는 사람이 아닐 때는 ‘나’로 따옴표를 쳐서 구분한다
+export function askedBy(uid, { me, nameOf }) {
+  const agent = uid === me ? '내 비서' : nameOf(uid) === '나' ? '‘나’의 비서' : `${nameOf(uid)}의 비서`;
+  return `${agent}가 물어봤어요`;
+}
+
+// 청구서 보내기를 눌렀는데 막혔을 때 버튼 아래에 보일 안내: 몇 줄이 남았고, 어느 지출의 어느 줄을, 누구의 비서가 물었는지, 어디로 가면 되는지.
+// 지출마다 한 줄이고, 그 지출의 첫 줄로 안내한다
+export function blockedNotice(groups, { me, nameOf }) {
+  if (!groups.length) return null;
+  const total = groups.reduce((n, g) => n + g.lines.length, 0);
+  return {
+    title: '청구서를 아직 보낼 수 없어요',
+    lead: `비서가 짐작하지 않고 물어본 줄이 ${total}줄 남았어요.`,
+    rows: groups.map((g) => {
+      const [first] = g.lines;
+      const more = g.lines.length - 1;
+      return { expId: g.expId, lineId: first.id, what: `${g.title}의 ‘${first.name}’${more ? ` 외 ${more}줄` : ''}`, who: askedBy(g.owner, { me, nameOf }), label: '확인하러 가기' };
+    }),
+  };
+}
+
+// 안 된다는 뜻으로 버튼을 좌우로 흔든다. 스프링에 처음 속도만 주고 제자리(0)를 목표로 두면 감쇠하며 두세 번 흔들리다 멈춘다.
+// 손으로 만지는 움직임과 같은 스프링이라, 흔들리는 중에 다시 눌러도 지금 위치에서 이어서 흔든다. 움직임 줄이기면 흔들지 않는다(false)
+const shakes = new WeakMap();
+export function shake(el, { velocity = 460, damping = 0.16, response = 0.18 } = {}) {
+  if (reduceMotion.matches) return false;
+  let spring = shakes.get(el);
+  if (!spring) {
+    spring = new Spring(0, (v) => {
+      // 움직이는 동안은 .btn의 CSS 전환(100ms)이 스프링을 둔하게 만들지 않도록 끈다
+      el.style.transition = v ? 'none' : '';
+      el.style.transform = v ? `translate3d(${v}px, 0, 0)` : '';
+    });
+    shakes.set(el, spring);
+  }
+  spring.to(0, { damping, response, velocity });
+  return true;
+}
+
+// 막혔다는 걸 누른 버튼 자리에서 알린다. 움직임 줄이기면 흔드는 대신 글자만 잠깐 밑줄로 강조한다(위치·색은 그대로. style.css의 [data-nudge])
+export function nudge(el, ms = 1600) {
+  if (!reduceMotion.matches) return shake(el);
+  el.setAttribute('data-nudge', '');
+  setTimeout(() => el.removeAttribute('data-nudge'), ms);
+  return false;
 }
 
 // 컴퓨터인지는 화면 너비가 아니라 마우스로 가리키는지로 본다(#8). 가로로 돌린 휴대폰은 넓어도 토스가 바로 열리기 때문이다
