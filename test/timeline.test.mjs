@@ -30,6 +30,13 @@ test('departure: 결제 전에 그 자리를 떠났으면 떠난 시각과 다�
   assert.deepEqual(departure(readVisits(minsu), bar), { leftAt: '22:55', nextAt: '23:08', nextHome: false });
 });
 
+test('midnight: orders on both sides of midnight keep the actual first order', () => {
+  const expense = { date: '2026-11-09', time: '00:20', items: [{ time: '00:05' }, { time: '23:50' }] };
+  assert.equal(expenseWindow(expense).from, Date.parse('2026-11-08T23:50:00+09:00'));
+  const visits = readVisits({ semanticSegments: [visit('2026-11-08T23:30:00+09:00', '2026-11-08T23:58:00+09:00')] });
+  assert.deepEqual(departure(visits, expense), { leftAt: '23:58', nextAt: null, nextHome: false });
+});
+
 test('departure: 결제 때까지 같은 곳에 있었으면 그대로 알린다', () => {
   const stayed = { semanticSegments: [visit('2026-11-08T22:00:00.000+09:00', '2026-11-08T23:59:00.000+09:00')] };
   assert.deepEqual(departure(readVisits(stayed), bar), { stayedUntil: '23:40' });

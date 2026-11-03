@@ -97,9 +97,11 @@ export function createLocationService({ store, clock }) {
       const exp = await store.get('expenses', input.expenseId);
       if (!exp || exp.roomId !== room.id || !exp.present.includes(me.uid)) throw new HttpError(400, '내가 함께 있던 지출을 골라 주세요');
       const result = checkResult(input, exp);
+      const consent = await active(me.uid, room.id);
       const mine = await store.list('locationEvidence', { uid: me.uid, roomId: room.id });
       if (mine.some(e => e.expenseId === exp.id)) throw new HttpError(409, '이 지출에는 이미 위치 요약을 붙였어요. 지우고 다시 붙여 주세요');
-      await store.put('locationConsents', { id: consentId(room.id, me.uid), uid: me.uid, roomId: room.id, expiresAt: new Date(clock().getTime() + KEEP).toISOString() });
+      // 같은 방의 새 요약을 붙여도 기존 자료의 보관 기한을 연장하지 않는다.
+      if (!consent) await store.put('locationConsents', { id: consentId(room.id, me.uid), uid: me.uid, roomId: room.id, expiresAt: new Date(clock().getTime() + KEEP).toISOString() });
       const record = await store.put('locationEvidence', {
         id: randomUUID(), uid: me.uid, roomId: room.id, expenseId: exp.id, source: 'timeline_export',
         ...result, summary: timelineSummary(result, exp), createdAt: clock().toISOString(),

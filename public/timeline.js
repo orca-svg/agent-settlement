@@ -48,9 +48,13 @@ export const kstTime = hhmm;
 /** 지출 시간대: 첫 주문부터 결제까지(ms). 주문 시각이 없으면 결제 3시간 전부터 */
 export function expenseWindow({ date, time, items = [] }) {
   const until = atKst(date, time);
-  const first = items.map((it) => it.time).filter(Boolean).sort()[0];
-  let from = first ? atKst(date, first) : until - 3 * 60 * MIN;
-  if (from > until) from -= DAY; // 자정을 넘겨 결제했으면 그 전의 주문은 전날이다
+  // HH:MM 문자열을 정렬하면 00:05가 전날 23:50보다 먼저 와요.
+  // 각 주문을 결제 이전의 날짜에 놓은 뒤 실제 시각으로 비교해요.
+  const orders = items.map(it => it.time).filter(Boolean).map(time => {
+    const at = atKst(date, time);
+    return at > until ? at - DAY : at;
+  });
+  const from = orders.length ? Math.min(...orders) : until - 3 * 60 * MIN;
   return { from, until };
 }
 

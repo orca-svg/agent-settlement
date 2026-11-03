@@ -102,7 +102,7 @@ export {};
 
 /** #2. Public profile; identity always comes from a verified token. @typedef {{ id: string, name: string, color: string }} UserProfile */
 /** Minimal deletion/retry gate, never returned in room data. @typedef {{ id: string }} DeletedUser */
-/** #7. 타임라인 요약을 붙이는 순간 받는 동의. 7일 뒤 끝난다. id is JSON.stringify([roomId, uid]). @typedef {{ id: string, roomId: string, uid: string, expiresAt: string }} LocationConsent */
+/** #7. 방·사용자별 첫 첨부부터 7일. 추가 첨부로 연장하지 않는다. id is JSON.stringify([roomId, uid]). @typedef {{ id: string, roomId: string, uid: string, expiresAt: string }} LocationConsent */
 /** 좌표·이동 경로·장소 이름은 일부러 넣지 않는다. 시각은 한국 시각 'HH:MM'.
  * @typedef {{ id: string, roomId: string, uid: string, expenseId: string, source: 'timeline_export', leftAt?: string, nextAt?: string|null, nextHome?: boolean, stayedUntil?: string, summary: string, createdAt: string }} LocationEvidence
  */

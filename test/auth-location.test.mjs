@@ -103,6 +103,22 @@ const attach = (request, exp, extra = {}, uid = 'me') => {
 };
 const stay = { leftAt: undefined, nextAt: undefined, nextHome: undefined };
 
+test('adding another timeline summary never extends existing consent retention', async t => {
+  const { request, exp, store, advance } = await setup(t);
+  assert.equal((await attach(request, exp)).status, 200);
+  const [before] = await store.list('locationConsents');
+  advance(6 * 86400000);
+  const second = { ...exp, id: `${exp.id}-second` };
+  await store.put('expenses', second);
+  assert.equal((await attach(request, second)).status, 200);
+  assert.equal((await store.list('locationConsents'))[0].expiresAt, before.expiresAt);
+  advance(86400000 + 1000);
+  await request('/api/rooms/room-one/location');
+  assert.deepEqual(await store.list('locationEvidence'), []);
+  assert.equal((await attach(request, exp)).status, 200);
+  assert.notEqual((await store.list('locationConsents'))[0].expiresAt, before.expiresAt);
+});
+
 test('timeline evidence needs consent, takes only times inside the expense window, once per expense, and expires', async t => {
   const { request, exp, advance, store } = await setup(t);
   const { from, until } = expenseWindow(exp);
