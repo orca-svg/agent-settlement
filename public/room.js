@@ -1,7 +1,7 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, flaggedLines, blockedNotice, nudge, COMPUTER_QUERY } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, flaggedLines, blockedNotice, askedBy, nudge, COMPUTER_QUERY } from './ui.js';
 import { reduceMotion } from './motion.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
@@ -289,8 +289,8 @@ function linesHtml(exp) {
     const flag = isFlagged(a);
     const picks = exp.present.map((u) => `<button type="button" class="pick" aria-pressed="${chosen.includes(u)}" ${a ? '' : 'disabled'}
         data-action="pick" data-exp="${esc(exp.id)}" data-line="${esc(it.id)}" data-p="${esc(u)}">${avatar(u)}${esc(nameOf(u))}</button>`).join('');
-    // 확인이 필요한 줄이 내 것이 아니면 누구의 확인인지 함께 보인다(청구서 보내기가 막혀 여기로 왔을 때 길을 잃지 않게)
-    const owner = flag && exp.createdBy !== state.data.me.uid ? chip(`${nameOf(exp.createdBy)}의 확인 필요`, 'warn') : '';
+    // 확인이 필요한 줄이 내 비서가 물은 게 아니면 누구의 비서가 물었는지 함께 보인다(청구서 보내기가 막혀 여기로 왔을 때 길을 잃지 않게)
+    const owner = flag && exp.createdBy !== state.data.me.uid ? chip(askedBy(exp.createdBy, { me: state.data.me.uid, nameOf }), 'warn') : '';
     const confirmBtn = a && (flag || edited)
       ? `<div class="line-foot"><button class="btn sm ${flag ? 'secondary' : 'plain'}" data-action="confirm-line" data-exp="${esc(exp.id)}" data-line="${esc(it.id)}">${edited ? '이대로 확인' : '비서가 짐작한 대로 확인'}</button>${owner}</div>`
       : '';

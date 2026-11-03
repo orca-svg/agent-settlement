@@ -1,7 +1,7 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode, flaggedLines, blockedNotice, shake, nudge } from '../public/ui.js';
+import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode, flaggedLines, blockedNotice, askedBy, shake, nudge } from '../public/ui.js';
 import { reduceMotion } from '../public/motion.js';
 
 test('allocButton: 나눈 뒤 바뀐 게 없으면 막고, 남은 일을 알려 준다', () => {
@@ -159,6 +159,12 @@ test('blockedNotice: 데모 방의 이름 "나"는 보는 사람이 아닐 때 �
   const mine = flaggedLines([{ ...izakaya, createdBy: 'me' }], flagged);
   assert.equal(blockedNotice(mine, { me: 'me', nameOf }).rows[0].who, '내 비서가 물어봤어요');
   assert.equal(blockedNotice(mine, { me: 'yh', nameOf }).rows[0].who, '‘나’의 비서가 물어봤어요');
+});
+
+test('askedBy: 막힌 줄을 누구의 비서가 물었는지. 안내와 시트의 칩이 같은 말을 쓴다', () => {
+  assert.equal(askedBy('cs', { me: 'ms', nameOf }), '철수의 비서가 물어봤어요');
+  assert.equal(askedBy('ms', { me: 'ms', nameOf }), '내 비서가 물어봤어요');
+  assert.equal(askedBy('me', { me: 'yh', nameOf }), '‘나’의 비서가 물어봤어요'); // 데모 방의 이름 "나"
 });
 
 // 가짜 프레임 시계: requestAnimationFrame을 1/60초씩 직접 돌려 스프링이 멈출 때까지 지켜본다
