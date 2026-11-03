@@ -859,7 +859,7 @@ function payoutSheet() {
       <section class="group"><div class="list">
         <label class="row field"><span class="grow">은행</span><select data-bank-pick>${options}<option value=""${p.other ? ' selected' : ''}>목록에 없어요</option></select></label>
         ${p.other ? `<label class="row field"><span class="grow">은행 이름</span><input data-pf="bank" value="${esc(p.bank)}" maxlength="30" placeholder="예: 경남은행"></label>` : ''}
-        <label class="row field"><span class="grow">계좌번호</span><input data-pf="accountNo" value="${esc(p.accountNo)}" inputmode="numeric" maxlength="30" placeholder="숫자만 또는 - 포함"></label>
+        <label class="row field"><span class="grow">계좌번호</span><input data-pf="accountNo" value="${esc(p.accountNo)}" inputmode="numeric" maxlength="30" placeholder="${p.last4 ? `지금은 •••• ${esc(p.last4)}. 새 번호 전체 입력` : '숫자만 또는 - 포함'}"></label>
         <label class="row field"><span class="grow">예금주</span><input data-pf="holder" value="${esc(p.holder)}" maxlength="30"></label>
       </div></section>
       ${p.other ? '<p class="group-note">목록에 없는 은행은 토스가 알아보지 못할 수 있어요. 그때는 보내는 사람에게 계좌번호를 복사해 보내도록 안내해요.</p>' : ''}${formError()}
@@ -882,11 +882,11 @@ const agentPanel = createAgentPanel({
 
 const AGENT_SHEETS = { invoice: invoiceSheet, dispute: disputeSheet, transfer: transferSheet, payout: payoutSheet, ...agentPanel.sheets };
 
-// 방의 할 일에서 열면 비어 있고, 내 비서 설정에서 열면 저장된 계좌를 채워 고치게 한다
+// 방의 할 일에서 열면 비어 있고, 내 비서 설정에서 열면 저장된 은행·예금주를 채운다. 계좌번호는 끝 4자리만 알아서 새로 입력한다
 function openPayoutSheet(saved = null) {
   const known = saved && BANKS.some((b) => b.label === saved.bank);
   state.payoutDraft = saved
-    ? { bank: saved.bank, accountNo: saved.accountNo, holder: saved.holder, other: !known }
+    ? { bank: saved.bank, accountNo: '', holder: saved.holder, other: !known, last4: saved.last4 }
     : { bank: BANKS[0].label, accountNo: '', holder: state.data.me.name, other: false };
   state.payoutFromAgent = Boolean(saved) || state.sheet === 'agent';
   openAgentSheet('payout');

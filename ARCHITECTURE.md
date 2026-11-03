@@ -128,7 +128,7 @@ API 서버 (server.mjs → src/app.mjs)
 | POST | `/api/rooms/:id/disputes/:did/mediate` | 중재 비서에게 맡기기(당사자만) |
 | POST | `/api/rooms/:id/disputes/:did/agree` | 중재안에 동의. 양쪽이 동의하면 지출을 다시 나누고 version을 올려 청구서를 다시 보내요 |
 | POST | `/api/rooms/:id/payout` | 받을 계좌 `{ bank, accountNo, holder }`. 내가 받을 모든 방의 대기 중 송금에 토스 링크를 채워요 |
-| GET | `/api/me/agent` | 내 비서 설정 전체(계좌 포함, 본인만). 방 응답의 `myAgent`는 계좌번호 없는 요약이에요 |
+| GET | `/api/me/agent` | 내 비서 설정 전체. 계좌번호는 끝 4자리(`payout.last4`)만 내려가요. 방 응답의 `myAgent`는 계좌 유무만 있는 요약이에요 |
 | POST | `/api/me/agent/rules` | 규칙 일부 `{ autoAccept?, sendWhen?, onDispute?, notify? }`. 바뀐 칸만 `ruleHistory`에 남고, 보낼 시기가 바뀌면 대기 중 송금의 알림 시각을 옮겨요 |
 | POST | `/api/me/agent/onboarding` | 처음 설정 마치기 `{ rules?, memory? }` |
 | POST | `/api/me/agent/memory` · `memory/edit` · `memory/delete` | 기억 더하기 `{ text }`, 고치기 `{ from, to }`, 지우기 `{ text }`. 한도를 넘으면 409 |

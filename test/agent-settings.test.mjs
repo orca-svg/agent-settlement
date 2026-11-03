@@ -400,7 +400,7 @@ test('암호화 저장소: 여러 방을 고쳐도 저장소에는 잠긴 글자
   const raw = JSON.stringify([await inner.get('agents', 'me'), await inner.list('transfers', { to: 'me' })]);
   assert.ok(!raw.includes('123456789012') && !raw.includes('123-456-789012'));
   assert.ok(raw.includes('새 기억') && raw.includes('12345'));
-  assert.equal((await ctx.settings.get('me')).payout.accountNo, '123-456-789012');
+  assert.equal((await ctx.store.get('agents', 'me')).payout.accountNo, '123-456-789012');
 });
 
 // ---------------------------------------------------------------- 처음 설정
@@ -460,13 +460,21 @@ test('API: 시드 fresh로 새 사용자를 만들고, 처음 설정부터 청�
     assert.equal((await req(`/api/rooms/${roomId}`, 'me')).json.myAgent.onboarded, true);
 
     const paid = await req('/api/me/agent/payout', 'me', { bank: '토스뱅크', accountNo: '1000-1234-5678', holder: '나' });
-    assert.equal(paid.json.payout.accountNo, '1000-1234-5678');
+    assert.deepEqual(paid.json.payout, { bank: '토스뱅크', holder: '나', last4: '5678' });
+    assert.equal((await store.get('agents', 'me')).payout.accountNo, '1000-1234-5678', '저장은 전체 번호');
     assert.equal((await req('/api/me/agent/payout', 'me', { bank: '', accountNo: '1' })).status, 400);
 
     // 방 응답에는 계좌번호가 없다. 설정 전체는 본인 신원으로만 읽는다
     const summary = JSON.stringify((await req(`/api/rooms/${roomId}`, 'me')).json.myAgent);
     assert.ok(!summary.includes('1234') && summary.includes('"hasPayout":true'));
-    assert.equal((await req('/api/me/agent', 'cs')).json.payout.holder, '철수');
+    const full = JSON.stringify((await req('/api/me/agent', 'cs')).json);
+    assert.ok(full.includes('"holder":"철수"') && !full.includes('accountNo') && !full.includes('100000000002'), '설정 응답에도 계좌번호 전체는 없다');
+    for (const path of ['/rules', '/memory', '/memory/edit', '/memory/delete', '/payout', '/onboarding']) {
+      const res = await fetch(`${url}/api/me/agent${path}`, { method: 'POST', headers: { 'x-demo-user': 'cs', 'content-type': 'application/json' }, body: 'null' });
+      assert.ok(res.status < 500, `${path}: 본문이 null이어도 500이 아니다(${res.status})`);
+    }
+    assert.equal((await req('/api/me/agent/memory', 'me', { text: { a: 1 } })).status, 400);
+    assert.equal((await req('/api/me/agent/onboarding', 'cs', { memory: ['x'] })).status, 400);
 
     assert.equal((await req('/api/me/agent')).status, 401);
     assert.equal((await req('/api/me/agent/rules', null, { autoAccept: 1 })).status, 401);
@@ -478,6 +486,54 @@ test('API: 시드 fresh로 새 사용자를 만들고, 처음 설정부터 청�
   } finally {
     server.close();
   }
+});
+
+test('시드: 새 사용자로 만들면 예전에 설정한 문서가 있어도 지운다', async () => {
+  const store = new MemoryStore();
+  await seedDemoRoom(store, { id: 'a' });
+  assert.ok((await store.get('agents', 'me')).onboardedAt);
+  await seedDemoRoom(store, { id: 'b', freshUid: 'me' });
+  assert.equal(await store.get('agents', 'me'), null);
+});
+
+test('없어진 방의 송금이 남아 있어도 규칙 저장과 계좌 저장은 끝까지 된다', async () => {
+  const ctx = await setup();
+  await ctx.settings.updateRules('cs', { sendWhen: { payday: 25 } });
+  await ctx.orch.sendInvoices(ROOM, 'me');
+  await ctx.store.put('transfers', { id: 'ghost', roomId: 'gone', version: 1, from: 'cs', to: 'me', amount: 100, status: 'scheduled', remindAt: null, link: null, fallback: null });
+  await ctx.settings.updateRules('cs', { sendWhen: 'manual' });
+  assert.equal(pair(await ctx.transfers(), 'cs', 'me').remindAt, null);
+  await ctx.orch.setPayout(null, 'me', NEW_ACCOUNT);
+  assert.deepEqual(await ctx.store.listEvents('gone'), [], '없는 방에는 기록을 만들지 않는다');
+});
+
+test('지출이 바뀌어 대체될 예전 version의 송금은 보낼 시기를 바꿔도 건드리지 않는다', async () => {
+  const ctx = await setup();
+  await ctx.settings.updateRules('cs', { sendWhen: { payday: 25 } });
+  await ctx.orch.sendInvoices(ROOM, 'me');
+  const old = pair(await ctx.transfers(), 'cs', 'me');
+  const room = await ctx.store.get('rooms', ROOM);
+  await ctx.store.put('rooms', { ...room, version: room.version + 1 });
+  await ctx.settings.updateRules('cs', { sendWhen: 'manual' });
+  assert.equal((await ctx.store.get('transfers', old.id)).remindAt, old.remindAt);
+});
+
+test('처음 설정: 기본값으로 시작을 다시 고르면 규칙이 기본값으로 돌아가고 기록에 남는다', async () => {
+  const { settings } = await setup();
+  await settings.updateRules('yh', { notify: 'all' });
+  const v = await settings.finishOnboarding('yh', { rules: DEFAULT_RULES });
+  assert.deepEqual(v.rules, DEFAULT_RULES);
+  assert.ok(v.ruleHistory.some((h) => h.field === 'autoAccept' && h.to === 0));
+  assert.ok(v.ruleHistory.some((h) => h.field === 'notify' && h.to === 'actions'));
+});
+
+test('설정 응답(규칙·기억 변경 포함)에는 계좌번호 전체가 없다', async () => {
+  const { settings } = await setup();
+  for (const v of [await settings.get('cs'), await settings.updateRules('cs', { autoAccept: 1 }), await settings.addMemory('cs', '새 기억')]) {
+    assert.deepEqual(v.payout, { bank: '토스뱅크', holder: '철수', last4: '0002' });
+    assert.ok(!JSON.stringify(v).includes('100000000002'));
+  }
+  assert.equal((await settings.get('nobody')).payout, null);
 });
 
 test('한 사람이 규칙을 바꿔도 다른 사람의 설정과 청구에는 영향이 없다', async () => {

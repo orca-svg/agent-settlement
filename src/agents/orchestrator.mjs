@@ -260,13 +260,14 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     let moved = 0;
     for (const t of await store.list('transfers', { from: uid })) {
       if (t.status !== 'scheduled' && !(t.status === 'due' && later)) continue;
-      const { room, name } = await load(t.roomId);
-      if (t.version !== room.version) continue;
+      const room = await store.get('rooms', t.roomId);
+      if (!room || t.version !== room.version) continue; // 없어진 방 하나 때문에 규칙 저장이 실패하면 안 된다
+      const toName = room.members.find((m) => m.uid === t.to)?.name ?? t.to;
       const { dueAt, ...rest } = t;
       await store.put('transfers', { ...rest, status: 'scheduled', remindAt });
       await say(t.roomId, {
         from: uid, to: uid, kind: 'transfer_rescheduled',
-        text: `${name(t.to)}에게 보낼 ${won(t.amount)}, ${remindText(remindAt, now)}`,
+        text: `${toName}에게 보낼 ${won(t.amount)}, ${remindText(remindAt, now)}`,
         meta: `규칙 변경 · ${sendWhenLabel(sendWhen)}`,
       });
       moved++;
@@ -289,7 +290,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       rooms.add(t.roomId);
     }
     const text = agent.payout ? '받을 계좌를 바꿨어요. 아직 보내지 않은 송금에는 새 계좌가 들어가요' : '받을 계좌를 알려 줬어요. 이제 바로 보낼 수 있어요';
-    for (const id of rooms) await say(id, { from: actorUid, to: 'all', kind: 'payout_set', text });
+    for (const id of rooms) if (await store.get('rooms', id)) await say(id, { from: actorUid, to: 'all', kind: 'payout_set', text });
     return { ok: true };
   }
 

@@ -29,7 +29,7 @@ export function normalizeSettings(doc, uid) {
     memory: Array.isArray(doc?.memory) ? doc.memory : [],
     memoryHidden: doc?.memoryHidden ?? {},
     rules: normalizeRules(doc?.rules),
-    ruleHistory: doc?.ruleHistory ?? [],
+    ruleHistory: Array.isArray(doc?.ruleHistory) ? doc.ruleHistory : [],
     payout: doc?.payout ?? null,
     onboardedAt: doc?.onboardedAt ?? null,
   };
@@ -38,8 +38,9 @@ export function normalizeSettings(doc, uid) {
 export const memoryLimit = (doc) => MEMORY_LIMITS[doc.plan] ?? MEMORY_LIMITS.free;
 
 function cleanText(text) {
+  if (typeof text !== 'string') throw new HttpError(400, '기억을 적어 주세요');
   // eslint-disable-next-line no-control-regex
-  const s = String(text ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  const s = text.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!s) throw new HttpError(400, '기억을 적어 주세요');
   if (s.length > MEMORY_MAX_CHARS) throw new HttpError(400, `기억은 ${MEMORY_MAX_CHARS}자까지 쓸 수 있어요`);
   return s;
@@ -47,9 +48,16 @@ function cleanText(text) {
 
 export function createAgentSettings({ store, clock = () => new Date(), orchestrator }) {
   const read = async (uid) => normalizeSettings(await store.get('agents', uid), uid);
-  // 본인에게만 내려가는 모양. 계좌도 그대로 들어 있으니 다른 사람에게 보내는 응답에 쓰지 않는다
-  const view = (doc) => ({ ...doc, memoryLimit: memoryLimit(doc) });
-  const saved = async (doc) => view(await store.put('agents', doc));
+  // 본인에게 내려가는 모양. 계좌번호 전체는 설정 화면에 필요 없으니 끝 4자리만 보낸다(바꿀 때는 새로 입력한다)
+  const view = ({ payout, ...doc }) => ({
+    ...doc,
+    payout: payout ? { bank: payout.bank, holder: payout.holder, last4: String(payout.accountNo ?? '').replace(/\D/g, '').slice(-4) } : null,
+    memoryLimit: memoryLimit(doc),
+  });
+  const saved = async (doc) => {
+    await store.put('agents', doc);
+    return view(doc);
+  };
 
   function withRules(doc, input) {
     const rules = { ...doc.rules };
@@ -108,7 +116,8 @@ export function createAgentSettings({ store, clock = () => new Date(), orchestra
     async finishOnboarding(uid, { rules, memory } = {}) {
       const before = await read(uid);
       let doc = withRules(before, rules);
-      if (String(memory ?? '').trim() && !doc.memory.includes(cleanText(memory))) doc = withMemory(doc, memory);
+      // 처음 설정의 기억 칸은 비워도 된다. 이미 있는 기억이면 그대로 둔다
+      if (memory != null && memory !== '' && !doc.memory.includes(cleanText(memory))) doc = withMemory(doc, memory);
       const out = await saved({ ...doc, onboardedAt: doc.onboardedAt ?? clock().toISOString() });
       await afterRules(before, out);
       return out;
@@ -152,26 +161,30 @@ export function createAgentSettings({ store, clock = () => new Date(), orchestra
 }
 
 export function registerAgentSettingsRoutes(routes, { settings, orchestrator, whoAmI, member }) {
+  const body = async (req) => {
+    const json = await readJson(req);
+    return json && typeof json === 'object' ? json : {}; // 'null' 같은 본문도 500이 아니라 검증 오류로 끝나게
+  };
   const mine = (path, fn) => routes.post(`/api/me/agent${path}`, async ({ req }) => {
     const { uid } = await whoAmI(req);
-    return fn(uid, await readJson(req));
+    return fn(uid, await body(req));
   });
 
   routes.get('/api/me/agent', async ({ req }) => settings.get((await whoAmI(req)).uid));
-  mine('/rules', (uid, body) => settings.updateRules(uid, body));
-  mine('/onboarding', (uid, body) => settings.finishOnboarding(uid, body));
+  mine('/rules', (uid, input) => settings.updateRules(uid, input));
+  mine('/onboarding', (uid, input) => settings.finishOnboarding(uid, input));
   mine('/memory', (uid, { text }) => settings.addMemory(uid, text));
   mine('/memory/edit', (uid, { from, to }) => settings.editMemory(uid, from, to));
   mine('/memory/delete', (uid, { text }) => settings.deleteMemory(uid, text));
   // 받을 계좌는 사람마다 하나. 방 없이 바꿔도 내가 받을 모든 방의 대기 중 송금이 함께 바뀐다
-  mine('/payout', async (uid, body) => {
-    await orchestrator.setPayout(null, uid, body);
+  mine('/payout', async (uid, input) => {
+    await orchestrator.setPayout(null, uid, input);
     return settings.get(uid);
   });
 
   routes.post('/api/rooms/:id/agent/shared', async ({ req, params }) => {
     const { me } = await member(req, params.id);
-    const { text, shared } = await readJson(req);
+    const { text, shared } = await body(req);
     return settings.shareMemory(me.uid, params.id, text, Boolean(shared));
   });
 }
