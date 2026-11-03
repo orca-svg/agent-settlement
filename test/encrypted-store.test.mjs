@@ -81,6 +81,44 @@ test('locationEvidence: 잠긴 시각으로는 찾을 수 없다', async () => {
   await assert.rejects(store.list('locationEvidence', { leftAt: '20:15' }), /잠긴 칸/);
 });
 
+// 이의(#7, #10): 위치 요약을 베낀 근거와, 그것을 보고 쓴 중재안
+const DISPUTE = {
+  id: 'r1:d-1', roomId: 'r1', expenseId: 'e1', by: 'me', status: 'proposed', agreedBy: [],
+  claim: '나의 위치 요약만으로 참석 여부를 확정할 수 없어 부담 항목 확인을 요청해요.',
+  evidence: [{ kind: 'left_at', time: '20:15', summary: LEFT.summary, locationId: 'loc-1', source: 'timeline_export', requiresHumanApproval: true }],
+  proposal: {
+    summary: '20:15 이전 주문은 넷이, 이후 주문은 나를 뺀 셋이 나눠요.',
+    alloc: { 'line-1': { consumers: ['cs', 'yh'], confidence: 0.6, reason: '20:15 이후 주문', confirmed: false } },
+    source: 'rules',
+  },
+};
+
+test('disputes.evidence·proposal: 잠그고, get·list 모두 원래 모양으로 푼다', async () => {
+  const { inner, store } = make();
+  await store.put('disputes', DISPUTE);
+  const raw = await inner.get('disputes', DISPUTE.id);
+  assert.ok(isSealed(raw.evidence) && isSealed(raw.proposal));
+  assert.equal(raw.claim, DISPUTE.claim); // 위치 근거로 낸 이의의 claim은 일반 문장이라 잠그지 않는다
+  assert.doesNotMatch(JSON.stringify(raw), /20:15|떠났어요|타임라인/);
+  assert.deepEqual(await store.get('disputes', DISPUTE.id), DISPUTE);
+  assert.deepEqual(await store.list('disputes', { roomId: 'r1' }), [DISPUTE]);
+});
+
+test('빈 목록은 null처럼 잠그지 않는다(넣을 때도, 진짜 저장소에 직접 들어 있어도)', async () => {
+  const { inner, store } = make();
+  const { proposal, ...rest } = DISPUTE;
+  const empty = { ...rest, id: 'r1:d-2', status: 'open', evidence: [] };
+  await store.put('disputes', empty);
+  assert.deepEqual((await inner.get('disputes', empty.id)).evidence, []);
+  assert.deepEqual(await store.get('disputes', empty.id), empty);
+  // 탈퇴 처리(erase-user.mjs)처럼 래퍼를 거치지 않고 []를 써 넣어도 읽힌다
+  await inner.put('disputes', { ...empty, id: 'r1:d-3' });
+  assert.deepEqual((await store.get('disputes', 'r1:d-3')).evidence, []);
+  // 비어 있지 않은 평문은 지금처럼 에러
+  await inner.put('disputes', { ...empty, id: 'r1:d-4', evidence: [{ kind: 'text', summary: '가짜 근거' }] });
+  await assert.rejects(store.get('disputes', 'r1:d-4'), /잠기지 않은 값/);
+});
+
 test('null·없는 칸은 잠그지 않고 그대로', async () => {
   const { inner, store } = make();
   await store.put('agents', { id: 'yh', uid: 'yh', payout: null });

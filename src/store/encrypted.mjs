@@ -7,10 +7,12 @@ import { seal, unseal } from '../security/seal.mjs';
 // 컬렉션별로 잠그는 칸
 // - 받는 계좌 원본과, 송금 건마다 복사되는 토스 링크·복사용 계좌 정보(#8)
 // - 위치 근거(#7): 본인 제출 시각과 그것으로 만든 요약 문장. 찾는 데 쓰는 uid·roomId·expenseId는 평문
+// - 이의: 위치 요약을 베낀 근거와, 그것을 보고 중재 비서가 쓴 중재안(src/app.mjs redactDispute가 가리는 칸)
 export const SEALED_FIELDS = {
   agents: ['payout'],
   transfers: ['link', 'fallback'],
   locationEvidence: ['summary', 'leftAt', 'stayedUntil', 'nextAt', 'nextHome'],
+  disputes: ['evidence', 'proposal'],
 };
 
 export function encryptedStore(inner, key) {
@@ -18,11 +20,15 @@ export function encryptedStore(inner, key) {
   const fieldsOf = (col) => SEALED_FIELDS[col] ?? [];
   const label = (col, id, field) => `${col}/${id}/${field}`;
 
-  // null·undefined는 "계좌 없음"이라는 뜻이라 잠그지 않는다
+  // 비어 있는 값(null·undefined·빈 목록)은 "없음"이라 잠그지 않는다.
+  // 빈 목록은 탈퇴 처리(erase-user.mjs)가 래퍼를 거치지 않고 disputes.evidence에 직접 써 넣는 값이기도 하다
+  const empty = (v) => v == null || (Array.isArray(v) && v.length === 0);
+
+  // 비어 있는 값은 그대로 둔다(empty 참고)
   const lock = (col, doc) => {
     const out = { ...doc };
     for (const f of fieldsOf(col)) {
-      if (out[f] == null) continue;
+      if (empty(out[f])) continue;
       if (doc.id == null) throw new Error(`id가 없는 문서는 잠글 수 없어요: ${col}.${f}`);
       out[f] = seal(out[f], key, label(col, doc.id, f));
     }
@@ -32,7 +38,7 @@ export function encryptedStore(inner, key) {
   const open = (col, doc) => {
     if (!doc) return doc;
     const out = { ...doc };
-    for (const f of fieldsOf(col)) if (out[f] != null) out[f] = unseal(out[f], key, label(col, doc.id, f));
+    for (const f of fieldsOf(col)) if (!empty(out[f])) out[f] = unseal(out[f], key, label(col, doc.id, f));
     return out;
   };
 
