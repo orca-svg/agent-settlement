@@ -10,6 +10,7 @@ import { router, readJson, send, allowCors, createRateLimiter, clientIp, HttpErr
 import { identify } from './identity.mjs';
 import { seedDemoRoom } from './dev/seed.mjs';
 import { registerExpenseRoutes } from './expenses/routes.mjs';
+import { registerRoomRoutes } from './rooms/routes.mjs';
 import { pendingActions } from './actions.mjs';
 import { createOrchestrator } from './agents/orchestrator.mjs';
 import { registerAgentRoutes } from './agents/routes.mjs';
@@ -137,6 +138,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     return { events: await store.listEvents(params.id, Number(url.searchParams.get('after') || 0)) };
   });
 
+  registerRoomRoutes(routes, ctx);
   registerExpenseRoutes(routes, { ...ctx, member });
   const orchestrator = createOrchestrator({ store, gemini, clock, evidenceFor, counterFor });
   registerAgentRoutes(routes, { orchestrator, member, overLimit });
