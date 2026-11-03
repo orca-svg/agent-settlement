@@ -37,8 +37,13 @@ export function createLocationService({ store, clock }) {
     const records = await store.list('locationEvidence', { uid, roomId: room.id });
     return records.filter(e => e.expenseId === expense.id && e.action === 'checkout').map(e => ({ kind: 'text', summary: e.summary, locationId: e.id, source: 'browser_self_report', uncertain: true }));
   }
-  async function sweep() {
-    for (const c of await store.list('locationConsents')) await active(c.uid, c.roomId);
+  // 끝난 동의를 정리한다. roomId를 주면 그 방만(방 요청은 그 방의 줄 안에서 부른다), 없으면 모든 방(주기 작업)
+  async function sweep(roomId) {
+    for (const c of await store.list('locationConsents', roomId ? { roomId } : {})) await active(c.uid, c.roomId);
+  }
+  // 정리할 것이 있는지만 본다(쓰지 않는다). 줄에 서지 않고 읽는 요청이 이것으로 줄에 설지 정한다
+  async function hasExpired(roomId) {
+    return (await store.list('locationConsents', { roomId })).some(c => Date.parse(c.expiresAt) <= clock().getTime());
   }
   function register(routes, member) {
     routes.get('/api/rooms/:id/location', async ({ req, params }) => {
@@ -84,5 +89,5 @@ export function createLocationService({ store, clock }) {
       return { record };
     });
   }
-  return { register, evidenceFor, sweep, purge };
+  return { register, evidenceFor, sweep, hasExpired, purge };
 }

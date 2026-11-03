@@ -34,12 +34,22 @@ export function router() {
 // 영수증 사진(긴 변 1600px JPEG, base64)이 실리는 요청의 본문 한도
 export const MAX_RECEIPT = 2_100_000;
 
-export async function readJson(req, { limit = 20_000 } = {}) {
+// 본문을 글자 그대로 받아 req에 남겨 둔다. 서버는 방·계정 요청을 줄(src/state-locks.mjs)에 세우기 전에 불러 두어,
+// 본문을 느리게 보내는 요청이 줄을 붙잡지 못하게 한다. 이미 받아 두었으면 그것을 돌려준다
+export async function readBody(req, { limit = 20_000 } = {}) {
+  if (req.rawBody !== undefined) return req.rawBody;
   let body = '';
   for await (const chunk of req) {
     body += chunk;
     if (body.length > limit) throw new HttpError(413, '요청이 너무 커요');
   }
+  req.rawBody = body;
+  return body;
+}
+
+export async function readJson(req, { limit = 20_000 } = {}) {
+  const body = await readBody(req, { limit });
+  if (body.length > limit) throw new HttpError(413, '요청이 너무 커요'); // 미리 받을 때는 더 큰 한도로 받았을 수 있다
   if (!body) return {};
   try {
     return JSON.parse(body);

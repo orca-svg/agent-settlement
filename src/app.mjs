@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { DEMO_ROOM, DEMO_EXPENSES, DEMO_DISPUTE, MEMORY_LIMIT } from '../public/data.js';
 import { ledger } from '../public/core.js';
-import { router, readJson, send, allowCors, createRateLimiter, clientIp, HttpError } from './http.mjs';
+import { router, readJson, readBody, send, allowCors, createRateLimiter, clientIp, HttpError, MAX_RECEIPT } from './http.mjs';
+import { createStateLocks } from './state-locks.mjs';
 import { createIdentity } from './identity.mjs';
 import { firebaseConfig } from './firebase.mjs';
 import { registerAccountRoutes } from './accounts.mjs';
@@ -59,15 +60,10 @@ function serveStatic(pathname, res) {
 }
 
 export function createApp({ store, gemini = null, clock = () => new Date(), evidenceFor, auth = null, env = {} }) {
-  // MemoryStore is a single-process prototype. Serialize private operations so
-  // deletion/revocation cannot race an in-flight AI result and restore data.
-  // #3 must implement equivalent transactional guarantees across instances.
-  let pending = Promise.resolve();
-  const stateOperation = fn => {
-    const result = pending.then(fn);
-    pending = result.catch(() => {});
-    return result;
-  };
+  // 방·계정 API는 저장소를 읽고 고쳐 쓰므로 줄을 세운다. 방의 일은 그 방의 줄에, 탈퇴처럼 여러 방에 걸친 일은
+  // 모든 방의 줄에 서서, 탈퇴·철회가 진행 중인 AI 결과와 엉켜 데이터가 되살아나지 않게 한다(src/state-locks.mjs).
+  // #3 저장소는 여러 인스턴스에서 같은 보장을 트랜잭션으로 해야 한다.
+  const locks = createStateLocks();
   const dev = env.DEV_SEED === '1' && env.NODE_ENV !== 'production' && !env.FIREBASE_PROJECT_ID && !auth;
   const identify = createIdentity({ auth, dev });
   const locationService = createLocationService({ store, clock });
@@ -120,9 +116,16 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   });
 
   // 방 멤버인지 확인한다. 방이 없으면 404, 누구인지 모르면 401, 멤버가 아니면 403
+  // 이 방의 끝난 위치 동의를 지운다. 지우기는 쓰기라 방의 줄 안에서 한다. 줄에 서지 않은 읽기 요청은
+  // 지울 것이 있을 때만 줄에 선다(2초마다 오는 화면 갱신이 늘 줄을 서지 않게)
+  async function expireLocations(req, roomId) {
+    if (req.stateLock) return locationService.sweep(roomId);
+    if (await locationService.hasExpired(roomId)) await locks.room(roomId, () => locationService.sweep(roomId));
+  }
+
   async function member(req, roomId) {
     const who = await authenticate(req);
-    await locationService.sweep();
+    await expireLocations(req, roomId);
     const room = await store.get('rooms', roomId);
     if (!room) throw new HttpError(404, '방을 찾을 수 없어요');
     const me = room.members.find((m) => m.uid === who.uid);
@@ -174,6 +177,18 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     return orchestrator.tick();
   });
 
+  // 방·계정 API만 줄에 선다(데모 화면 API는 저장소를 쓰지 않는다). 그중 읽기만 하는 요청은 줄에 서지 않는다.
+  // 위치 화면(GET …/location)은 읽다가 끝난 동의를 지우므로 쓰기처럼 줄에 선다
+  const WRITE_FREE = /\/receipts\/extract$/; // POST지만 저장하지 않는다(사진 → 초안)
+  async function withStateLock(req, url, params, invoke) {
+    if (!/^\/api\/(rooms|me|dev|cron)(\/|$)/.test(url.pathname)) return invoke();
+    if ((req.method === 'GET' && !url.pathname.endsWith('/location')) || WRITE_FREE.test(url.pathname)) return invoke();
+    // 본문은 줄에 서기 전에 받는다. 본문을 느리게 보내는 요청이 줄을 붙잡지 못하게(영수증 사진이 실리는 지출 남기기만 큰 한도)
+    await readBody(req, { limit: /^\/api\/rooms\/[^/]+\/expenses$/.test(url.pathname) ? MAX_RECEIPT : undefined });
+    req.stateLock = true;
+    return url.pathname.startsWith('/api/rooms/') && params.id ? locks.room(params.id, invoke) : locks.global(invoke);
+  }
+
   const server = http.createServer(async (req, res) => {
     req.identityContext = { auth, dev };
     const url = new URL(req.url, 'http://localhost');
@@ -187,8 +202,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       const hit = routes.match(req.method, url.pathname);
       if (hit) {
         const invoke = () => hit.handler({ req, res, url, params: hit.params, ...ctx });
-        const isPrivateState = /^\/api\/(rooms|me|dev|cron)(\/|$)/.test(url.pathname);
-        const out = await (isPrivateState ? stateOperation(invoke) : invoke());
+        const out = await withStateLock(req, url, hit.params, invoke);
         if (!res.writableEnded) send(res, 200, out ?? {});
         return;
       }
