@@ -772,7 +772,7 @@ function qrBlock(t) {
     : `<div class="qr-wait">${qr?.failed ? 'QR을 만들지 못했어요.<br>위 계좌번호를 복사해 보내 주세요.' : 'QR을 만드는 중이에요'}</div>`;
   // 컴퓨터에는 슬라이더가 없으니, 휴대폰으로 보내고 돌아온 사람이 여기서 바로 끝낸다
   return `<div class="qr-desktop"><p class="group-note">휴대폰 카메라로 QR을 찍으면 토스 송금 화면이 열려요.</p>${img}
-    <button class="btn secondary" style="width:100%;margin-top:12px" data-action="mark-sent" data-id="${esc(t.id)}">휴대폰으로 보냈어요</button></div>`;
+    <button class="btn secondary" style="width:100%;margin-top:12px" data-action="mark-sent" data-id="${esc(t.id)}">보냈어요</button></div>`;
 }
 
 // 송금: 밀어서 보내면 그 제스처 안에서 토스를 연다. 앱이 안 열리면 계좌·금액을 복사해 둔다.
@@ -1058,6 +1058,11 @@ addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 56),
 addEventListener('resize', () => {
   resetSegs();
   mountSegs(document);
+});
+// 송금 시트는 그릴 때 컴퓨터인지 보고 QR이나 슬라이더 중 하나만 둔다. 연 채로 포인터가 바뀌면
+// (iPad에서 키보드를 떼거나 붙일 때 등) 맞는 쪽으로 다시 그린다
+matchMedia(COMPUTER_QUERY).addEventListener('change', () => {
+  if (state.sheet === 'transfer') renderSheet();
 });
 
 async function loadConfig() {

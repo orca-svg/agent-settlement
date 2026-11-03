@@ -647,14 +647,10 @@ button.row:active { background: var(--fill); }
 .slider.pressed .slider-thumb { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24); }
 .slider-hint { font-size: 0.75rem; color: var(--label-3); text-align: center; margin-top: 6px; }
 
-/* 컴퓨터(마우스로 가리키는 기기)에서만 보이는 QR. 휴대폰은 가로로 돌려 넓어도 토스가 바로 열리니 필요 없다.
-   미디어 쿼리는 ui.js의 COMPUTER_QUERY와 같아야 한다 */
-.qr-desktop { display: none; margin-top: 16px; text-align: center; }
+/* 컴퓨터에서 휴대폰으로 넘기는 QR. 보일지는 room.js가 sendMode로 그릴 때 정하니 여기서 숨기지 않는다 */
+.qr-desktop { margin-top: 16px; text-align: center; }
 .qr-desktop img { border-radius: 12px; width: 220px; height: 220px; }
 .qr-wait { width: 220px; height: 220px; margin: 0 auto; display: grid; place-items: center; border-radius: 12px; background: var(--fill); color: var(--label-2); font-size: 0.8125rem; line-height: 1.5; padding: 16px; box-sizing: border-box; }
-@media (hover: hover) and (pointer: fine) {
-  .qr-desktop { display: block; }
-}
 
 .phone-label { font-size: 0.8125rem; color: var(--label-2); margin-bottom: 10px; display: flex; gap: 6px; align-items: center; }
 .done-mark {

@@ -1,8 +1,7 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode, COMPUTER_QUERY } from '../public/ui.js';
+import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode } from '../public/ui.js';
 
 test('allocButton: 나눈 뒤 바뀐 게 없으면 막고, 남은 일을 알려 준다', () => {
   assert.deepEqual(allocButton({ allocated: false, fresh: false, flagged: 0 }), { label: '비서에게 나누기 맡기기', disabled: false, hint: '' });
@@ -80,11 +79,6 @@ test('sendMode: 컴퓨터에서 토스 링크가 있으면 QR만, 휴대폰이�
   assert.equal(sendMode(copyOnly, { computer: true }), 'slider'); // QR로 열 토스 링크가 없으니 계좌 복사 슬라이더를 남긴다
   assert.equal(sendMode(none, { computer: true }), 'no-payout');
   assert.equal(sendMode(none, { computer: false }), 'no-payout');
-});
-
-test('style.css의 QR 표시 기준이 COMPUTER_QUERY와 같다', () => {
-  const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
-  assert.ok(css.includes(`@media ${COMPUTER_QUERY}`));
 });
 
 test('qrImageUrl: 빈 값이면 null', () => {
