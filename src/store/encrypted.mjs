@@ -59,7 +59,7 @@ export function encryptedStore(inner, key) {
       if (sealedKey) throw new Error(`잠긴 칸(${col}.${sealedKey})으로는 찾을 수 없어요`);
       return (await inner.list(col, where)).map((doc) => open(col, doc));
     },
-    // 비서 기록 문장에는 계좌번호가 들어가지 않는다
+    // 비서 기록 문장에는 계좌번호·위치 요약이 들어가지 않는다(위치 근거면 orchestrator·location이 일반 문구만 쓴다)
     appendEvent: (roomId, ev) => inner.appendEvent(roomId, ev),
     listEvents: (roomId, afterSeq) => inner.listEvents(roomId, afterSeq),
   };
