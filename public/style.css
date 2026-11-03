@@ -670,8 +670,9 @@ button.row:active { background: var(--fill); }
   place-items: center;
 }
 
-/* 꼬리말 링크(개인정보 처리방침)는 글자색을 그대로 쓰고 밑줄로 링크임을 보인다 */
-.foot a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+/* 꼬리말 링크(개인정보 처리방침)는 흐린 안내 글과 구분되게 본문 글자색·굵은 글씨로 보이고, 밑줄로 링크임을 보인다
+   (표준 개인정보 보호지침 제20조①: 글자 크기·색상 등으로 다른 고지사항과 구분) */
+.foot a { color: var(--label); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .foot {
   max-width: 1120px;
   margin: 0 auto;
