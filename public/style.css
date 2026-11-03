@@ -295,6 +295,9 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
   background: none;
   border: 0;
 }
+/* 링크로 만든 행(계정 화면의 내 방·데모)도 버튼 행과 같은 글자색으로. 눌리는 곳임은 화살표(›)가 알린다 */
+a.row { color: inherit; text-decoration: none; cursor: pointer; }
+a.row:active { background: var(--fill); }
 .row + .row::before {
   content: "";
   position: absolute;
