@@ -1,6 +1,6 @@
 // #2 내 계정. 로그인하면 '내 방'이 첫 화면이고, 오른쪽 위 내 아바타를 누르면 '프로필' 화면으로 간다.
 // 프로필 화면은 왼쪽 위 '내 방'(바꾼 것은 버림)과 오른쪽 위 '저장'(저장하고 내 방으로)으로 나간다. 브라우저 뒤로도 저장하지 않는다
-import { initAuth, currentUser, login, logout, reauthenticate } from './auth.js';
+import { initAuth, currentUser, login, logout } from './auth.js';
 import { api } from './room-api.js';
 import { esc, avatarHtml, CHEVRON } from './ui.js';
 import { profileFormHtml, mountProfileForm, initial } from './profile-form.js';
@@ -30,7 +30,10 @@ const demoRows = (label, dev) => `<section class="group"><h2 class="group-label"
     ${dev ? linkRow('room.html', '개발용 방 열기', '시드 신원으로 실제 방 화면을 시험해요') : ''}
   </div></section>`;
 
-let notice = ''; // 화면을 옮긴 뒤 그 화면에 띄울 한 줄(프로필을 저장했어요)
+// 탈퇴하면 로그아웃하고 이 화면의 로그인으로 돌아와 결과를 버튼 바로 아래에 알린다
+const DELETED = 'account.html?deleted=1';
+let notice = new URLSearchParams(location.search).has('deleted') ? '계정을 지웠어요. 함께 정산한 금액은 익명 기록으로 남아요.' : ''; // 화면을 옮긴 뒤 그 화면에 띄울 한 줄
+if (notice) history.replaceState(null, '', location.pathname); // 새로고침해도 다시 뜨지 않게
 const onProfile = () => location.hash === '#profile';
 function openProfile() {
   history.pushState({ view: 'profile' }, '', '#profile');
@@ -60,15 +63,17 @@ async function render() {
           <a href="${PRIVACY}" target="_blank" rel="noopener">개인정보 처리방침</a></p>
       </section>${demoRows('로그인 없이', config.dev)}`;
     if (ready) panel.querySelector('#login').onclick = () => run(async () => { say('Google 창에서 계정을 골라 주세요…'); await login(); await render(); });
+    say(notice);
+    notice = '';
     return;
   }
   const { pending } = await api('/api/me/deletion');
   if (pending) {
     setNav(BRAND);
     panel.innerHTML = `<section class="hero"><h1>탈퇴 마무리</h1></section>
-      <section class="group"><button class="btn" style="width:100%" id="finish-delete">다시 인증하고 탈퇴 마무리</button>${MESSAGE}</section>`;
+      <section class="group"><button class="btn" style="width:100%" id="finish-delete">탈퇴 마무리</button>${MESSAGE}</section>`;
     say('개인 데이터는 지웠어요. Google 계정 연결 삭제만 남았어요.');
-    panel.querySelector('button').onclick = () => run(async () => { await reauthenticate(); await api('/api/me/delete', { method: 'POST' }); await logout(); });
+    panel.querySelector('button').onclick = () => run(async () => { await api('/api/me/delete', { method: 'POST' }); await logout(DELETED); });
     return;
   }
   const [{ profile }, { rooms }] = await Promise.all([api('/api/me'), api('/api/rooms')]);
@@ -119,9 +124,8 @@ function profileView(profile) {
   panel.querySelector('#logout').onclick = () => run(logout);
   panel.querySelector('#delete').onclick = () => run(async () => {
     if (!confirm('프로필·비서 설정·위치 요약을 지우고 탈퇴할까요? 함께 정산한 금액은 익명 기록으로 남고 되돌릴 수 없어요.')) return;
-    await reauthenticate();
     await api('/api/me/delete', { method: 'POST' });
-    await logout();
+    await logout(DELETED);
   });
 }
 async function run(fn) { try { return await fn(); } catch (e) { say(e.message, true); } }

@@ -130,7 +130,7 @@ API 서버 (server.mjs → src/app.mjs)
 | GET / POST | `/api/me` | 내 프로필 읽기 / `{ name, color }` 저장 |
 | GET | `/api/rooms` | 내 방 목록 `{ rooms: [{ id, name, dates }] }` |
 | GET | `/api/me/deletion` | 삭제 재시도 상태 `{ pending }` |
-| POST | `/api/me/delete` | 5분 이내 Google 재인증 필요. 개인정보 삭제·공동 기록 익명화·Firebase 계정 삭제 |
+| POST | `/api/me/delete` | 검증된 토큰 필요(다시 로그인 창 없음, 화면에서 한 번 확인). 개인정보 삭제·공동 기록 익명화·Firebase 계정 삭제 |
 | GET | `/api/rooms/:id/location` | 내 동의와 위치 요약 목록 |
 | POST | `/api/rooms/:id/location/timeline` | 이의를 낼 때 타임라인에서 찾은 결과 `{ agree: true, expenseId, leftAt, nextAt?, nextHome? }` 또는 `{ agree: true, expenseId, stayedUntil }`. 그 지출 시간대 밖의 시각·좌표·다른 필드는 거부, 지출당 한 번(409). 붙이는 순간 7일 동의 |
 | POST | `/api/rooms/:id/location/revoke` | 내 동의와 요약, 연결된 미확정 중재안 삭제 |

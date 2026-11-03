@@ -31,7 +31,8 @@ export function registerAccountRoutes(routes, { store, authenticate, auth, clock
   });
   routes.post('/api/me/delete', async ({ req }) => {
     const me = await authenticate(req, { allowDeleting: true });
-    if (!auth || !Number.isFinite(me.authTime) || clock().getTime() / 1000 - me.authTime > 300) throw new HttpError(401, '탈퇴하려면 Google 계정으로 다시 로그인해 주세요');
+    // 검증된 토큰(취소 여부까지 확인)만 받는다. 다시 로그인 창은 띄우지 않고, 되돌릴 수 없으니 화면에서 한 번 확인을 받는다
+    if (!auth) throw new HttpError(401, '로그인이 필요해요');
     if (typeof store.eraseUser !== 'function') throw new HttpError(503, '현재 저장소의 계정 삭제 연결이 필요해요');
     await store.put('deletedUsers', { id: me.uid });
     const { removedLinks } = await store.eraseUser(me.uid);
