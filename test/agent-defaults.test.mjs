@@ -2,7 +2,7 @@
 // 모든 방에 이 설정으로 들어간다. 방마다 다른 값은 그 방의 내 비서에서 '이 방에서만'으로 정한다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultsHtml, defaultsBody } from '../public/agent-defaults.js';
+import { defaultsHtml, defaultsBody, defaultsChanges } from '../public/agent-defaults.js';
 import { payoutFieldsHtml, payoutDraftFrom } from '../public/payout-form.js';
 import { draftFromRules } from '../public/agent-panel.js';
 
@@ -42,6 +42,29 @@ test('저장할 것: 바꾼 규칙만 보내고, 계좌는 새 번호를 적었�
   const body = defaultsBody(v, changed);
   assert.equal(body.rules.autoAccept, 50_000);
   assert.deepEqual(body.payout, { bank: '토스뱅크', accountNo: '1000-2000-4000', holder: '재윤' });
+});
+
+test('목차가 가리키는 칸: 내 비서 기본 설정(#agent) 아래에 받을 계좌·비서 규칙·알림이 각자 id를 갖는다', () => {
+  const v = view();
+  const html = defaultsHtml(v, ui(v));
+  for (const id of ['agent', 'payout', 'rules', 'notify']) assert.match(html, new RegExp(`id="${id}"`), id);
+  assert.ok(html.indexOf('id="payout"') < html.indexOf('id="rules"') && html.indexOf('id="rules"') < html.indexOf('id="notify"'));
+  assert.match(html, /<label class="set-name" for="set-auto-accept">자동 수락 한도<\/label>/, '한도 이름을 누르면 금액 칸으로 간다');
+});
+
+// 화면 아래 '저장하지 않은 변경 N개'가 세는 것. 저장할 것(defaultsBody)과 같은 기준이라 세는 수와 저장하는 것이 어긋나지 않는다
+test('바꾼 칸 세기: 규칙은 칸마다, 계좌는 새 번호를 적었을 때만 하나로 센다', () => {
+  const v = view({ bank: '토스뱅크', holder: '재윤', last4: '3000' });
+  assert.deepEqual(defaultsChanges(v, ui(v)), []);
+  const u = ui(v, { editPayout: true });
+  assert.deepEqual(defaultsChanges(v, u), [], '바꾸기만 누르고 아무것도 안 적었으면 바뀐 것이 아니다');
+  u.draft.autoAccept = '50000';
+  u.draft.mode = 'now';
+  u.draft.notify = 'all';
+  u.payout.accountNo = '1000-2000-4000';
+  assert.deepEqual(defaultsChanges(v, u), ['autoAccept', 'sendWhen', 'notify', 'payout']);
+  u.draft.autoAccept = '30,000';
+  assert.ok(!defaultsChanges(v, u).includes('autoAccept'), '같은 금액을 쉼표와 함께 적어도 그대로다');
 });
 
 test('계좌 입력칸은 방의 계좌 시트와 같은 모양이다: 은행 목록, 목록에 없으면 직접 쓰기, 저장된 끝 4자리 안내', () => {

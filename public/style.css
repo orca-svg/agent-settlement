@@ -1151,3 +1151,147 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
 .room-rule-body { margin-top: 10px; }
 .room-rule-body > .group-note:only-child { padding-top: 0; }
 .group-note a { color: var(--tint); text-decoration: none; font-weight: 500; }
+
+/* ---------- 내 방·내 계정: 웹 배치 ----------
+   화면마다 읽기 좋은 폭이 다르다(로그인은 520px, 내 방은 목록 폭, 내 계정은 목차 + 설정).
+   상단바·본문·꼬리말이 같은 폭을 따라 왼쪽 선이 하나다(account.js가 body[data-view]를 바꾼다) */
+.solo-page[data-view="rooms"] :is(.nav-inner, .solo, .foot) { max-width: 760px; }
+.solo-page[data-view="settings"] :is(.nav-inner, .solo, .foot) { max-width: 1040px; }
+
+/* 내 방 머리말: 왼쪽에 제목, 오른쪽에 할 일(초대 링크로 참가·새 방 만들기). 좁으면 할 일이 제목 아래로 내려와 반씩 나눈다 */
+.page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; padding-bottom: 24px; }
+.page-actions { display: flex; gap: 8px; }
+.page-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.page-actions .btn svg { flex: none; }
+@media (max-width: 560px) { .page-actions { flex-basis: 100%; } .page-actions .btn { flex: 1; } }
+.join-panel .join-link { background: var(--card); border-radius: var(--radius); margin-bottom: 24px; }
+
+/* 방 목록: 한 줄에 이름 | 기간. 줄 전체가 링크라 가리키면 바탕이 바뀌고 새 탭으로도 열린다 */
+.room-table { list-style: none; margin: 0; padding: 0; background: var(--card); border-radius: var(--radius); overflow: hidden; }
+.room-table li + li { border-top: 0.5px solid var(--sep); }
+.room-table a { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 16px; min-height: 52px; padding: 10px 16px; color: inherit; text-decoration: none; transition: background-color 120ms ease; }
+.room-table a:active { background: var(--fill); }
+.room-table a:focus-visible { outline-offset: -3px; }
+.room-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-dates { font-size: 0.875rem; color: var(--label-2); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.room-table .chev { color: var(--label-3); }
+.room-empty { background: var(--card); border-radius: var(--radius); padding: 20px 16px; }
+.room-empty .title { font-weight: 500; }
+.room-empty .meta { margin-top: 4px; font-size: 0.875rem; color: var(--label-2); letter-spacing: 0; }
+
+/* 내 계정: 왼쪽 목차는 스크롤을 따라오며 지금 읽는 칸을 굵게·바탕색으로 짚는다. 좁은 화면은 목차 없이 한 줄로 */
+.settings { display: grid; grid-template-columns: 184px minmax(0, 1fr); gap: 48px; align-items: start; }
+.settings-toc { position: sticky; top: calc(48px + env(safe-area-inset-top) + 24px); }
+.settings-toc ol { list-style: none; margin: 0; padding: 0; }
+.settings-toc ol ol { padding-left: 12px; }
+.settings-toc a { display: block; padding: 6px 10px; border-radius: 8px; color: var(--label-2); text-decoration: none; font-size: 0.9375rem; letter-spacing: 0; transition: background-color 120ms ease, color 120ms ease; }
+.settings-toc a[aria-current] { color: var(--label); font-weight: 600; background: var(--fill); }
+@media (max-width: 860px) {
+  .settings { grid-template-columns: minmax(0, 1fr); }
+  .settings-toc { display: none; }
+}
+@media (prefers-reduced-motion: no-preference) { html:has(.settings) { scroll-behavior: smooth; } }
+
+/* 묶음 제목: 맨 위 묶음(프로필·내 비서 기본 설정·계정)은 크게, 그 아래 칸(받을 계좌·비서 규칙·알림)은 한 단계 작게.
+   묶음 사이는 넓게, 같은 묶음 안의 칸 사이는 좁게 띄워 어디까지가 한 묶음인지 보이게 한다 */
+.set-section, .set-group { scroll-margin-top: calc(48px + env(safe-area-inset-top) + 16px); }
+.set-section { margin-bottom: 32px; }
+.settings-body > .set-section:not(:first-child), .set-group { margin-top: 56px; }
+.set-group { margin-bottom: 20px; }
+h2.set-title, .set-group-title { font-size: 1.375rem; font-weight: 700; letter-spacing: -0.015em; }
+h3.set-title { font-size: 1.0625rem; font-weight: 600; }
+.set-intro { margin-top: 4px; max-width: 40em; font-size: 0.875rem; line-height: 1.5; color: var(--label-2); letter-spacing: 0; }
+.set-card { margin-top: 12px; background: var(--card); border-radius: var(--radius); }
+
+/* 설정 한 줄: 왼쪽 이름·설명 | 오른쪽 컨트롤. 계좌 입력칸(방 시트와 같은 마크업 .row.field)도 이 두 칸에 맞춘다 */
+.set-row, .set-card > .list > .row.field { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 8px 32px; align-items: start; padding: 16px 20px; }
+.set-card > .list { background: none; border-radius: 0; }
+.set-card .row { --inset: 20px; }
+.set-card .set-row, .set-card > .group { position: relative; }
+.set-card :is(.set-row, .profile-preview, .group) + :is(.set-row, .group)::before { content: ""; position: absolute; top: 0; left: 20px; right: 0; height: 0.5px; background: var(--sep); }
+.set-name, .set-card > .list > .row.field > .grow { display: block; padding-top: 8px; font-weight: 500; }
+.set-desc { margin-top: 2px; font-size: 0.8125rem; line-height: 1.45; color: var(--label-2); letter-spacing: 0; }
+.set-control { min-width: 0; }
+.set-control .group-note, .set-card > .group-note { padding: 6px 2px 0; }
+.set-card > .group-note { padding: 0 20px 16px; }
+.set-card > .group { margin: 0; padding: 14px 20px; }
+.set-control .swatches { padding: 0; }
+.set-control > .btn { margin-top: 2px; }
+/* 컨트롤 칸 안에 들어간 한 줄 입력(보낼 시기의 '매달 [25일]')은 줄 모양 없이 이름과 칸만 */
+.set-control .list { background: none; }
+.set-control .row.field { display: flex; gap: 12px; min-height: 0; padding: 0; }
+.set-control .row.field > .grow { flex: none; color: var(--label-2); }
+.set-control .row::before { display: none; }
+
+/* 입력칸은 웹 폼처럼 테두리 있는 칸으로. 초점이 가면 강조색 테두리로 지금 쓰는 칸을 알린다 */
+.set-card :is(.field input, .field select, .set-control > input, .set-amount input) {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  font: inherit;
+  color: var(--label);
+  text-align: left;
+  text-align-last: auto;
+  background: var(--bg);
+  border: 0.5px solid var(--label-3);
+  border-radius: 10px;
+  transition: border-color 120ms ease;
+}
+.set-card :is(input, select):focus-visible { outline: 3px solid color-mix(in srgb, var(--tint) 45%, transparent); outline-offset: 0; border-color: var(--tint); }
+.set-card .field select { cursor: pointer; }
+.set-amount { position: relative; display: flex; align-items: center; }
+.set-amount input { padding-right: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+.set-amount span { position: absolute; right: 14px; color: var(--label-2); pointer-events: none; }
+/* 저장된 계좌: 은행·끝 4자리와 예금주, 옆에 바꾸기 */
+.set-value { display: flex; align-items: center; gap: 12px; padding-top: 2px; }
+.set-value .title { display: block; font-weight: 500; font-variant-numeric: tabular-nums; }
+.set-value .meta { display: block; font-size: 0.8125rem; color: var(--label-2); letter-spacing: 0; }
+/* 프로필 미리보기: 카드 맨 위 한 줄에 방 사람들이 볼 모습 그대로 */
+.set-card .profile-preview { display: flex; align-items: center; gap: 14px; padding: 16px 20px; }
+.set-card .profile-preview .avatar.xl { width: 48px; height: 48px; font-size: 1.25rem; }
+.set-card .profile-preview .meta { display: block; font-size: 0.8125rem; color: var(--label-2); letter-spacing: 0; }
+
+/* 저장 막대: 바꾼 것이 있을 때만 설정 칸 아래에 붙어 따라온다. 반투명 재질이라 지나가는 내용이 비치고,
+   나타날 때 아래에서 살짝 올라온다(움직임 줄이기면 나타나기만) */
+.save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 24px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: var(--material);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-radius: var(--radius) var(--radius) 0 0;
+  box-shadow: 0 -0.5px 0 var(--sep), 0 -8px 24px rgba(0, 0, 0, 0.06);
+  transition: opacity 200ms ease, transform 200ms ease, display 200ms allow-discrete;
+}
+.save-bar[hidden] { display: none; opacity: 0; transform: translateY(8px); }
+@starting-style { .save-bar { opacity: 0; transform: translateY(8px); } }
+.save-status { flex: 1; min-width: 0; font-size: 0.9375rem; font-weight: 500; letter-spacing: 0; }
+.save-status.error { color: var(--orange); }
+.save-actions { display: flex; gap: 8px; }
+.save-actions[hidden] { display: none; }
+
+@media (hover: hover) {
+  .room-table a:hover { background: var(--fill); }
+  .settings-toc a:hover { color: var(--label); }
+  .set-card :is(.field input, .field select, .set-control > input, .set-amount input):hover { border-color: var(--label-2); }
+}
+@media (max-width: 640px) {
+  .set-row, .set-card > .list > .row.field { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px 16px; }
+  .set-name, .set-card > .list > .row.field > .grow { padding-top: 0; }
+  .set-card :is(.set-row, .profile-preview, .group) + :is(.set-row, .group)::before { left: 16px; }
+  .set-card .row { --inset: 16px; }
+  .set-card .profile-preview, .set-card > .group { padding: 14px 16px; }
+  .set-card > .group-note { padding: 0 16px 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .save-bar, .save-bar[hidden] { transform: none; }
+  @starting-style { .save-bar { transform: none; } }
+}
+@media (prefers-reduced-transparency: reduce) { .save-bar { background: var(--card); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+@media (prefers-contrast: more) { .set-card, .room-table, .room-empty, .save-bar { outline: 1px solid var(--label-3); } }
