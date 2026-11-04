@@ -32,7 +32,8 @@ export async function login() {
   if (!instance) throw new Error('Google 로그인을 준비 중이에요. 지금은 데모를 이용할 수 있어요');
   return sdk.signInWithPopup(instance, new sdk.GoogleAuthProvider());
 }
-export async function logout(to = './') {
+// 로그아웃하면 첫 화면(데모)이 아니라 다시 로그인할 수 있는 '내 계정' 화면으로 간다
+export async function logout(to = 'account.html') {
   if (instance) await sdk.signOut(instance);
   localStorage.removeItem('agent-settlement.uid');
   // 정산당 한 번 올린 타임라인 방문 시각도 이 기기에서 지운다(room.js)
