@@ -2,6 +2,7 @@
 // import할 때 DOM을 건드리지 않는다(테스트에서 불러올 수 있게).
 import { esc, avatarHtml } from './ui.js';
 import { PROFILE_COLORS } from './profile-colors.js';
+import { settingRow } from './settings-layout.js';
 
 export { PROFILE_COLORS };
 export const initial = (name) => [...(name.trim() || '?')][0];
@@ -13,20 +14,25 @@ export function profileFormHtml(profile) {
   const colors = PROFILE_COLORS.some(([c]) => c === now) ? PROFILE_COLORS : [[now, '지금 색'], ...PROFILE_COLORS];
   const swatches = colors.map(([c, label]) => `<label class="swatch" style="--c:${c}">
       <input type="radio" name="color" value="${c}" aria-label="${label}"${c === now ? ' checked' : ''}>${CHECK}</label>`).join('');
-  return `<form id="profile">
-    <div class="profile-preview" aria-hidden="true">${avatarHtml(initial(profile.name), now, 'xl')}<span class="title">${esc(profile.name)}</span></div>
-    <div class="list"><label class="row field"><span class="grow">표시 이름</span><input name="name" maxlength="40" required value="${esc(profile.name)}"></label></div>
-    <h3 class="group-label" style="margin-top:20px"><span>프로필 색</span></h3>
-    <div class="list"><div class="swatches" role="radiogroup" aria-label="프로필 색">${swatches}</div></div>
+  // 폼 id는 목차의 '프로필' 칸(#profile)과 겹치지 않게 따로 둔다
+  return `<form id="profile-form">
+    <div class="profile-preview" aria-hidden="true">${avatarHtml(initial(profile.name), now, 'xl')}<span class="grow"><span class="title">${esc(profile.name)}</span><span class="meta">방 사람들에게 이렇게 보여요</span></span></div>
+    ${settingRow({ label: '표시 이름', forId: 'profile-name', control: `<input id="profile-name" name="name" maxlength="40" required autocomplete="nickname" value="${esc(profile.name)}">` })}
+    ${settingRow({ label: '프로필 색', desc: '내 이름 옆 동그라미 색이에요.', control: `<div class="swatches" role="radiogroup" aria-label="프로필 색">${swatches}</div>` })}
   </form>`;
 }
 
-// 이름·색을 바꾸는 대로 미리보기를 고친다. 저장은 화면의 상단바가 맡고, 여기서는 지금 값과 바뀌었는지만 알려 준다
+// 이름·색을 바꾸는 대로 미리보기를 고친다. 저장은 화면 아래 저장 막대가 맡고, 여기서는 지금 값과 바뀐 칸만 알려 준다.
+// reset()은 처음 그린 값(input의 value·checked)으로 되돌린다
 export function mountProfileForm(form, { onSubmit } = {}) {
   const avatar = form.querySelector('.profile-preview .avatar');
   const title = form.querySelector('.profile-preview .title');
   const value = () => Object.fromEntries(new FormData(form));
-  const saved = JSON.stringify(value());
+  const saved = value();
+  const changes = () => {
+    const now = value();
+    return [now.name.trim() !== saved.name.trim() && 'name', now.color !== saved.color && 'color'].filter(Boolean);
+  };
   const sync = () => {
     const { name, color } = value();
     avatar.style.setProperty('--c', color);
@@ -36,5 +42,5 @@ export function mountProfileForm(form, { onSubmit } = {}) {
   form.addEventListener('input', sync);
   form.addEventListener('change', sync);
   form.addEventListener('submit', (e) => { e.preventDefault(); onSubmit?.(); }); // 이름 칸에서 Enter
-  return { value, changed: () => JSON.stringify(value()) !== saved };
+  return { value, changes, changed: () => changes().length > 0, reset: () => { form.reset(); sync(); } };
 }

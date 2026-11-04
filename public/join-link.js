@@ -16,7 +16,12 @@ export function joinLinkHtml() {
   return `<button type="button" class="row new-room" id="join-toggle" aria-expanded="false" aria-controls="join-link">
       <span class="new-room-icon" aria-hidden="true">${ICON_LINK}</span><span class="grow"><span class="title">초대 링크로 참가하기</span>
       <span class="meta" style="display:block">친구에게 받은 링크를 붙여 넣어요</span></span>${CHEVRON}</button>
-    <form class="row join-link" id="join-link" hidden novalidate>
+    ${joinFormHtml()}`;
+}
+
+// 입력칸만. 넓은 '내 방' 화면은 접힌 줄 대신 머리말의 버튼(id="join-toggle")이 이 칸을 연다
+export function joinFormHtml() {
+  return `<form class="row join-link" id="join-link" hidden novalidate>
       <input id="join-input" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://…/room.html?invite=…" aria-label="받은 초대 링크" aria-describedby="join-error">
       <button type="submit" class="btn sm">참가 화면 열기</button>
       <p class="join-error" id="join-error" role="alert"></p></form>`;

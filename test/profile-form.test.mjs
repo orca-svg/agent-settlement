@@ -27,3 +27,13 @@ test('profileFormHtml: 이름은 이스케이프하고 미리보기는 첫 글�
   assert.match(html, /&lt;b&gt;민수/);
   assert.match(html, /class="avatar xl"[^>]*>&lt;</);
 });
+
+// 내 계정은 한 페이지라 목차의 '프로필'(#profile)이 이 묶음을 가리킨다. 폼은 다른 id를 써서 겹치지 않는다
+test('profileFormHtml: 설정 줄로 그린다 — 이름 칸은 label로 이어지고, 폼 id는 목차 칸(#profile)과 겹치지 않는다', () => {
+  const html = profileFormHtml({ name: '준엽', color: '#5856D6' });
+  assert.match(html, /^<form id="profile-form"/);
+  assert.doesNotMatch(html, /id="profile"/);
+  assert.match(html, /<label class="set-name" for="profile-name">표시 이름<\/label>/);
+  assert.match(html, /<input id="profile-name" name="name"[^>]*value="준엽"/);
+  assert.match(html, /<span class="set-name">프로필 색<\/span>/);
+});
