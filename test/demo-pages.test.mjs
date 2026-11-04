@@ -24,7 +24,7 @@ for (const name of PAGES) {
 
   test(`demo/${name}: 불러오는 파일이 모두 있다`, () => {
     const html = read('demo', name);
-    for (const [, ref] of html.matchAll(/(?:src|href)="([^"#:?]+\.(?:js|css))"/g)) {
+    for (const [, ref] of html.matchAll(/(?:src|href)="([^"#:?]+\.(?:js|css|png))"/g)) {
       assert.ok(fs.existsSync(path.join(pub, 'demo', ref)), `${ref}가 없어요`);
     }
     const { imports } = JSON.parse(/<script type="importmap">(.*?)<\/script>/.exec(html)[1]);

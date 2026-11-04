@@ -11,7 +11,7 @@ export { cleanMemory, redactTransfer, redactDispute } from './api.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, '..', 'public');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
 // 화면 파일. 브라우저 데모(public/demo/)는 서버 코드(src/)를 그대로 불러 돌리므로, 운영이 아닐 때만 /src/의 모듈도 내준다.
 // 배포에서는 GitHub Pages가 src/를 함께 올린다(.github/workflows/pages.yml)

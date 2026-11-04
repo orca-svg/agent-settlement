@@ -23,6 +23,8 @@ export function demoPage(name, html) {
   out = swap(out, '<!doctype html>', `<!doctype html>\n<!-- scripts/demo-pages.mjs가 public/${name}에서 만든 체험 데모 페이지예요. 직접 고치지 말고 다시 만들어 주세요 -->`);
   out = out.replace(/<title>([^<]*)<\/title>/, '<title>체험 데모 · $1</title>');
   out = swap(out, '<link rel="stylesheet" href="style.css">', '<link rel="stylesheet" href="../style.css">\n  <link rel="stylesheet" href="demo.css">');
+  // 파비콘·홈 화면 아이콘은 실제 페이지 옆(public/)에 있다
+  out = out.replace(/(<link rel="(?:icon|apple-touch-icon)"[^>]*\bhref=")(?![a-z]+:|\/|\.\.\/)/g, '$1../');
   out = out.replace(/<body( class="([^"]*)")?>/, (_, __, cls) => `<body class="${cls ? `${cls} ` : ''}demo">\n  ${BAND}`);
   const entry = name.replace('.html', '.js');
   out = swap(out, `<script type="module" src="${entry}"></script>`,
