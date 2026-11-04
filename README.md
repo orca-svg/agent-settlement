@@ -2,7 +2,7 @@
 
 <img src=".github/assets/logo.png" width="112" alt="정산은 비서끼리 로고">
 
-<sub><a href="https://gdgoc-devfest-2026.vercel.app"><b>GDGoC DevFest 2026 「Tell the Vision」</b></a> 출품작</sub>
+<sub><a href="https://gdgoc-devfest-2026.vercel.app"><b>GDGoC DevFest 2026 「Tell the Vision」</b></a> -- Team 6</sub>
 
 # 정산은 비서끼리
 
