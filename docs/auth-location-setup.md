@@ -19,7 +19,7 @@
 - 로그인 설정 요청이 일시적으로 실패해도 다음 요청에서 다시 초기화(동시 호출은 한 요청 공유). `test/auth-browser-init.test.mjs`.
 - #35 병합 시 `firestore.rules`의 `disputes` 직접 읽기를 차단해야 API 가림을 우회할 수 없음. 이 브랜치에는 Firestore 규칙 파일이 없으며 #35 담당 변경 사항임.
 
-1. **Firebase 프로젝트 연결됨.** 11/3 배포 `/api/config`에서 팀 프로젝트 설정을 확인했고 사용자가 Google 로그인 성공을 보고함. 자동 검증은 Auth Emulator로 수행. 배포에서 프로필 저장·로그아웃·탈퇴의 전체 흐름은 별도 확인 필요.
+1. **Firebase 프로젝트 연결 및 실제 Google OAuth 검증.** 아래 순서로 팀 프로젝트 설정 필요.
 2. **#3 영구 저장소 연결.** 현재 MemoryStore이므로 서버 재시작 시 프로필·방·요약이 사라짐. 새 컬렉션 `users`, `deletedUsers`, `locationConsents`, `locationEvidence`를 같은 Store 계약으로 지원해야 함. 운영에서는 TTL 삭제, 요청/삭제 경쟁에 대한 트랜잭션도 필요.
 3. **#3 탈퇴 계약 연결.** MemoryStore의 `eraseUser(uid)` 구현 및 테스트를 제공. FirestoreStore에도 같은 원자적 삭제·익명화 기능을 연결해야 함. 지원하지 않는 저장소는 503으로 탈퇴를 막음. 삭제 도중 Auth API가 실패하면 tombstone으로 일반 접근을 막고 삭제 상태 화면에서 재시도 가능. 익명화는 채무 면제가 아니며, 탈퇴자의 미정산 금액은 앱이 임의로 송금·탕감하지 않음.
 4. **실제 타임라인 파일 확인.** 파서는 휴대폰 내보내기(`semanticSegments`)와 예전 Takeout(`timelineObjects`)을 공개 분석 기준으로 읽음. Google 공식 스키마가 아니므로 실제 내보내기 파일(Android·iOS)로 확인 필요. 시각은 한국 시각 기준이며 해외 시차는 별도 설계 필요. 장소 좌표를 쓰지 않아 '첫 주문 때 머물던 곳'을 그 지출의 장소로 봄. Places 장소 매칭은 구현하지 않음.
@@ -32,14 +32,7 @@
 - 실제 서버 조립과 같은 `encryptedStore(MemoryStore)`에서 탈퇴를 확인: 당사자의 QR과 계좌 복사본 삭제, 타인의 계좌 복호화 정상, 공유 금액 유지.
 - 위치 동의 철회·만료와 프로필 변경은 개인정보 없는 이벤트로 다른 참여자의 화면 갱신을 유도. API 응답은 `Cache-Control: no-store`.
 - PR과 브랜치 push에서 `.github/workflows/test.yml`이 Node 22의 `npm ci` 및 `npm test`를 실행.
-- 위 결과는 11/2 당시 기준. 11/3에는 팀에서 Firebase 설정과 PR #30 배포를 반영함. #3/#4 통합 상태는 최신 main 기준으로 별도 확인해야 함.
-
-## 2026-11-03 최신 main 통합 보완
-
-- 기준 main: `1ab5738`. PR #30, #39, #42, #44 등 병합 반영. #7은 체크인 대신 타임라인 파일 분석 방식으로 검증.
-- 자정 전후 주문이 함께 있을 때 첫 주문을 잘못 고르는 문제 수정.
-- 같은 방에 새 위치 요약을 붙일 때 기존 요약의 7일 보관 기한까지 연장하던 문제 수정. 첫 첨부의 동의 기한을 유지하고, 만료 후 새 첨부는 새 동의 시작.
-- `origin/feat/firestore-store`의 `d8d9fa5`에서 disputes·locationEvidence 직접 읽기 차단을 확인. main에는 아직 미병합이므로 규칙 배포까지 완료됐다는 의미는 아님.
+- Firebase 프로젝트는 아직 없음. 이 브랜치만 merge해도 Google 로그인이나 Cloud Run API 배포가 자동으로 완료되지는 않음. #3/#4 담당자와 위 연결 계약을 맞춘 뒤 실제 계정 검증 필요.
 
 ## 프로젝트 없이 먼저 실행
 
