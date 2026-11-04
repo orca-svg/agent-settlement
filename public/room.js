@@ -17,7 +17,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
 const inviteToken = roomId ? null : new URLSearchParams(location.search).get('invite');
 // #4 방 만들기·참가하기·정책 동의·초대 링크 화면 상태. 방에 보일 이름·색은 입력받지 않고 내 프로필(profile)을 쓴다
-const setup = { create: { name: '', start: '', end: '', policy: 'actual' }, join: { agree: false }, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, copied: false, busy: false, error: '' };
+const setup = { create: { name: '', start: '', end: '', policy: 'actual' }, join: {}, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, copied: false, busy: false, error: '' };
 // 로그인이 없는 개발용 서버에서만: 처음 방을 만들거나 참가할 때 이 브라우저용 uid를 하나 만든다. 배포에서는 Google 로그인 신원을 쓴다
 const ensureUid = () => currentUid() || (authOptions().dev ? (setCurrentUid(`u-${crypto.randomUUID().slice(0, 8)}`), currentUid()) : null);
 const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null, disputeDone: null, rejectDraft: null, sendBlocked: false, announceBlocked: false, focusLine: null };
@@ -447,8 +447,7 @@ async function setupAct(name, d) {
       return;
     }
     if (name === 'join-room') {
-      need(setup.join.agree, '참가에 동의해 주세요');
-      ensureUid();
+      ensureUid(); // '동의하고 참가하기'를 누른 것이 곧 동의다
       const { roomId: id } = await api(`/api/invites/${encodeURIComponent(inviteToken)}/join`, { method: 'POST', body: { agree: true } });
       location.search = `?room=${encodeURIComponent(id)}`;
       return;
@@ -1523,7 +1522,6 @@ document.addEventListener('input', (e) => {
     const end = document.querySelector('[data-cf="end"]');
     if (e.target.dataset.cf === 'start' && end) end.min = e.target.value;
   }
-  if (e.target.dataset?.jf) setup.join[e.target.dataset.jf] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
   if (e.target.dataset?.dd && state.disputeDraft) {
     state.disputeDraft[e.target.dataset.dd] = e.target.value;
     const send = $('#dispute-send');

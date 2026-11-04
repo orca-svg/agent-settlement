@@ -40,9 +40,10 @@ test('참가: 로그인 전에는 방 미리보기와 Google 로그인, 로그�
   assert.match(out, /data-action="sign-in"/);
   assert.ok(!out.includes('data-action="join-room"'));
 
-  const inn = joinHtml(invite, { agree: false }, { profile, dev: false });
-  assert.match(inn, /data-action="join-room"/);
-  assert.match(inn, /data-jf="agree"/);
+  const inn = joinHtml(invite, {}, { profile, dev: false });
+  assert.match(inn, /data-action="join-room"[^>]*>동의하고 참가하기</, '동의는 체크박스가 아니라 무엇에 동의하는지 적은 버튼으로 받는다');
+  assert.ok(!inn.includes('type="checkbox"'), '체크박스는 없다(iOS에는 체크박스가 없다)');
+  assert.match(inn, /멤버들에게 보여요/, '버튼 바로 위에 무엇이 보이게 되는지 적는다');
   assert.ok(!inn.includes('data-jf="name"'), '이름 입력칸은 없다');
   assert.ok(inn.includes('&lt;재윤&gt;') && inn.includes('#34c759'));
   assert.ok(!inn.includes('account.html#profile'));

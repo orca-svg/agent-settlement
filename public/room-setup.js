@@ -84,14 +84,11 @@ export function joinHtml(inv, d, { busy = false, error = '', profile = null, dev
   const policy = `<section class="group"><h2 class="group-label"><span>이 방의 환율 정책</span><span>들어간 뒤에 동의해요</span></h2>
       <div class="list"><div class="row"><span class="grow"><span class="title">${esc(p.label)}</span><span class="meta" style="display:block">${esc(p.desc)}</span></span></div></div></section>`;
   if (!profile && !dev) return head + policy + signInHtml('참가하려면 로그인해 주세요. 로그인하면 이 화면으로 돌아와요.');
+  // 동의는 체크박스로 따로 받지 않는다(iOS에는 체크박스가 없다). 무엇이 보이게 되는지 버튼 바로 위에 적고, 버튼이 곧 동의다
   return `${head}${policy}
-    <section class="group"><div class="list">
-      ${meRow(profile, dev)}
-      <label class="row"><input type="checkbox" data-jf="agree" ${d.agree ? 'checked' : ''} style="width:20px;height:20px;accent-color:var(--tint);flex:none">
-        <span class="grow">이 방에 들어가서 함께 쓴 돈을 비서끼리 정산하는 데 동의해요. 내 프로필 이름·색과 이 방에 남긴 지출이 멤버들에게 보여요.</span></label>
-    </div></section>
-    <section class="next">${errorHtml(error)}
-      <div class="actions"><button class="btn" data-action="join-room" ${busy ? 'disabled' : ''}>${busy ? '들어가는 중…' : '참가하기'}</button></div></section>`;
+    <section class="group"><div class="list">${meRow(profile, dev)}</div></section>
+    <section class="next"><p>참가하면 내 프로필 이름·색과 이 방에 남긴 지출이 멤버들에게 보여요. 함께 쓴 돈은 각자의 비서끼리 정산해요.</p>${errorHtml(error)}
+      <div class="actions"><button class="btn" data-action="join-room" ${busy ? 'disabled' : ''}>${busy ? '들어가는 중…' : '동의하고 참가하기'}</button></div></section>`;
 }
 
 // 방 화면: 환율 정책과 초대 링크. 방을 만들 때 이미 정한 정책이라, 모두 동의했으면 한 줄과 '바꾸기'만 둔다.
