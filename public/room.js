@@ -619,7 +619,7 @@ async function act(name, d) {
   if (name === 'receipt-sample') {
     // 체험 데모: 샘플 영수증을 그려 사진을 고른 것처럼 읽는다
     const { sampleReceiptFile } = await import('./demo/receipt.js');
-    readReceipt(await sampleReceiptFile());
+    readReceipt(await sampleReceiptFile(state.data.room));
   } else if (name === 'show-receipt') {
     showReceipt(d.id);
   } else if (name === 'close-photo') {

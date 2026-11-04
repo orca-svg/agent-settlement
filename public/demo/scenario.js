@@ -57,11 +57,14 @@ export function tripDays(label, today) {
   return [0, 1, 2].map((n) => addDays(start, Math.min(n, nights)));
 }
 
+// 엔화 금액을 원으로(가상 환율, 100원 단위)
+const wonOf = (yen, date) => Math.round((yen * fakeRate('JPY', date)) / 100 / 100) * 100;
+
 // 엔화 금액을 이 방에서 쓰는 통화로 바꾼다. 엔화 방은 그대로, 다른 외화 방은 가상 환율로, 원화 방은 원으로
 function amountIn(yen, room, date) {
   const currency = room.fx?.currency ?? 'KRW';
   if (currency === 'JPY') return { currency, amount: yen };
-  const krw = Math.round((yen * fakeRate('JPY', date)) / 100 / 100) * 100;
+  const krw = wonOf(yen, date);
   if (currency === 'KRW') return { currency, amount: krw };
   return { currency, amount: Math.round((krw / fakeRate(currency, date)) * 100 * 100) / 100 };
 }
@@ -85,14 +88,17 @@ export function friendExpenses(room, members, today) {
 }
 
 // 샘플 영수증(이자카야)을 읽은 결과. 브라우저 데모의 '사진 읽기'는 어떤 사진을 골라도 이 값을 돌려준다.
-// 영수증의 통화는 엔이라, 엔화가 아닌 방에서는 실제 서비스처럼 '이 방에서 쓰지 않는 통화'라고 알린다
+// 엔화 방이면 일본 가게의 엔화 영수증, 아니면(원화만 쓰는 방, 다른 외화 방) 같은 메뉴의 원화 영수증이다. 원화는 어느 방에서나 쓴다.
+// 샘플 영수증 그림(receipt.js)도 이 값으로 그린다
 const IZAKAYA = DEMO_EXPENSES.find((e) => e.id === 'izakaya');
 export function sampleReceipt(room, today) {
-  const items = IZAKAYA.items.map(({ name, qty, unit, tags }) => ({ name, qty, unit, tags }));
+  const date = tripDays(room.dates, today)[0];
+  const yen = room.fx?.currency === 'JPY';
+  const items = IZAKAYA.items.map(({ id, name, qty, unit, tags }) => ({ id, name, qty, unit: yen ? unit : wonOf(unit, date), tags }));
   return {
     merchant: '이자카야 나니와',
-    currency: 'JPY',
-    date: tripDays(room.dates, today)[0],
+    currency: yen ? 'JPY' : 'KRW',
+    date,
     time: IZAKAYA.time,
     total: items.reduce((s, it) => s + it.qty * it.unit, 0),
     items,

@@ -151,6 +151,28 @@ test('task 1~5: 방 만들기부터 이의·중재, 송금, 정산 완료와 나
   assert.equal(storage.getItem('agent-settlement.demo.v1'), null);
 });
 
+test('원화만 쓰는 방: 친구들의 지출도, 샘플 영수증도 원화로 들어간다', async () => {
+  const { ok } = demo();
+  const base = (id) => `/api/rooms/${encodeURIComponent(id)}`;
+  const { room } = await ok('POST', '/api/rooms', { name: '부산 1박 2일', dates: '11월 7일 – 8일' });
+  assert.equal(room.fx, null);
+  await ok('POST', `${base(room.id)}/invite`, {});
+  const view = await ok('GET', base(room.id));
+  assert.equal(view.room.members.length, 4);
+  assert.equal(view.expenses.length, 6);
+  assert.ok(view.expenses.every((e) => e.currency === 'KRW'));
+  const { draft } = await ok('POST', `${base(room.id)}/receipts/extract`, { image: { mimeType: 'image/jpeg', data: 'AAAA' } });
+  assert.equal(draft.ok, true, draft.reason);
+  assert.equal(draft.currency, 'KRW');
+  assert.ok(draft.items.every((it) => Number.isInteger(it.unit) && it.unit > 0));
+  assert.ok(!draft.items.some((it) => it.name === '차액 조정'), '줄의 합과 합계가 같다');
+  const { expense } = await ok('POST', `${base(room.id)}/expenses`, { expense: {
+    title: draft.merchant, kind: 'food', date: draft.date, time: draft.time, payer: 'me', method: 'card', currency: draft.currency,
+    items: draft.items, present: ['me', 'cs', 'yh', 'ms'], source: 'receipt',
+  } });
+  assert.equal(expense.currency, 'KRW');
+});
+
 test('데모에서는 계정을 지울 수 없다', async () => {
   const { call } = demo();
   const out = await call('POST', '/api/me/delete', {});
