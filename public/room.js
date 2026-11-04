@@ -616,11 +616,7 @@ async function act(name, d) {
   if (SETUP_ACTIONS.has(name)) return setupAct(name, d);
   if (agentPanel.handles(name)) return agentPanel.act(name, d);
   if (AGENT_ACTIONS.has(name)) return agentAct(name, d); // 송금 링크는 이 호출 안에서 동기적으로 연다
-  if (name === 'receipt-sample') {
-    // 체험 데모: 샘플 영수증을 그려 사진을 고른 것처럼 읽는다
-    const { sampleReceiptFile } = await import('./demo/receipt.js');
-    readReceipt(await sampleReceiptFile(state.data.room));
-  } else if (name === 'show-receipt') {
+  if (name === 'show-receipt') {
     showReceipt(d.id);
   } else if (name === 'close-photo') {
     closePhoto();
@@ -866,7 +862,7 @@ function photoPickHtml() {
   const touch = matchMedia('(pointer: coarse)').matches;
   return `<section class="next" style="margin:0"><h2>${touch ? '영수증을 찍거나 골라 주세요' : '영수증 사진을 골라 주세요'}</h2>
     <p>AI가 읽은 내용은 저장 전에 직접 확인하고 고칠 수 있어요. 사진 원본은 저장하지 않아요.</p>
-    <div class="actions">${receiptPickers(touch)}${authOptions().demo ? '<button type="button" class="btn plain" data-action="receipt-sample">샘플 영수증으로 해 보기</button>' : ''}</div></section>`;
+    <div class="actions">${receiptPickers(touch)}</div></section>`;
 }
 
 // 읽은 줄을 고칠 수 있는 목록. 합계와 줄 합을 나란히 보여 준다.
@@ -1172,7 +1168,7 @@ const deviceOs = guessOs(navigator.userAgent, navigator.maxTouchPoints);
 let guideOs = deviceOs === 'android' ? 'android' : 'ios';
 function renderGuide() {
   const body = $('#guide-body');
-  body.innerHTML = guideHtml({ os: guideOs, phone: deviceOs !== 'computer', sample: authOptions().demo });
+  body.innerHTML = guideHtml({ os: guideOs, phone: deviceOs !== 'computer' });
   mountSegs(body);
 }
 
@@ -1212,12 +1208,11 @@ async function readTimeline(file) {
   redraw();
 }
 
-// 개발용·체험 데모용: 고른 지출에 맞춘 가짜 타임라인. 첫 주문 20분 전부터 머물다 첫 주문과 결제 사이 3분의 1쯤에 떠나
-// 13분 뒤 다른 곳에 도착한다(데모의 2차 바는 22:30 첫 주문, 23:40 결제라 22:55쯤 떠나고 23:10 주문은 빠진다)
+// 개발용: 고른 지출에 맞춘 가짜 타임라인. 첫 주문 20분 전부터 머물다 결제 전에 떠나 13분 뒤 다른 곳에 도착한다
 function sampleTimeline(exp) {
   const { from, until } = expenseWindow(exp);
   const iso = (ms) => new Date(ms + 9 * 3600_000).toISOString().replace('Z', '+09:00');
-  const left = from + Math.round((until - from) * 0.36);
+  const left = from + Math.round((until - from) * 0.6);
   const visit = (start, end) => ({ startTime: iso(start), endTime: iso(end), visit: { hierarchyLevel: 0, probability: 0.9, topCandidate: { semanticType: 'UNKNOWN' } } });
   return { semanticSegments: [visit(from - 20 * 60_000, left), visit(left + 13 * 60_000, left + 8 * 3600_000)] };
 }
@@ -1280,8 +1275,7 @@ const copyRow = (label, value, key) => `<div class="row"><span class="grow"><spa
 // 데스크톱 QR(#8). 토큰은 수명이 15분이라, 송금 화면을 열 때마다 서버에서 새로 받는다.
 // QR에는 계좌·금액이 든 t.link를 바로 담지 않는다. 우리 서버의 짧은 수명 토큰(/api/qr/:token)을 담아,
 // QR 이미지를 만들어 주는 외부 서비스는 그 토큰만 보고 실제 계좌 정보는 보지 못하게 한다.
-// 체험 데모는 컴퓨터에서도 휴대폰처럼 밀어서 보내기를 보인다(데모의 QR은 휴대폰에서 열 서버가 없다)
-const isComputer = () => !authOptions().demo && matchMedia(COMPUTER_QUERY).matches;
+const isComputer = () => matchMedia(COMPUTER_QUERY).matches;
 let qrTimer = 0;
 let qrAsked = { id: null, at: 0 };
 
@@ -1530,11 +1524,10 @@ async function agentAct(name, d) {
     forgetVisits();
     render();
   } else if (name === 'timeline-sample') {
-    // 개발용·체험 데모용 가짜 기록: 주문 시각이 적힌 지출(없으면 첫 지출)에서 결제 전에 떠난 타임라인을 파일을 고른 것처럼 읽는다
-    guide.close();
-    const mine = state.data.expenses.filter((e) => e.present.includes(state.data.me.uid));
-    const exp = mine.find((e) => e.items?.some((it) => it.time)) ?? mine[0];
-    if (exp) await readTimeline(new File([JSON.stringify(sampleTimeline(exp))], 'sample-timeline.json', { type: 'application/json' }));
+    const inv = byId('invoices', state.ref);
+    const exp = inv && disputable(inv)[0];
+    if (exp) scanDispute(readVisits(sampleTimeline(exp)));
+    renderSheet();
   } else if (name === 'revoke-location') {
     await post('/location/revoke');
   } else if (name === 'answer-invoice') {
@@ -1767,9 +1760,8 @@ async function loadConfig() {
     const config = await (await fetch(`${API_BASE}/api/config`, { signal: AbortSignal.timeout(8000) })).json();
     state.aiReady = config.mode === 'gemini';
     if (state.data) render(); // AI가 연결돼 있으면 '영수증 사진으로'를 보여 준다
-    // 체험 데모는 브라우저 안에서 돌고, 사진은 샘플 영수증으로 읽는다(public/demo/server.js)
-    mode.textContent = config.demo ? '체험 데모' : config.mode === 'gemini' ? 'Gemini 연결됨' : '규칙 모드';
-    mode.classList.toggle('live', config.mode === 'gemini' && !config.demo);
+    mode.textContent = config.mode === 'gemini' ? 'Gemini 연결됨' : '규칙 모드';
+    mode.classList.toggle('live', config.mode === 'gemini');
   } catch {
     mode.textContent = '서버 연결 안 됨';
   }

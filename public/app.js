@@ -1,0 +1,740 @@
+// 화면 로직. 사람은 '확인·승인'만 하고, 돈 얘기는 비서들이 오른쪽 채널에서 주고받는다.
+import { DEMO_ROOM as ROOM, POLICIES, DEMO_EXPENSES as EXPENSES, DEMO_MEMORY as MEMORY, MEMORY_LIMIT, DEMO_RULES as RULES, DEMO_DISPUTE as DISPUTE } from './data.js';
+import { won, yen, dayLabel, amountOf, toKrw, shares, ledger, settle, ruleAllocate, presentAfter } from './core.js';
+import { reduceMotion } from './motion.js';
+import { esc, chip, avatarHtml, topic, subj, tile, CHEVRON, CHECK, ARROW, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, whose, restNote, allocLabel } from './ui.js';
+import { API_BASE } from './api.js';
+import { createLogPop } from './log-pop.js';
+
+const PEOPLE = ROOM.members.map((m) => m.uid);
+const TRIP = { title: ROOM.name, dates: ROOM.dates, agreedPolicy: ROOM.policy, agreedAt: ROOM.agreedAt };
+const $ = (s, el = document) => el.querySelector(s);
+const COLOR = Object.fromEntries(PEOPLE.map((p, i) => [p, `var(--p${i})`]));
+const avatar = (p, cls = '') => avatarHtml(p[0], COLOR[p] || '#8e8e93', cls);
+const agentOf = (p) => (p === '중재' ? '중재 비서' : p === '나' ? '나의 비서' : `${p}의 비서`);
+const byId = (id) => EXPENSES.find((e) => e.id === id);
+const sleep = (ms) => new Promise((r) => setTimeout(r, reduceMotion.matches ? 0 : ms));
+const STAGES = ['collected', 'allocating', 'review', 'ready', 'sending', 'disputed', 'mediating', 'proposal', 'settling', 'done'];
+const atLeast = (s) => STAGES.indexOf(state.stage) >= STAGES.indexOf(s);
+const policyLabel = (id) => POLICIES.find((p) => p.id === id).label;
+const tKey = (t) => `${t.from}>${t.to}`;
+const PAYDAY = '25일 월급날';
+// ---------------------------------------------------------------- 상태
+const START = Date.UTC(2026, 10, 10, 0, 0, 0); // 11/10 09:00 KST, 정산일 아침
+const fresh = () => ({
+  stage: 'collected',
+  preview: TRIP.agreedPolicy,
+  memory: structuredClone(MEMORY),
+  memoryDirty: false,
+  memEdit: null,
+  allocs: {},
+  modes: {},
+  allocSource: '',
+  proposal: null,
+  sent: {},
+  payWhen: '지금',
+  log: [],
+  clock: START,
+  sheet: null,
+});
+let state = fresh();
+let config = { mode: 'unknown' };
+let busy = null;
+let renderedLog = 0;
+let logSeen = 0; // 좁은 화면의 기록 패널에서 마지막으로 본 기록 번호. 처음부터 다시 보면 0으로 돌아간다
+
+// 좁은 화면의 기록 패널 맨 위에 올리는 할 일. 본문의 다음 할 일 카드와 같은 동작을 부른다
+function logTodos() {
+  const todo = (eyebrow, title, actions) => `<div class="pop-todo"><b>${eyebrow}</b><p>${title}</p>
+    <div class="actions">${actions}<button class="btn sm plain" data-action="close-log">나중에</button></div></div>`;
+  switch (state.stage) {
+    case 'collected':
+      return todo('나의 할 일', `비서가 여행 지출 ${EXPENSES.length}건을 모았어요`, '<button class="btn sm" data-action="allocate">나누기 맡기기</button>');
+    case 'review':
+      return todo('나의 할 일', `${topic(flagged().map((it) => `‘${esc(it.name)}’`).join(', '))} 어떻게 나눌까요?`, '<button class="btn sm" data-action="open-exp" data-id="izakaya">확인하기</button>');
+    case 'ready':
+      return todo('나의 할 일', '이대로 청구서를 보낼까요?', '<button class="btn sm" data-action="send">청구서 보내기</button>');
+    case 'disputed':
+      return todo('나의 할 일', '민수의 비서가 ‘2차 바’에 이의를 제기했어요', '<button class="btn sm" data-action="open-dispute">이의 내용 보기</button>');
+    case 'proposal':
+      return todo('나의 할 일', '중재 비서가 나누는 방법을 제안했어요', '<button class="btn sm" data-action="open-dispute">중재안 보기</button>');
+    case 'settling': {
+      const t = transfers().filter(needsHuman)[0];
+      return t ? todo(`${esc(t.from)}의 휴대폰 · ${esc(agentOf(t.from))}`, `오사카 여행 정산 ${won(t.amount)}. 확인하면 보낼게요.`, `<button class="btn sm" data-action="open-payer" data-p="${t.from}">${esc(t.from)}의 화면 보기</button>`) : '';
+    }
+    default:
+      return '';
+  }
+}
+
+const logPop = createLogPop({
+  itemHtml: (l, opts) => logItemHtml({ avatar: avatar(l.from, 'agent'), who: agentOf(l.from), to: l.to, time: l.t, text: l.text, meta: l.meta, tagHtml: l.tag, ...opts }),
+  timeOf: (l) => l.t,
+  todosHtml: logTodos,
+  seen: { get: () => logSeen, set: (n) => { logSeen = n; } },
+  emptyText: '비서에게 나누기를 맡기면 여기에 기록이 쌓여요.',
+});
+
+// 중재 전후로 바뀌는 나누기 방식(split)과 배분(alloc)을 지출에 입혀서 계산에 넘긴다
+const expenseView = () => EXPENSES.map((e) => ({ ...e, split: state.modes[e.id] ?? e.split, alloc: state.allocs[e.id] }));
+const agreedLedger = () => ledger(ROOM, expenseView(), TRIP.agreedPolicy);
+const transfers = () => settle(agreedLedger());
+const flagged = () => {
+  const a = state.allocs.izakaya;
+  return a ? byId('izakaya').items.filter((it) => a[it.id].confidence < 0.7 && !a[it.id].confirmed) : [];
+};
+const needsHuman = (t) => t.amount > RULES[t.from].autoAccept && !state.sent[tKey(t)];
+
+function log(from, to, text, { meta = '', tag = '' } = {}) {
+  state.clock += 6000;
+  const t = new Date(state.clock + 9 * 3600_000).toISOString().slice(11, 16); // 분까지만(로그가 아니라 대화)
+  state.log.push({ from, to, text, meta, tag, t });
+  renderChannel();
+}
+
+async function post(path, body, signal) {
+  if (config.mode === 'offline') throw new Error('offline');
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  return json;
+}
+
+// ---------------------------------------------------------------- 흐름
+async function allocate() {
+  const izakaya = byId('izakaya');
+  const controller = new AbortController();
+  busy = controller;
+  state.stage = 'allocating';
+  if (!state.log.length) {
+    const kinds = EXPENSES.reduce((m, e) => ({ ...m, [e.source]: (m[e.source] || 0) + 1 }), {});
+    log('나', '모두의 비서', `여러분, 오사카 여행 지출 ${EXPENSES.length}건을 모았어요. 메뉴가 달랐던 이자카야 영수증은 각자 공유해 준 기억으로 나눌게요.`, {
+      meta: `모은 지출: ${Object.entries(kinds).map(([k, v]) => `${k} ${v}`).join(' · ')}`,
+    });
+  }
+  render();
+  let out;
+  try {
+    out = await post('/api/allocate', { memory: state.memory }, controller.signal);
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      busy = null;
+      state.stage = !state.allocs.izakaya ? 'collected' : flagged().length ? 'review' : 'ready';
+      return render();
+    }
+    await sleep(600);
+    out = { lines: ruleAllocate(izakaya, state.memory, ROOM.members), source: 'rules', fallback: e.message };
+  }
+  busy = null;
+  state.allocs.izakaya = out.lines;
+  state.allocSource = allocLabel(out) + (out.fallback ? ' (서버 응답이 없어 규칙으로)' : '');
+  state.memoryDirty = false;
+  const used = PEOPLE.reduce((n, p) => n + state.memory[p].length, 0);
+  log('나', '모두의 비서', `이자카야 영수증 ${izakaya.items.length}줄을 여러분이 공유해 준 기억 ${used}개로 나눠 봤어요.`, { meta: `나눈 방법: ${state.allocSource}` });
+  const ask = flagged();
+  if (ask.length) {
+    log('나', '나', `${topic(ask.map((it) => `‘${it.name}’`).join(', '))} 누가 먹었는지 기억에 근거가 없어요. 짐작하지 않을게요. 누구 몫인지 알려 주세요.`, { tag: chip('내 확인 필요', 'warn') });
+  }
+  state.stage = ask.length ? 'review' : 'ready';
+  render();
+}
+
+function maybeReady() {
+  if (state.stage === 'review' && !flagged().length) {
+    state.stage = 'ready';
+    log('나', '나', '확인해 줘서 고마워요. 이제 청구서를 보낼 수 있어요.');
+  }
+}
+
+async function sendInvoices() {
+  state.stage = 'sending';
+  closeSheet();
+  render();
+  const rows = agreedLedger();
+  for (const p of PEOPLE.filter((x) => x !== '나')) {
+    await sleep(450);
+    log('나', agentOf(p), `${p}의 몫을 담은 청구서예요. 단톡방에는 아무것도 올리지 않았어요.`, {
+      meta: `${p}의 몫 ${won(rows[p].owed)} · 이미 낸 돈 ${won(rows[p].paid)} · 환율은 ${policyLabel(TRIP.agreedPolicy)} · 지출 ${EXPENSES.length}건 기준`,
+    });
+  }
+  await sleep(700);
+  log('철수', '나의 비서', `잘 받았어요. 철수도 함께 있던 일정이고 맡겨 둔 한도 안이라 그대로 받을게요. 돈은 ${PAYDAY}에 보낼게요.`, {
+    meta: `철수가 정해 둔 규칙: 함께 있던 일정이면 받기 · ${won(RULES.철수.autoAccept)}까지는 묻지 않고 받기 · 보내는 날은 ${RULES.철수.sendWhen}`,
+  });
+  await sleep(500);
+  log('영희', '나의 비서', '잘 받았어요. 영희는 오히려 받을 돈이 있어서 보낼 건 없어요.', { meta: '영희가 정해 둔 규칙: 함께 있던 일정이면 받기' });
+  await sleep(700);
+  log('민수', '나의 비서', `‘2차 바’는 다시 봐 주세요. 민수는 ${DISPUTE.leftAt}에 먼저 숙소로 돌아갔어요.`, {
+    meta: `민수가 낸 근거(원본 대신 요약만 보내요): ${DISPUTE.evidence.join(' / ')}`,
+    tag: chip('이의 제기', 'warn'),
+  });
+  state.stage = 'disputed';
+  render();
+}
+
+async function mediate() {
+  const bar = byId(DISPUTE.expense);
+  const controller = new AbortController();
+  busy = controller;
+  state.stage = 'mediating';
+  log('나', '중재 비서', '중재 비서님, 이 이의를 맡길게요. 영수증의 주문 시각도 함께 보내요.', { meta: `내가 정해 둔 규칙: 이의가 오면 ${RULES.나.onDispute}` });
+  render();
+  let out;
+  try {
+    out = await post('/api/mediate', { memory: state.memory }, controller.signal);
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      busy = null;
+      state.stage = 'disputed';
+      return render();
+    }
+    await sleep(600);
+    out = {
+      summary: `${DISPUTE.leftAt} 이전 주문은 넷이, 이후 주문은 ${DISPUTE.by}를 뺀 셋이 나눠요. 술을 마시지 않는 사람은 술값에서 빠져요.`,
+      lines: ruleAllocate(bar, state.memory, ROOM.members, presentAfter(bar, DISPUTE.by, DISPUTE.leftAt)),
+      source: 'rules',
+      fallback: e.message,
+    };
+  }
+  busy = null;
+  state.proposal = { ...out, label: allocLabel(out) + (out.fallback ? ' (서버 응답이 없어 규칙으로)' : '') };
+  log('중재', '나·민수의 비서', out.summary, { meta: `중재한 방법: ${state.proposal.label}` });
+  state.stage = 'proposal';
+  render();
+}
+
+async function acceptProposal() {
+  const before = agreedLedger();
+  state.allocs[DISPUTE.expense] = state.proposal.lines;
+  state.modes[DISPUTE.expense] = 'items';
+  state.stage = 'settling';
+  closeSheet();
+  const after = agreedLedger();
+  log('나', '중재 비서', '좋아요, 이 중재안에 동의해요.');
+  await sleep(500);
+  log('민수', '중재 비서', '제가 낸 근거가 반영됐네요. 민수가 정해 둔 대로 이 중재안에 동의할게요.', { meta: '민수가 정해 둔 규칙: 근거와 맞는 중재안이면 동의' });
+  await sleep(500);
+  const d = after.철수.owed - before.철수.owed;
+  log('철수', '나의 비서', `몫이 ${won(Math.abs(d))} ${d >= 0 ? '늘었지만' : '줄었고'} 여전히 맡겨 둔 한도 안이라 그대로 받을게요.`, { meta: `철수가 정해 둔 규칙: ${won(RULES.철수.autoAccept)}까지는 묻지 않고 받기` });
+  for (const t of transfers().filter(needsHuman)) {
+    await sleep(500);
+    log(t.from, t.from, `보낼 돈이 ${won(t.amount)}이라 제가 혼자 정할 수 있는 한도(${won(RULES[t.from].autoAccept)})를 넘었어요. 보내도 될까요?`, { tag: chip(`${t.from}의 확인 필요`, 'warn') });
+  }
+  if (!transfers().some(needsHuman)) state.stage = 'done';
+  render();
+}
+
+async function pay(person) {
+  const mine = transfers().filter((t) => t.from === person);
+  const now = state.payWhen === '지금';
+  for (const t of mine) state.sent[tKey(t)] = now ? 'sent' : 'scheduled';
+  const total = mine.reduce((s, t) => s + t.amount, 0);
+  render();
+  await sleep(400);
+  log(person, mine.map((t) => agentOf(t.to)).join(', '), now ? `${person}가 확인해 줘서 ${won(total)}을 보냈어요.` : `${person}가 확인해 줘서 ${PAYDAY}에 ${won(total)}을 보낼게요.`, {
+    meta: `토스 송금 링크로 ${now ? '바로' : PAYDAY} 보내요. 데모라 실제 돈은 오가지 않아요.`,
+  });
+  if (!transfers().some(needsHuman)) {
+    await sleep(500);
+    log('나', '나', '받을 돈이 모두 들어왔어요. 오사카 정산이 끝났어요.');
+    state.stage = 'done';
+  }
+  render();
+}
+
+function act(name, d) {
+  switch (name) {
+    case 'allocate': return allocate();
+    case 'cancel': busy?.abort(); return undefined;
+    case 'send': return sendInvoices();
+    case 'mediate': return mediate();
+    case 'accept': return acceptProposal();
+    case 'pay': return pay(d.p);
+    case 'open-exp': return openSheet('expense', d.id);
+    case 'open-dispute': return openSheet('dispute');
+    case 'open-payer': return openSheet('payer', d.p);
+    case 'close-sheet': return closeSheet();
+    case 'policy': state.preview = d.id; return render();
+    case 'policy-reset': state.preview = TRIP.agreedPolicy; return render();
+    case 'when': state.payWhen = d.id; return render();
+    case 'toggle-pick': {
+      const it = byId(d.exp).items.find((x) => x.id === d.line);
+      const a = state.allocs[d.exp][d.line];
+      const set = new Set(a.consumers);
+      if (set.has(d.p)) set.delete(d.p); else set.add(d.p);
+      if (!set.size) return undefined; // 적어도 한 명의 몫이다
+      // 물어본 줄은 '이대로 확인'을 눌러야 확정된다. 고르는 도중의 상태가 청구서로 새지 않게.
+      const asked = a.confidence < 0.7 && !a.confirmed;
+      Object.assign(a, { consumers: PEOPLE.filter((p) => set.has(p)), reason: '직접 고쳤어요.', edited: true, confirmed: !asked });
+      return render();
+    }
+    case 'confirm-line': {
+      const a = state.allocs[d.exp][d.line];
+      a.confirmed = true;
+      const it = byId(d.exp).items.find((x) => x.id === d.line);
+      log('나', '모두의 비서', `${topic(`‘${it.name}’`)} ${whose(a.consumers.join('·'))} 몫이에요. 사람이 직접 확인했어요.`, { meta: a.edited ? '비서가 나눈 것을 사람이 고쳐서 정했어요' : '비서가 나눈 대로 사람이 확인했어요' });
+      maybeReady();
+      return render();
+    }
+    case 'mem-del':
+      state.memory[d.p].splice(Number(d.i), 1);
+      state.memoryDirty = Boolean(state.allocs.izakaya);
+      return render();
+    case 'mem-open': state.memEdit = d.p; return render();
+    case 'mem-cancel': state.memEdit = null; return render();
+    case 'reset':
+      busy?.abort();
+      state = fresh();
+      renderedLog = 0;
+      closeSheet();
+      window.scrollTo({ top: 0, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+      return render();
+    default: return undefined;
+  }
+}
+
+// ---------------------------------------------------------------- 메인 화면
+function hero() {
+  return `<section class="hero">
+    <h1>${esc(TRIP.title)}</h1>
+    <p class="sub">${esc(TRIP.dates)} · 4명 · 돈 얘기는 각자의 비서끼리 해요</p>
+    <div class="people">${PEOPLE.map((p) => `<span class="person">${avatar(p)}${esc(p)}</span>`).join('')}</div>
+    ${serverUp() ? '<p class="demo-note">정해진 예시 시나리오예요. 지출을 직접 남기고 나눠 보려면 <a href="room.html">실제 방</a>에서 해 보세요.</p>' : ''}
+  </section>`;
+}
+
+function nextCard() {
+  const progress = (title, text) => `<section class="next" aria-busy="true">
+    <p class="eyebrow">비서가 일하는 중</p><h2>${title}</h2><p>${text}</p>
+    <div class="progress"><i></i></div>
+    <div class="actions"><button class="btn plain sm" data-action="cancel">취소</button></div></section>`;
+  const card = (cls, eyebrow, title, text, actions) => `<section class="next ${cls}">
+    <p class="eyebrow">${eyebrow}</p><h2>${title}</h2><p>${text}</p>
+    ${actions ? `<div class="actions">${actions}</div>` : ''}</section>`;
+  switch (state.stage) {
+    case 'collected':
+      return card('', '할 일 1개', `비서가 여행 지출 ${EXPENSES.length}건을 모았어요`,
+        '카드 승인 알림, 영수증 사진, 비서에게 한 말에서 모았어요. 메뉴가 달랐던 영수증은 각자의 비서가 공유한 기억으로 나눠요.',
+        '<button class="btn" data-action="allocate">비서에게 나누기 맡기기</button>');
+    case 'allocating':
+      return progress('비서들이 영수증을 나누는 중이에요', '이자카야 영수증 7줄을 4명의 비서가 공유한 기억과 맞춰 보고 있어요. 보통 10초 안팎이에요.');
+    case 'review': {
+      const names = flagged().map((it) => `‘${esc(it.name)}’`).join(', ');
+      return card('warn', '확인이 필요해요', `${topic(names)} 어떻게 나눌까요?`,
+        '비서들의 기억에 근거가 없는 줄이에요. 그래서 비서가 짐작으로 청구하지 않고 먼저 물어봐요.',
+        '<button class="btn" data-action="open-exp" data-id="izakaya">이자카야 영수증 확인하기</button>');
+    }
+    case 'ready':
+      return card('', '내 승인이 필요해요', '이대로 청구서를 보낼까요?',
+        '보내면 각자의 비서가 자기 규칙대로 확인해요. 단톡방에는 아무것도 올라가지 않아요.',
+        '<button class="btn" data-action="send">비서들에게 청구서 보내기</button><button class="btn secondary" data-action="open-exp" data-id="izakaya">영수증 다시 보기</button>');
+    case 'sending':
+      return `<section class="next" aria-busy="true"><p class="eyebrow">비서가 일하는 중</p><h2>비서들이 청구서를 확인하는 중이에요</h2>
+        <p>각자 맡긴 규칙(자동 수락 한도, 보낼 시기)대로 처리해요.</p><div class="progress"><i></i></div></section>`;
+    case 'disputed':
+      return card('warn', '이의 제기', '민수의 비서가 ‘2차 바’에 이의를 제기했어요',
+        `민수는 ${DISPUTE.leftAt}에 먼저 들어갔다고 해요. 내 규칙은 ‘${esc(RULES.나.onDispute)}’예요.`,
+        '<button class="btn" data-action="open-dispute">이의 내용 보기</button>');
+    case 'mediating':
+      return progress('중재 비서가 양쪽 근거를 맞춰 보는 중이에요', '민수의 근거와 영수증의 주문 시각을 비교하고 있어요.');
+    case 'proposal':
+      return card('', '중재안 도착', '중재 비서가 나누는 방법을 제안했어요', esc(state.proposal.summary),
+        '<button class="btn" data-action="open-dispute">중재안 보기</button>');
+    case 'settling': {
+      const p = transfers().filter(needsHuman)[0]?.from;
+      if (!p) return '';
+      return card('', '거의 끝났어요', `${esc(p)}의 확인만 남았어요`,
+        `${esc(p)}가 보낼 돈이 ${esc(p)} 비서의 자동 수락 한도(${won(RULES[p].autoAccept)})를 넘어서, 비서가 ${esc(p)}에게 물었어요. 나는 기다리기만 하면 돼요.`,
+        `<button class="btn" data-action="open-payer" data-p="${p}">${esc(p)}의 화면 보기</button>`);
+    }
+    case 'done':
+      return card('done', '정산 완료', '정산이 끝났어요',
+        '아무도 단톡방에서 돈 얘기를 꺼내지 않았어요. 남은 건 비서끼리 주고받은 기록뿐이에요.',
+        '<button class="btn secondary" data-action="reset">처음부터 다시 보기</button>');
+    default:
+      return '';
+  }
+}
+
+function expenseStatus(e) {
+  if (e.id === 'izakaya') {
+    if (!state.allocs.izakaya) return chip('메뉴별로 나누기 전');
+    const n = flagged().length;
+    return n ? chip(`확인 필요 ${n}`, 'warn') : chip('메뉴별로 나눔', 'ok');
+  }
+  if (e.id === DISPUTE.expense) {
+    if (state.modes[e.id] === 'items') return chip('중재로 다시 나눔', 'ok');
+    if (atLeast('disputed')) return chip('이의 제기됨', 'warn');
+    return chip('합계만 있어 1/N');
+  }
+  return chip('1/N');
+}
+
+function expensesSection() {
+  const rows = EXPENSES.map((e) => {
+    const { krw } = toKrw(e, ROOM, TRIP.agreedPolicy);
+    return `<button class="row" data-action="open-exp" data-id="${e.id}">
+      ${tile(e.kind)}
+      <span class="grow"><span class="title">${esc(e.title)}</span>
+        <span class="meta" style="display:block">${esc(e.payer)} · ${e.method === 'card' ? '카드' : '현금'} ${yen(amountOf(e))} · ${dayLabel(e.date)} ${e.time}</span>
+        <span style="display:block;margin-top:4px">${expenseStatus(e)}</span></span>
+      <span class="end"><span class="amount">${won(krw)}</span></span>
+      ${CHEVRON}
+    </button>`;
+  }).join('');
+  return `<section class="group">
+    <h2 class="group-label"><span>비서가 모은 지출 ${EXPENSES.length}건</span><span>${esc(policyLabel(TRIP.agreedPolicy))} 기준</span></h2>
+    <div class="list">${rows}</div>
+    <p class="group-note">정산을 올리는 걸 잊어도 괜찮아요. 비서가 카드 알림과 영수증에서 먼저 챙겨요.</p>
+  </section>`;
+}
+
+function policySection() {
+  const agreed = agreedLedger();
+  const preview = ledger(ROOM, expenseView(), state.preview);
+  const isPreview = state.preview !== TRIP.agreedPolicy;
+  const netText = (n) => (n >= 0 ? `받을 돈 ${won(n)}` : `보낼 돈 ${won(-n)}`);
+  const rows = PEOPLE.map((p) => {
+    const diff = preview[p].net - agreed[p].net;
+    const receiver = agreed[p].net >= 0;
+    const word = diff > 0 ? (receiver ? '더 받아요' : '덜 내요') : (receiver ? '덜 받아요' : '더 내요');
+    const note = isPreview && diff !== 0 ? `<span class="meta num" style="display:block">합의 정책보다 ${won(Math.abs(diff))} ${word}</span>` : '';
+    return `<div class="row" style="--inset:52px">${avatar(p)}<span class="grow">${esc(p)}</span>
+      <span class="end"><span class="amount num ${preview[p].net >= 0 ? 'pos' : 'neg'}">${netText(preview[p].net)}</span>${note}</span></div>`;
+  }).join('');
+  const seg = `<div class="seg" role="radiogroup" aria-label="환율 정책" data-seg="policy"><span class="seg-thumb"></span>
+    ${POLICIES.map((p) => `<button type="button" role="radio" aria-checked="${p.id === state.preview}" data-action="policy" data-id="${p.id}">${esc(p.label)}</button>`).join('')}</div>`;
+  return `<section class="group">
+    <h2 class="group-label"><span>환율 정책</span><span>${esc(TRIP.agreedAt)}, 여행 전에 4명의 비서가 합의</span></h2>
+    <div class="list">
+      <div class="policy">${seg}
+        <p class="policy-desc">${esc(POLICIES.find((p) => p.id === state.preview).desc)}</p>
+        ${isPreview ? '<p class="preview-note">미리보기예요. 정책을 바꾸려면 4명의 비서가 모두 다시 동의해야 해요. <button class="text-btn" data-action="policy-reset">합의한 정책으로 보기</button></p>' : ''}
+      </div>
+      ${rows}
+    </div>
+    <p class="group-note">여행 중에는 환율을 따지지 않아요. 정해 둔 정책대로 비서가 계산하고, 지출마다 근거를 보여 줘요.</p>
+  </section>`;
+}
+
+function transferStatus(t) {
+  if (!atLeast('sending')) return { label: '청구서 보내기 전' };
+  if (t.from === DISPUTE.by && !atLeast('settling')) return { label: '이의 제기 중', cls: 'warn' };
+  const sent = state.sent[tKey(t)];
+  if (sent === 'sent') return { label: '보냄', cls: 'ok' };
+  if (sent === 'scheduled') return { label: `예약 · ${PAYDAY}`, cls: 'tint' };
+  const r = RULES[t.from];
+  if (t.amount > r.autoAccept) return { label: `${t.from} 확인 대기`, cls: 'warn', action: true };
+  if (r.sendWhen === '바로') return { label: '자동 수락 · 보냄', cls: 'ok' };
+  return { label: `자동 수락 · ${r.sendWhen} 예약`, cls: 'tint' };
+}
+
+function transfersSection() {
+  const list = transfers();
+  const naive = EXPENSES.reduce((n, e) => n + e.present.filter((p) => p !== e.payer).length, 0);
+  const rows = list.map((t) => {
+    const s = transferStatus(t);
+    return `<div class="row" style="--inset:76px">
+      <span style="display:flex;gap:2px">${avatar(t.from)}${avatar(t.to)}</span>
+      <span class="grow"><span class="title">${esc(t.from)} → ${esc(t.to)}</span><span style="display:block;margin-top:3px">${chip(s.label, s.cls)}</span></span>
+      <span class="end"><span class="amount num" style="display:block">${won(t.amount)}</span>
+      ${s.action ? `<button class="text-btn" data-action="open-payer" data-p="${t.from}">${esc(t.from)}의 화면</button>` : ''}</span>
+    </div>`;
+  }).join('');
+  return `<section class="group">
+    <h2 class="group-label"><span>누가 누구에게</span><span>송금 ${list.length}번이면 끝나요</span></h2>
+    <div class="list">${rows}</div>
+    <p class="group-note">지출마다 따로 보내면 ${naive}번 오갈 송금을, 받을 사람과 보낼 사람을 묶어 ${list.length}번으로 줄였어요.</p>
+  </section>`;
+}
+
+function memorySection() {
+  const editable = !atLeast('sending');
+  const rows = PEOPLE.map((p) => {
+    const mems = state.memory[p].map((m, i) => `<span class="mem">${esc(m)}${editable ? `<button type="button" aria-label="${esc(m)} 지우기" data-action="mem-del" data-p="${p}" data-i="${i}">×</button>` : ''}</span>`).join('');
+    const full = state.memory[p].length >= MEMORY_LIMIT;
+    const form = state.memEdit === p
+      ? `<form class="mem-add" data-p="${p}"><input id="mem-input" maxlength="60" placeholder="예: 매운 음식을 못 먹어요" aria-label="${esc(p)}의 비서가 기억할 것"><button class="btn sm">추가</button><button type="button" class="btn plain sm" data-action="mem-cancel">취소</button></form>`
+      : '';
+    return `<div class="row" style="--inset:52px;align-items:flex-start">${avatar(p)}
+      <span class="grow"><span class="title">${esc(agentOf(p))}</span> <span class="quota">${state.memory[p].length}/${MEMORY_LIMIT}</span>
+        <span class="memory">${mems || '<span class="meta">공유한 기억이 없어요</span>'}</span>${form}</span>
+      ${editable && !full && state.memEdit !== p ? `<button class="text-btn" data-action="mem-open" data-p="${p}" aria-label="${esc(p)}의 기억 추가">추가</button>` : ''}
+    </div>`;
+  }).join('');
+  const dirty = state.memoryDirty && editable
+    ? '<div class="row"><span class="grow meta">기억이 바뀌었어요. 이 기억으로 영수증을 다시 나눌까요?</span><button class="btn sm" data-action="allocate">다시 나누기</button></div>'
+    : '';
+  return `<section class="group">
+    <h2 class="group-label"><span>비서가 정산에 쓰는 기억</span><span>무료 요금제 · 사람당 ${MEMORY_LIMIT}개</span></h2>
+    <div class="list">${rows}${dirty}</div>
+    <p class="group-note">각자 공유하기로 한 기억만 정산에 써요. 기억을 고치고 다시 나누면 메뉴 배분이 어떻게 바뀌는지 바로 볼 수 있어요.</p>
+  </section>`;
+}
+
+// ---------------------------------------------------------------- 비서끼리 채널
+function renderChannel() {
+  const el = $('#channel');
+  const waiting = atLeast('settling') ? transfers().filter(needsHuman)[0] : null;
+  const notif = waiting
+    ? `<button class="notif" style="display:block;width:calc(100% - 32px);text-align:left;cursor:pointer" data-action="open-payer" data-p="${waiting.from}">
+        <b>${esc(waiting.from)}의 휴대폰 · ${esc(agentOf(waiting.from))}</b>오사카 여행 정산 ${won(waiting.amount)}. 확인하면 보낼게요.</button>`
+    : '';
+  const times = minuteLabels(state.log.map((l) => l.t));
+  const items = state.log.map((l, i) => logItemHtml({
+    avatar: avatar(l.from, 'agent'), who: agentOf(l.from), to: l.to, time: times[i],
+    text: l.text, meta: l.meta, tagHtml: l.tag, enter: i >= renderedLog,
+  })).join('');
+  el.innerHTML = `<h2>비서끼리</h2><p class="lead">단톡방 대신 비서들이 주고받은 기록이에요. 사람에게는 확인할 일만 올라와요.</p>
+    ${notif}
+    ${state.log.length ? `<ol class="log">${items}</ol>` : '<p class="empty">비서에게 나누기를 맡기면 여기에 기록이 쌓여요.</p>'}`;
+  renderedLog = state.log.length;
+  el.scrollTop = el.scrollHeight;
+  if (logSeen > state.log.length) logSeen = 0;
+  logPop.update(state.log.map((l, i) => ({ ...l, seq: i + 1 })));
+}
+
+// ---------------------------------------------------------------- 시트 내용
+function linesHtml(exp, alloc, { editable, timed }) {
+  return exp.items.map((it) => {
+    const a = alloc?.[it.id];
+    const flag = a && exp.id === 'izakaya' && a.confidence < 0.7 && !a.confirmed;
+    const present = timed ? presentAfter(exp, DISPUTE.by, DISPUTE.leftAt)(it) : exp.present;
+    const picks = present.map((p) => `<button type="button" class="pick" aria-pressed="${Boolean(a?.consumers.includes(p))}" ${editable && a ? '' : 'disabled'}
+        data-action="toggle-pick" data-exp="${exp.id}" data-line="${it.id}" data-p="${p}">${avatar(p)}${esc(p)}</button>`).join('');
+    return `<div class="line ${flag ? 'flag' : ''}">
+      <div class="line-top"><span class="line-name">${timed ? `<small style="margin:0 6px 0 0">${it.time}</small>` : ''}${esc(it.name)}<small>×${it.qty}</small></span><span class="num">${yen(it.qty * it.unit)}</span></div>
+      <div class="picks">${picks}</div>
+      <p class="reason">${a ? esc(a.reason) : '아직 나누지 않았어요.'}</p>
+      ${flag && editable ? `<div><button class="btn sm secondary" data-action="confirm-line" data-exp="${exp.id}" data-line="${it.id}">${a.edited ? '이대로 확인' : '비서가 짐작한 대로 확인'}</button></div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function sharesHtml(exp, mode, alloc) {
+  const s = shares({ ...exp, split: mode }, ROOM, TRIP.agreedPolicy, alloc);
+  return PEOPLE.filter((p) => s.krwShare[p] !== undefined).map((p) => `<div class="row" style="--inset:52px">${avatar(p)}
+      <span class="grow">${esc(p)}${p === exp.payer ? ' <span class="meta">· 낸 사람</span>' : ''}</span>
+      <span class="amount num">${won(s.krwShare[p])}</span></div>`).join('');
+}
+
+function expenseSheet(id) {
+  const e = byId(id);
+  const { krw, how } = toKrw(e, ROOM, TRIP.agreedPolicy);
+  const mode = state.modes[e.id] ?? e.split ?? 'equal';
+  const alloc = state.allocs[e.id];
+  let detail = '';
+  if (e.id === 'izakaya') {
+    const editable = ['review', 'ready'].includes(state.stage);
+    const note = editable ? '이름을 눌러 고칠 수 있어요. 청구서를 보내기 전까지는 언제든 바꿀 수 있어요.'
+      : alloc ? '청구서를 보낸 뒤라 고칠 수 없어요.' : '‘비서에게 나누기 맡기기’를 누르면 비서들이 기억으로 나눠요.';
+    detail = `<section class="group"><h3 class="group-label"><span>영수증 ${e.items.length}줄 · 어떻게 나눌까요</span><span>${esc(state.allocSource || '나누기 전')}</span></h3>
+      <div class="list">${linesHtml(e, alloc, { editable })}</div>
+      <p class="group-note">${note}</p></section>`;
+  } else if (e.id === DISPUTE.expense && mode === 'items') {
+    detail = `<section class="group"><h3 class="group-label"><span>중재로 다시 나눔 · 주문 시각 기준</span><span>${esc(state.proposal?.label || '')}</span></h3>
+      <div class="list">${linesHtml(e, alloc, { editable: false, timed: true })}</div></section>`;
+  } else if (e.id === DISPUTE.expense) {
+    detail = `<p class="how">카드 승인 알림에는 합계만 있어서, 함께 있던 4명이 똑같이 나눴어요.${atLeast('disputed') ? ' 민수의 비서가 이 지출에 이의를 제기했어요.' : ''}</p>
+      ${atLeast('disputed') ? '<p style="margin:-8px 0 20px"><button class="btn secondary" data-action="open-dispute">이의 내용 보기</button></p>' : ''}`;
+  }
+  return {
+    title: e.title,
+    html: `<div class="big"><div class="amt">${won(krw)}</div>
+        <p class="sub">${yen(amountOf(e))} · ${esc(subj(e.payer))} ${e.method === 'card' ? '카드로' : '현금으로'} 냄 · ${dayLabel(e.date)} ${e.time} · ${esc(e.source)}에서</p></div>
+      <p class="how">${esc(policyLabel(TRIP.agreedPolicy))} 정책: ${esc(how)}</p>
+      ${detail}
+      <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>${mode === 'items' ? '쓴 만큼' : '1/N'}</span></h3>
+        <div class="list">${sharesHtml(e, mode, alloc)}</div>${restNote(shares({ ...e, split: mode }, ROOM, TRIP.agreedPolicy, alloc).rest)}</section>
+      ${state.stage === 'ready' && id === 'izakaya' ? '<button class="btn" style="width:100%" data-action="send">비서들에게 청구서 보내기</button>' : ''}`,
+  };
+}
+
+function disputeSheet() {
+  const e = byId(DISPUTE.expense);
+  const receipt = e.items.map((it) => `<div class="row" style="--inset:16px"><span class="meta num" style="width:44px">${it.time}</span><span class="grow">${esc(it.name)} ×${it.qty}</span><span class="num">${yen(it.qty * it.unit)}</span></div>`).join('');
+  let action = '';
+  if (state.stage === 'disputed') {
+    action = `<button class="btn" style="width:100%" data-action="mediate">중재 비서에게 맡기기</button>
+      <p class="group-note" style="text-align:center">내 비서의 규칙: 이의가 오면 ${esc(RULES.나.onDispute)}</p>`;
+  } else if (state.stage === 'mediating') {
+    action = '<div class="next" aria-busy="true" style="margin:0"><h2 style="font-size:1.0625rem">중재 비서가 근거를 맞춰 보는 중이에요</h2><div class="progress"><i></i></div><div class="actions"><button class="btn plain sm" data-action="cancel">취소</button></div></div>';
+  } else if (state.proposal) {
+    const before = shares({ ...e, split: 'equal' }, ROOM, TRIP.agreedPolicy).krwShare;
+    const after = shares({ ...e, split: 'items' }, ROOM, TRIP.agreedPolicy, state.proposal.lines).krwShare;
+    const changes = PEOPLE.map((p) => {
+      const d = (after[p] || 0) - (before[p] || 0);
+      return `<div class="row" style="--inset:52px">${avatar(p)}<span class="grow">${esc(p)}</span>
+        <span class="end num"><span class="meta">${won(before[p] || 0)} →</span> <span class="amount">${won(after[p] || 0)}</span>
+        <span class="meta" style="display:block">${d === 0 ? '그대로' : `${d > 0 ? '+' : '−'}${won(Math.abs(d))}`}</span></span></div>`;
+    }).join('');
+    action = `<section class="group"><h3 class="group-label"><span>중재안</span><span>${esc(state.proposal.label)}</span></h3>
+        <div class="list"><p style="padding:14px 16px">${esc(state.proposal.summary)}</p>${linesHtml(e, state.proposal.lines, { editable: false, timed: true })}</div></section>
+      <section class="group"><h3 class="group-label"><span>이 지출의 몫이 이렇게 바뀌어요</span><span>1/N → 중재안</span></h3><div class="list">${changes}</div></section>
+      ${state.stage === 'proposal'
+        ? `<button class="btn" style="width:100%" data-action="accept">이 중재안에 동의</button>
+           <p class="group-note" style="text-align:center">동의하면 민수의 비서에게도 보내요. 민수의 규칙은 ‘근거와 맞으면 동의’예요.</p>`
+        : '<p class="group-note" style="text-align:center">양쪽 비서가 동의해서 이 지출은 중재안대로 나눴어요.</p>'}`;
+  }
+  return {
+    title: '이의 제기 · 2차 바',
+    html: `<div class="big"><div class="amt">${yen(amountOf(e))}</div>
+        <p class="sub">${esc(subj(e.payer))} 카드로 냄 · ${dayLabel(e.date)} ${e.time} 결제</p></div>
+      <div class="split" style="margin-bottom:20px">
+        <div class="claim"><h3>${avatar('민수', 'agent')}민수의 비서 주장</h3><p>${esc(DISPUTE.claim)}</p><ul>${DISPUTE.evidence.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+          <p class="privacy">민수의 비서는 위치 기록 원본이 아니라 요약 한 줄만 보냈어요.</p></div>
+        <div class="claim"><h3>${avatar('나', 'agent')}나의 비서 기록</h3><ul>${DISPUTE.counter.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+          <p class="privacy">영수증의 주문 시각을 근거로 함께 보냈어요.</p></div>
+      </div>
+      <section class="group"><h3 class="group-label"><span>영수증 · 주문 시각</span><span>${esc(DISPUTE.by)} ${DISPUTE.leftAt} 귀가</span></h3><div class="list">${receipt}</div></section>
+      ${action}`,
+  };
+}
+
+function payerSheet(person) {
+  const mine = transfers().filter((t) => t.from === person);
+  const total = mine.reduce((s, t) => s + t.amount, 0);
+  const rows = agreedLedger()[person];
+  const sent = mine.length && mine.every((t) => state.sent[tKey(t)]);
+  const head = `<p class="phone-label">${avatar(person)}${esc(person)}가 보는 화면이에요. 단톡방이 아니라 ${esc(person)}의 비서가 따로 알려 줘요.</p>`;
+  if (sent) {
+    const scheduled = mine.some((t) => state.sent[tKey(t)] === 'scheduled');
+    return {
+      title: `${person}의 비서`,
+      html: `${head}<div class="done-mark"><span class="circle">${CHECK}</span>
+        <h2 style="font-size:1.375rem">${scheduled ? `${PAYDAY}에 보낼게요` : '보냈어요'}</h2>
+        <p class="meta">${won(total)} · ${mine.map((t) => esc(t.to)).join(', ')}에게 · 모의 송금</p></div>`,
+    };
+  }
+  const checks = [
+    `지출 ${EXPENSES.length}건 모두 ${person}가 함께 있던 일정이에요.`,
+    state.modes[DISPUTE.expense] === 'items' ? `2차 바는 ${DISPUTE.leftAt} 이전 주문만 포함했어요. 중재안에 양쪽이 동의했어요.` : null,
+    `환율은 여행 전에 합의한 ‘${policyLabel(TRIP.agreedPolicy)}’로 계산했어요.`,
+    `${person}의 몫 ${won(rows.owed)} − 이미 낸 돈 ${won(rows.paid)} = ${won(total)}`,
+  ].filter(Boolean);
+  const seg = `<div class="seg" role="radiogroup" aria-label="보낼 때" data-seg="when"><span class="seg-thumb"></span>
+    ${['지금', PAYDAY].map((w) => `<button type="button" role="radio" aria-checked="${w === state.payWhen}" data-action="when" data-id="${w}">${w === '지금' ? '지금 보내기' : w}</button>`).join('')}</div>`;
+  const label = state.payWhen === '지금' ? `밀어서 ${won(total)} 보내기` : `밀어서 ${PAYDAY}에 예약`;
+  return {
+    title: `${person}의 비서`,
+    html: `${head}
+      <div class="big"><div class="amt">${won(total)}</div><p class="sub">${mine.map((t) => `${esc(t.to)}에게 ${won(t.amount)}`).join(', ')} · 오사카 2박 3일</p></div>
+      <section class="group"><h3 class="group-label"><span>비서가 확인한 것</span></h3>
+        <div class="list">${checks.map((c) => `<div class="row" style="--inset:16px"><span class="chip ok" aria-hidden="true">✓</span><span class="grow">${esc(c)}</span></div>`).join('')}</div></section>
+      <section class="group"><h3 class="group-label"><span>보낼 때</span><span>보낼 시기를 놓치지 않게 비서가 챙겨요</span></h3>${seg}
+        <div class="slider" data-commit="pay" data-p="${person}">
+          <span class="slider-fill"></span><span class="slider-label">${label}</span>
+          <button type="button" class="slider-thumb" aria-label="${label}. Enter 키로도 할 수 있어요">${ARROW}</button>
+        </div>
+        <p class="slider-hint">모의 송금이에요. 실제 돈은 움직이지 않아요.</p></section>`,
+  };
+}
+
+function sheetContent({ kind, id }) {
+  if (kind === 'expense') return expenseSheet(id);
+  if (kind === 'dispute') return disputeSheet();
+  return payerSheet(id);
+}
+
+// ---------------------------------------------------------------- 시트
+const sheetRoot = $('#sheet-root');
+const sheet = createSheet(sheetRoot, { onClosed: () => { state.sheet = null; } });
+function openSheet(kind, id) {
+  state.sheet = { kind, id };
+  sheet.open(render);
+}
+const closeSheet = (velocity) => sheet.close(velocity);
+
+// ---------------------------------------------------------------- 그리기와 이벤트
+function render() {
+  $('#main').innerHTML = [hero(), nextCard(), expensesSection(), policySection(), transfersSection(), memorySection()].join('');
+  mountSegs($('#main'));
+  renderChannel();
+  if (state.sheet && !sheetRoot.hidden) {
+    const body = $('#sheet-body');
+    const top = body.scrollTop;
+    const { title, html } = sheetContent(state.sheet);
+    $('#sheet-title').textContent = title;
+    body.innerHTML = html;
+    body.scrollTop = top;
+    mountSegs(body);
+    mountSliders(body, (d) => act(d.commit, d));
+  }
+  if (state.memEdit) $('#mem-input')?.focus();
+}
+
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-action]');
+  if (!el || el.disabled) return;
+  if (el.dataset.action === 'toggle-log') return logPop.toggle();
+  if (el.dataset.action === 'close-log') return logPop.close();
+  if (logPop.isOpen) logPop.close(false); // 기록 패널 안의 버튼은 패널을 닫고 진행한다
+  act(el.dataset.action, el.dataset);
+});
+
+document.addEventListener('submit', (e) => {
+  const form = e.target.closest('.mem-add');
+  if (!form) return;
+  e.preventDefault();
+  const p = form.dataset.p;
+  const text = $('input', form).value.replace(/\s+/g, ' ').trim().slice(0, 60);
+  if (text && state.memory[p].length < MEMORY_LIMIT) {
+    state.memory[p].push(text);
+    state.memoryDirty = Boolean(state.allocs.izakaya);
+  }
+  state.memEdit = null;
+  render();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (logPop.isOpen) {
+      logPop.close();
+    } else if (state.memEdit) {
+      state.memEdit = null;
+      render();
+    } else closeSheet();
+    return;
+  }
+  segArrowKeys(e, (btn) => act(btn.dataset.action, btn.dataset));
+});
+
+const nav = $('#nav');
+addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 56), { passive: true });
+addEventListener('resize', () => {
+  resetSegs();
+  mountSegs(document);
+});
+
+// 실제 방은 API 서버가 있어야 동작한다. 서버가 응답하기 전에는 예시 시나리오만 보여 준다
+const serverUp = () => config.mode === 'gemini' || config.mode === 'rules';
+
+async function loadConfig() {
+  const mode = $('#mode');
+  try {
+    const res = await fetch(`${API_BASE}/api/config`, { signal: AbortSignal.timeout(8000) });
+    config = await res.json();
+    // 서버가 응답하면(로컬이든 배포든) 실제 방으로 가는 길을 보여 준다
+    $('#to-room').hidden = false;
+    render();
+    if (config.mode === 'gemini') {
+      mode.textContent = `${allocLabel({ source: config.model })} 연결됨`;
+      mode.classList.add('live');
+    } else {
+      mode.textContent = '규칙 모드';
+    }
+  } catch {
+    config = { mode: 'offline' };
+    mode.textContent = '규칙 모드';
+    mode.title = 'AI 서버에 연결되지 않아 규칙으로 나누고 중재해요';
+  }
+}
+
+logPop.show(true);
+render();
+loadConfig();

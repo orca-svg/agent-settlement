@@ -15,22 +15,18 @@ const tag = (v) => (_, pre, q, spec) => `${pre}${q}${spec}?v=${v}${q}`;
 export const stampJs = (src, v) => src.replace(JS_SPEC, tag(v));
 export const stampHtml = (html, v) => html.replace(HTML_SCRIPT, tag(v)).replace(HTML_CSS, tag(v));
 
-// 폴더(하위 폴더 포함: 체험 데모 demo/, 배포본에 함께 올리는 src/)의 .js·.mjs·.html을 고쳐 쓰고, 바뀐 파일의 상대 경로를 돌려준다
-export function stampDir(dir, v, base = dir) {
+// 폴더 바로 아래의 .js·.html을 고쳐 쓰고, 바뀐 파일 이름을 돌려준다
+export function stampDir(dir, v) {
   const changed = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const file = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      changed.push(...stampDir(file, v, base));
-      continue;
-    }
-    const stamp = /\.m?js$/.test(entry.name) ? stampJs : entry.name.endsWith('.html') ? stampHtml : null;
+  for (const name of fs.readdirSync(dir)) {
+    const stamp = name.endsWith('.js') ? stampJs : name.endsWith('.html') ? stampHtml : null;
     if (!stamp) continue;
+    const file = path.join(dir, name);
     const before = fs.readFileSync(file, 'utf8');
     const after = stamp(before, v);
     if (after !== before) {
       fs.writeFileSync(file, after);
-      changed.push(path.relative(base, file).split(path.sep).join('/'));
+      changed.push(name);
     }
   }
   return changed;

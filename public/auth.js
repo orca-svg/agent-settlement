@@ -25,9 +25,7 @@ export function initAuth() {
   });
 }
 export const authOptions = () => options;
-// 체험 데모(public/demo/)는 Firebase 없이 '나'로 로그인한 것처럼 둔다. 토큰은 없고, 요청은 브라우저 안의 데모 서버가 받는다
-const DEMO_USER = Object.freeze({ uid: 'me', displayName: '나' });
-export const currentUser = () => instance?.currentUser || (options.demo ? DEMO_USER : null);
+export const currentUser = () => instance?.currentUser || null;
 export async function token() { await initAuth(); return instance?.currentUser?.getIdToken() || null; }
 export async function login() {
   await initAuth();

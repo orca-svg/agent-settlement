@@ -24,9 +24,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
-      # 체험 데모(public/demo/)는 서버 라우트(src/)를 브라우저에서 돌린다. 배포본의 /src/에 함께 올린다(서버 비밀값은 src/에 없다)
-      - name: 체험 데모가 쓰는 서버 코드 함께 올리기
-        run: cp -R src public/src
       # Pages는 모든 파일을 10분 캐시한다. 배포마다 화면 파일 주소에 같은 버전(커밋)을 붙여,
       # 배포 직후 새 room.js가 캐시에 남은 옛 ui.js를 불러 화면이 비는 일을 막는다(scripts/stamp-version.mjs)
       - name: 화면 파일 주소에 배포 버전 붙이기
