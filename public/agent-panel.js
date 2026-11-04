@@ -10,7 +10,7 @@ const DISPUTE_NOTES = {
   evidence: '내 몫을 줄일 근거가 있으면 비서가 대신 이의를 내요.',
   mediator: '내가 낸 지출에 이의가 오면 중재 비서에게 맡겨요. 결과에는 내가 동의해야 해요.',
 };
-const SEND_MODES = [['now', '바로'], ['payday', '지정일'], ['manual', '직접']];
+const SEND_MODES = [['now', '바로'], ['payday', '지정일'], ['manual', '편할 때']];
 const SEND_NOTES = {
   now: '',
   payday: '그날 오전 9시에 알려 드려요. 그달에 그날이 없으면 마지막 날에 알려요.',

@@ -10,7 +10,7 @@ export const MEMORY_LIMITS = { free: MEMORY_LIMIT };
 export const MEMORY_MAX_CHARS = 60;
 export const AUTO_ACCEPT_MAX = 10_000_000;
 export const AUTO_ACCEPT_PRESETS = [0, 10_000, 30_000, 50_000];
-// 직접 보내기: 바로 알리지 않고, 이만큼 지난 날 09:00(KST)까지 받는 사람이 받았다고 하지 않았으면 그때 한 번 알린다
+// 편할 때 보내기(#59, 예전 이름 '직접'): 바로 알리지 않고, 이만큼 지난 날 09:00(KST)까지 받는 사람이 받았다고 하지 않았으면 그때 한 번 알린다
 export const MANUAL_WAIT_DAYS = 3;
 
 export const ON_DISPUTE = {
@@ -21,7 +21,7 @@ export const ON_DISPUTE = {
 export const NOTIFY = { actions: '확인할 일만', all: '모든 진행 상황' };
 
 export const sendWhenLabel = (sendWhen) => {
-  if (sendWhen === 'manual') return '직접 보내기';
+  if (sendWhen === 'manual') return '편할 때 보내기';
   return sendWhen?.payday ? `매달 ${sendWhen.payday}일에 보내기` : '바로 보내기';
 };
 export const autoAcceptLabel = (n) => (n > 0 ? `${won(n)}까지 자동 수락` : '항상 나에게 묻기');

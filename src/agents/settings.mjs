@@ -11,7 +11,7 @@ const validAutoAccept = (v) => Number.isSafeInteger(v) && v >= 0 && v <= AUTO_AC
 const validSendWhen = (v) => v === 'now' || v === 'manual' || (Number.isInteger(v?.payday) && v.payday >= 1 && v.payday <= 31);
 const CHECKS = {
   autoAccept: [validAutoAccept, `자동 수락 한도는 0원에서 ${AUTO_ACCEPT_MAX.toLocaleString('ko-KR')}원 사이의 정수로 정해 주세요`],
-  sendWhen: [validSendWhen, '보낼 시기는 바로, 매달 1~31일, 직접 중에서 골라 주세요'],
+  sendWhen: [validSendWhen, '보낼 시기는 바로, 매달 1~31일, 편할 때 중에서 골라 주세요'],
   onDispute: [(v) => Object.hasOwn(ON_DISPUTE, v), '이의 처리 방법을 골라 주세요'],
   notify: [(v) => Object.hasOwn(NOTIFY, v), '알림 수준을 골라 주세요'],
 };

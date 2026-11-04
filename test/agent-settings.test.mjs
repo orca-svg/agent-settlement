@@ -114,12 +114,12 @@ test('완료 기준: 바로로 정하면 다음 확인 때 바로 알린다', as
   assert.equal(pair(await ctx.transfers(), 'cs', 'me').status, 'due');
 });
 
-// 직접 보내기는 바로 알리지 않는다. 다만 3일 뒤 09:00(KST)까지 받는 사람이 받았다고 하지 않았으면 그때 한 번 알린다
+// 편할 때 보내기는 바로 알리지 않는다. 다만 3일 뒤 09:00(KST)까지 받는 사람이 받았다고 하지 않았으면 그때 한 번 알린다
 // 철수는 송금이 여러 건일 수 있어 그 송금 하나(t)만 본다
 const dueFor = async (ctx, t) => (await ctx.store.listEvents(ROOM)).filter((e) => e.kind === 'transfer_due' && e.action?.ref === t.id);
 const asksToSend = async (ctx, t) => pendingActions({ room: await ctx.store.get('rooms', ROOM), transfers: await ctx.transfers() }).some((a) => a.type === 'approve_transfer' && a.ref === t.id);
 
-test('직접 보내기: 바로 알리지 않고, 3일 뒤 09:00(KST)까지 받았다는 확인이 없으면 그때 한 번 알린다', async () => {
+test('편할 때 보내기: 바로 알리지 않고, 3일 뒤 09:00(KST)까지 받았다는 확인이 없으면 그때 한 번 알린다', async () => {
   const ctx = await setup(); // 11/10 12:00 KST
   await ctx.settings.updateRules('cs', { sendWhen: 'manual' });
   await ctx.orch.sendInvoices(ROOM, 'me');
@@ -139,13 +139,13 @@ test('직접 보내기: 바로 알리지 않고, 3일 뒤 09:00(KST)까지 받�
   const due = await dueFor(ctx, t);
   assert.equal(due.length, 1, '한 번만 알린다');
   assert.match(due[0].text, /받았다는 확인이 없어요/);
-  assert.equal(due[0].meta, '정해 둔 규칙: 직접 보내기');
+  assert.equal(due[0].meta, '정해 둔 규칙: 편할 때 보내기');
   assert.equal(await asksToSend(ctx, t), true);
   assert.equal((await ctx.orch.approveTransfer(ROOM, t.id, 'cs')).status, 'opened');
   assert.equal((await ctx.orch.markSent(ROOM, t.id, 'cs')).status, 'sent');
 });
 
-test('직접 보내기: 받는 사람이 먼저 받았다고 하면 보내는 사람에게 알리지 않는다', async () => {
+test('편할 때 보내기: 받는 사람이 먼저 받았다고 하면 보내는 사람에게 알리지 않는다', async () => {
   const ctx = await setup();
   await ctx.settings.updateRules('cs', { sendWhen: 'manual' });
   await ctx.orch.sendInvoices(ROOM, 'me');
@@ -215,11 +215,11 @@ test('규칙 적용 근거가 비서 기록에 남는다: 자동 수락, 묻기,
   assert.ok(scheduled.includes('정해 둔 규칙: 바로 보내기'));
 });
 
-test('규칙 적용 근거: 직접 보내기, 이의 처리(근거 이의·중재 맡기기·묻기)', async () => {
+test('규칙 적용 근거: 편할 때 보내기, 이의 처리(근거 이의·중재 맡기기·묻기)', async () => {
   const manual = await setup();
   await manual.settings.updateRules('cs', { sendWhen: 'manual' });
   await manual.orch.sendInvoices(ROOM, 'me');
-  assert.ok((await manual.metas('transfer_scheduled')).includes('정해 둔 규칙: 직접 보내기'));
+  assert.ok((await manual.metas('transfer_scheduled')).includes('정해 둔 규칙: 편할 때 보내기'));
 
   const med = await setup({ evidence: true });
   await med.settings.updateRules('ms', { onDispute: 'evidence' });

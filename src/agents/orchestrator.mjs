@@ -416,8 +416,8 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       const { room, name } = await roomOf(t.roomId);
       if (['scheduled', 'due', 'opened'].includes(t.status) && t.version !== room.version) {
         await store.put('transfers', { ...t, status: 'superseded' });
-      } else if (t.status === 'scheduled' && t.remindAt && new Date(t.remindAt) <= now) { // remindAt이 없는 예전 직접 보내기는 알리지 않는다
-        // 받는 사람이 받았다고 했으면 confirmed라 여기 오지 않는다. 직접 보내기는 그래서 '확인이 없을 때만' 알리게 된다
+      } else if (t.status === 'scheduled' && t.remindAt && new Date(t.remindAt) <= now) { // remindAt이 없는 예전 편할 때 보내기는 알리지 않는다
+        // 받는 사람이 받았다고 했으면 confirmed라 여기 오지 않는다. 편할 때 보내기는 그래서 '확인이 없을 때만' 알리게 된다
         await store.put('transfers', { ...t, status: 'due', dueAt: now.toISOString() });
         await say(t.roomId, {
           from: t.from, to: t.from, kind: 'transfer_due',
