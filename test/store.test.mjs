@@ -4,17 +4,24 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MemoryStore } from '../src/store/memory.mjs';
 import { encryptedStore } from '../src/store/encrypted.mjs';
+import { cachedStore } from '../src/store/cached.mjs';
 
 const fixedNow = () => new Date('2026-11-10T00:00:00Z');
 const KEY = Buffer.alloc(32, 5);
 const IMPLS = [
   ['MemoryStore', (opts) => new MemoryStore(opts)],
   ['encryptedStore', (opts) => encryptedStore(new MemoryStore(opts), KEY)],
+  ['cachedStore', (opts) => cachedStore(new MemoryStore(opts))],
 ];
-// FirestoreStore(#3)는 에뮬레이터가 있을 때만 같은 계약을 돌린다(docs/firestore-setup.md). 테스트마다 빈 데이터베이스를 쓴다
+// FirestoreStore(#3)는 에뮬레이터가 있을 때만 같은 계약을 돌린다(docs/firestore-setup.md). 테스트마다 빈 데이터베이스를 쓴다.
+// 마지막 것이 배포 서버의 조합이다(server.mjs)
 if (process.env.FIRESTORE_EMULATOR_HOST) {
   const { emulatorStore } = await import('./helpers/firestore-emulator.mjs');
-  IMPLS.push(['FirestoreStore', (opts) => emulatorStore(opts)], ['encryptedStore(FirestoreStore)', (opts) => encryptedStore(emulatorStore(opts), KEY)]);
+  IMPLS.push(
+    ['FirestoreStore', (opts) => emulatorStore(opts)],
+    ['encryptedStore(FirestoreStore)', (opts) => encryptedStore(emulatorStore(opts), KEY)],
+    ['encryptedStore(cachedStore(FirestoreStore))', (opts) => encryptedStore(cachedStore(emulatorStore(opts)), KEY)],
+  );
 }
 
 for (const [name, make] of IMPLS) {
