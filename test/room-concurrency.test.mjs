@@ -131,3 +131,20 @@ test('본문을 느리게 보내는 요청이 같은 방의 다른 쓰기를 붙
   slowBody.end(json.slice(5));
   assert.equal(await slowDone, 200);
 });
+
+// #5: 받을 계좌는 다른 방의 송금까지 고치고, 방마다 쓸 기억 고르기는 사람마다 하나인 비서 문서를 고친다. 그래서 다른 방의 일이 끝난 뒤에 돈다
+test('한 방의 중재가 끝나기 전에는 다른 방에서 온 계좌 저장·기억 고르기도 기다린다', async (t) => {
+  const { gemini, request, store, blockOnGemini } = await setup(t);
+  const slow = await blockOnGemini('room-one');
+  const text = (await store.get('agents', 'cs')).memory[0];
+  const payout = request('/api/rooms/room-two/payout', { uid: 'cs', body: { bank: '토스뱅크', accountNo: '1000-2000-3000', holder: '철수' } });
+  const shared = request('/api/rooms/room-two/agent/shared', { uid: 'cs', body: { text, shared: false } });
+  assert.equal(await within(Promise.race([payout, shared]), 300), null, '방의 일이 끝나기 전에 끝났어요');
+  gemini.open();
+  await slow.response;
+  assert.equal((await payout).status, 200);
+  assert.equal((await shared).status, 200);
+  const cs = await store.get('agents', 'cs');
+  assert.ok(!(cs.memoryShared['room-two'] ?? []).includes(text) && cs.memory.includes(text), '기억 끄기와 계좌 저장이 서로 덮어쓰지 않는다');
+  assert.equal((await store.get('agents', 'cs')).payout.accountNo, '1000-2000-3000');
+});

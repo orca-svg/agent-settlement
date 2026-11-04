@@ -8,7 +8,8 @@ const $ = (s) => document.querySelector(s);
 // events는 오래된 것부터 [{ seq, kind?, action?, text, ... }].
 // itemHtml(e, { unread, extraHtml })은 기록 한 줄, timeOf(e)는 묶음 안의 시각, todosHtml()은 맨 위 할 일 카드를 그린다.
 // seen.get/set은 마지막으로 본 seq를 읽고 쓴다.
-export function createLogPop({ itemHtml, timeOf, todosHtml = () => '', seen, emptyText = '아직 기록이 없어요.' }) {
+// counts(e)는 종 배지에 셀 기록이다(실제 방은 주인의 알림 수준을 따른다, #5). 기록 목록에는 모두 보인다.
+export function createLogPop({ itemHtml, timeOf, todosHtml = () => '', seen, emptyText = '아직 기록이 없어요.', counts = () => true }) {
   const root = $('#log-pop-root');
   const pop = $('#log-pop');
   const bell = $('#nav-bell');
@@ -19,7 +20,7 @@ export function createLogPop({ itemHtml, timeOf, todosHtml = () => '', seen, emp
   const lastSeq = () => events.at(-1)?.seq ?? 0;
 
   function renderBell() {
-    const n = isOpen ? 0 : events.filter((e) => e.seq > seen.get()).length;
+    const n = isOpen ? 0 : events.filter((e) => e.seq > seen.get() && counts(e)).length;
     badge.hidden = !n;
     badge.textContent = n > 99 ? '99+' : String(n);
     bell.setAttribute('aria-label', n ? `비서끼리 기록, 새 기록 ${n}개` : '비서끼리 기록');

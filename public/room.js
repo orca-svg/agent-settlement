@@ -8,6 +8,8 @@ import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
 import { initAuth, authOptions, onSessionChange } from './auth.js';
 import { BANKS } from './banks.js';
+import { createAgentPanel, personChipHtml } from './agent-panel.js';
+import { notifies } from './agent-rules.js';
 import { readVisits, departure, timelineSummary, expenseWindow, kstTime, keepForSettlement } from './timeline.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -42,6 +44,7 @@ const logPop = createLogPop({
     ...opts,
   }),
   timeOf: (e) => timeOf(e.at),
+  counts: (e) => notifies(e, currentUid(), state.data?.myAgent?.notify),
   todosHtml: () => (state.data?.actions ?? []).map((a) => `<div class="pop-todo"><b>${esc(state.data.me.name)}의 할 일</b><p>${esc(a.text)}</p>
     <div class="actions">${actionButtons(a, 'sm')}<button class="btn sm plain" data-action="close-log">나중에</button></div></div>`).join(''),
   seen: {
@@ -59,6 +62,33 @@ const logPop = createLogPop({
     },
   },
 });
+
+// 우측 상단 내 프로필 메뉴(#5). 내 계정으로 가는 길이면서, 방 안에서는 '이 방의 내 비서'로 가는 길을 겸한다(주 입구는 방 머리의 내 칩)
+const meMenu = {
+  get isOpen() {
+    return !$('#me-menu').hidden;
+  },
+  toggle() {
+    if (this.isOpen) this.close();
+    else this.open();
+  },
+  open() {
+    $('#me-menu').hidden = false;
+    $('#nav-me').setAttribute('aria-expanded', 'true');
+    $('#me-menu [role="menuitem"]:not([hidden])')?.focus();
+  },
+  close(focus = true) {
+    $('#me-menu').hidden = true;
+    $('#nav-me').setAttribute('aria-expanded', 'false');
+    if (focus) $('#nav-me').focus();
+  },
+  // 방을 읽은 뒤 내 얼굴과 '이 방의 내 비서'를 채운다. 방 밖이거나 서버가 요약을 주지 않으면 내 계정만 남는다
+  update() {
+    const me = state.data?.me;
+    $('#nav-me-avatar').innerHTML = me ? avatar(me.uid) : '';
+    $('#me-menu-agent').hidden = !state.data?.myAgent;
+  },
+};
 
 // ---------------------------------------------------------------- 데이터
 async function load() {
@@ -313,7 +343,7 @@ function expSheetHtml(exp) {
     ? `<section class="group"><h3 class="group-label"><span>영수증 ${exp.items.length}줄 · 어떻게 나눌까요</span><span>${esc(state.allocSource[exp.id] ?? (exp.alloc ? '' : '나누기 전'))}</span></h3>
         ${busy ? '<div class="next" aria-busy="true" style="margin:0 0 12px"><h2 style="font-size:1.0625rem">비서들이 기억으로 나누는 중이에요</h2><div class="progress"><i></i></div></div>' : ''}
         <div class="list">${linesHtml(exp)}</div>
-        <p class="group-note">${exp.alloc ? '이름을 눌러 고친 뒤 확인하면 그 줄은 더 묻지 않아요.' : '각자의 비서가 공유한 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄은 짐작하지 않고 물어봐요.'}</p>
+        <p class="group-note">${exp.alloc ? '이름을 눌러 고친 뒤 확인하면 그 줄은 더 묻지 않아요.' : '각자의 비서가 이 방에 쓰기로 고른 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄은 짐작하지 않고 물어봐요.'}</p>
         <button class="btn ${exp.alloc ? 'secondary' : ''}" style="width:100%;margin-top:10px" data-action="allocate-exp" data-id="${esc(exp.id)}" ${busy || ab.disabled ? 'disabled' : ''}>${ab.label}</button>
         ${ab.hint ? `<p class="group-note" style="margin-top:8px">${esc(ab.hint)}</p>` : ''}</section>`
     : `<p class="how">영수증 줄이 없어서 함께 있던 ${exp.present.length}명이 똑같이 나눠요.</p>`;
@@ -358,6 +388,7 @@ const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (
 
 async function act(name, d) {
   if (name !== 'agree' && name !== 'reject') state.disputeDone = null; // 동의·거부 결과 한 줄은 다음 조작 전까지만 남긴다
+  if (agentPanel.handles(name)) return agentPanel.act(name, d);
   if (AGENT_ACTIONS.has(name)) return agentAct(name, d); // 송금 링크는 이 호출 안에서 동기적으로 연다
   if (name === 'show-receipt') {
     showReceipt(d.id);
@@ -480,10 +511,13 @@ function whoPicker() {
 }
 
 function hero() {
-  const { room } = state.data;
+  const { room, me } = state.data;
+  // 내 칩은 '내 비서' 입구를 겸한다(#5). 다른 사람 칩은 이름표이고, 비서 설정을 마쳤는지만 로봇 표시로 보인다
+  const ready = new Set(state.data.agentReady ?? []);
+  const person = (m) => (m.uid === me.uid ? agentPanel.chipHtml(m, avatar(m.uid)) : personChipHtml({ name: m.name, avatar: avatar(m.uid), ready: ready.has(m.uid) }));
   return `<section class="hero"><h1>${esc(room.name)}</h1>
     <p class="sub">${esc(room.dates || '')}${room.dates ? ' · ' : ''}${room.members.length}명 · 돈 얘기는 각자의 비서끼리 해요</p>
-    <div class="people">${room.members.map((m) => `<span class="person">${avatar(m.uid)}${esc(m.name)}</span>`).join('')}</div></section>`;
+    <div class="people">${room.members.map(person).join('')}</div></section>`;
 }
 
 function nextCard() {
@@ -494,7 +528,7 @@ function nextCard() {
     const unsplit = state.data.expenses.find((e) => e.split === 'items' && e.items?.length && !e.alloc);
     if (unsplit) {
       return `<section class="next"><p class="eyebrow">다음에 할 일</p><h2>${esc(topic(`‘${unsplit.title}’`))} 아직 메뉴별로 나누지 않았어요</h2>
-        <p>각자의 비서가 공유한 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄만 사람에게 물어봐요.</p>
+        <p>각자의 비서가 이 방에 쓰기로 고른 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄만 사람에게 물어봐요.</p>
         <div class="actions"><button class="btn" data-action="open-exp" data-id="${esc(unsplit.id)}">나누러 가기</button>${add.replace('class="btn"', 'class="btn plain"')}</div></section>`;
     }
     const settling = settlingCard(add.replace(/class="btn( secondary)?"/g, 'class="btn plain"'));
@@ -547,7 +581,7 @@ function transfersSection() {
   const live = transfers.filter((t) => t.status !== 'superseded');
   const list = live.length ? live : settle(ledger).map((t) => ({ ...t, status: 'preview' }));
   const me = currentUid();
-  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: '송금 앱 열림', sent: !t.notReceivedAt ? '보냈어요' : t.to === me ? '확인을 부탁했어요' : '아직 못 받았대요', confirmed: '받았어요' })[t.status] ?? t.status;
+  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: isManual(t) ? '직접 보내기' : new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: '송금 앱 열림', sent: !t.notReceivedAt ? '보냈어요' : t.to === me ? '확인을 부탁했어요' : '아직 못 받았대요', confirmed: '받았어요' })[t.status] ?? t.status;
   const rows = list.map((t) => {
     const mine = t.id && (t.from === me || t.to === me);
     const tag = mine ? `button type="button" class="row" data-action="open-transfer" data-id="${esc(t.id)}"` : 'div class="row"';
@@ -630,6 +664,7 @@ function renderSheet() {
     $('#sheet-title').textContent = title;
     body.innerHTML = html;
     body.scrollTop = top;
+    mountSegs(body);
     mountSliders(body, { onCommitGesture: (d) => sendGesture(d.id) });
     return;
   }
@@ -682,6 +717,8 @@ function renderChannel() {
 const enc = encodeURIComponent;
 const byId = (col, id) => state.data?.[col]?.find((x) => x.id === id);
 const whenText = (iso) => `${dayLabel(new Date(new Date(iso).getTime() + 9 * 3600_000).toISOString().slice(0, 10))} 09:00`;
+// 직접 보내기 송금. remindAt이 없는 예전 송금도 직접 보내기다(그때는 알리지 않았다)
+const isManual = (t) => Boolean(t.manual) || !t.remindAt;
 
 // 할 일마다 누를 버튼. 다음 할 일 카드와 좁은 화면의 기록 패널이 함께 쓴다
 function actionButtons(a, size = '') {
@@ -749,6 +786,12 @@ function settlingCard(addButtons) {
       ${blocked ? blockedHtml(blocked, state.announceBlocked) : ''}</section>`;
   }
   const live = transfers.filter((t) => t.version === room.version);
+  // 직접 보내기로 정한 송금은 바로 알리지 않는다. 대신 방을 열었을 때 내 차례임을 보여 준다
+  const manual = live.find((t) => t.from === state.data.me.uid && t.status === 'scheduled' && isManual(t));
+  if (manual) {
+    return `<section class="next"><p class="eyebrow">직접 보내기</p><h2>${esc(nameOf(manual.to))}에게 ${won(manual.amount)}을 보내면 돼요</h2>
+      <p>직접 보내기로 정해서 비서가 바로 알리지 않아요. 편할 때 보내 주세요.${manual.remindAt ? ` ${esc(whenText(manual.remindAt))}까지 받았다는 확인이 없으면 한 번 알려 드려요.` : ''}</p><div class="actions"><button class="btn" data-action="open-transfer" data-id="${esc(manual.id)}">보내러 가기</button>${addButtons}</div></section>`;
+  }
   const done = live.length ? live.every((t) => t.status === 'confirmed') : current.every((i) => i.status === 'accepted');
   if (done) {
     return `<section class="next done"><p class="eyebrow">정산 완료</p><h2>정산이 끝났어요</h2>
@@ -1051,6 +1094,9 @@ function transferSheet() {
       <button class="btn" data-action="mark-sent" data-id="${esc(t.id)}">보냈어요</button>
       ${t.link && !isComputer() ? `<button class="btn secondary" data-action="reopen-link" data-id="${esc(t.id)}">토스 다시 열기</button>` : ''}
       <button class="btn plain" data-action="close-sheet">아직이에요</button></div>${t.link && isComputer() ? qrBlock(t, { sentButton: false }) : ''}`;
+  } else if (t.to === me && isManual(t) && ['scheduled', 'due', 'opened'].includes(t.status)) {
+    actions = `<p class="group-note">${esc(subj(nameOf(t.from)))} 직접 보내기로 했어요. 돈이 들어왔으면 알려 주세요. 그러면 비서가 ${esc(nameOf(t.from))}에게 따로 알리지 않아요.</p>
+      <button class="btn" style="width:100%;margin-top:10px" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>`;
   } else if (t.to === me && t.status === 'sent' && !t.notReceivedAt) {
     actions = `<div style="display:grid;gap:8px"><button class="btn" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>
       <button class="btn secondary" data-action="not-received" data-id="${esc(t.id)}">아직 안 들어왔어요</button></div>`;
@@ -1059,11 +1105,11 @@ function transferSheet() {
     actions = `<p class="group-note">${esc(nameOf(t.from))}에게 다시 확인해 달라고 했어요. 그 사이 들어왔다면 알려 주세요.</p>
       <button class="btn" style="width:100%;margin-top:10px" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>`;
   } else {
-    actions = `<p class="group-note">${{ scheduled: `${whenText(t.remindAt)}에 ${esc(nameOf(t.from))}에게 알려요.`, due: `${esc(subj(nameOf(t.from)))} 보낼 차례예요.`, opened: `${esc(subj(nameOf(t.from)))} 송금 앱을 열었어요.`, sent: t.notReceivedAt ? `${esc(subj(toName))} 아직 못 받았대요. ${esc(subj(nameOf(t.from)))} 확인하고 있어요.` : `${esc(subj(nameOf(t.from)))} 보냈어요. 받는 사람의 확인을 기다려요.`, confirmed: '받았다고 확인했어요. 이 송금은 끝났어요.', superseded: '지출이 바뀌어 대체된 송금이에요.' }[t.status] ?? ''}</p>`;
+    actions = `<p class="group-note">${{ scheduled: !isManual(t) ? `${whenText(t.remindAt)}에 ${esc(nameOf(t.from))}에게 알려요.` : `${esc(subj(nameOf(t.from)))} 직접 보내기로 했어요.`, due: `${esc(subj(nameOf(t.from)))} 보낼 차례예요.`, opened: `${esc(subj(nameOf(t.from)))} 송금 앱을 열었어요.`, sent: t.notReceivedAt ? `${esc(subj(toName))} 아직 못 받았대요. ${esc(subj(nameOf(t.from)))} 확인하고 있어요.` : `${esc(subj(nameOf(t.from)))} 보냈어요. 받는 사람의 확인을 기다려요.`, confirmed: '받았다고 확인했어요. 이 송금은 끝났어요.', superseded: '지출이 바뀌어 대체된 송금이에요.' }[t.status] ?? ''}</p>`;
   }
   return {
     title: '송금',
-    html: `<div class="big"><div class="amt">${won(t.amount)}</div><p class="sub">${esc(nameOf(t.from))} → ${esc(toName)}${t.status === 'scheduled' && new Date(t.remindAt) > Date.now() ? ` · ${whenText(t.remindAt)} 예약` : ''}</p></div>
+    html: `<div class="big"><div class="amt">${won(t.amount)}</div><p class="sub">${esc(nameOf(t.from))} → ${esc(toName)}${t.status === 'scheduled' && !isManual(t) && new Date(t.remindAt) > Date.now() ? ` · ${whenText(t.remindAt)} 예약` : ''}</p></div>
       ${note ? `<p class="preview-note" style="margin-bottom:14px">${esc(note)}</p>` : ''}
       ${account}${formError()}${actions}`,
   };
@@ -1080,7 +1126,7 @@ function payoutSheet() {
       <section class="group"><div class="list">
         <label class="row field"><span class="grow">은행</span><select data-bank-pick>${options}<option value=""${p.other ? ' selected' : ''}>목록에 없어요</option></select></label>
         ${p.other ? `<label class="row field"><span class="grow">은행 이름</span><input data-pf="bank" value="${esc(p.bank)}" maxlength="30" placeholder="예: 경남은행"></label>` : ''}
-        <label class="row field"><span class="grow">계좌번호</span><input data-pf="accountNo" value="${esc(p.accountNo)}" inputmode="numeric" maxlength="30" placeholder="숫자만 또는 - 포함"></label>
+        <label class="row field"><span class="grow">계좌번호</span><input data-pf="accountNo" value="${esc(p.accountNo)}" inputmode="numeric" maxlength="30" placeholder="${p.last4 ? `지금은 •••• ${esc(p.last4)}. 새 번호 전체 입력` : '숫자만 또는 - 포함'}"></label>
         <label class="row field"><span class="grow">예금주</span><input data-pf="holder" value="${esc(p.holder)}" maxlength="30"></label>
       </div></section>
       ${p.other ? '<p class="group-note">목록에 없는 은행은 토스가 알아보지 못할 수 있어요. 그때는 보내는 사람에게 계좌번호를 복사해 보내도록 안내해요.</p>' : ''}${formError()}
@@ -1088,7 +1134,30 @@ function payoutSheet() {
   };
 }
 
-const AGENT_SHEETS = { invoice: invoiceSheet, dispute: disputeSheet, transfer: transferSheet, payout: payoutSheet };
+// 개인 비서 설정(#5). 받을 계좌는 위 payoutSheet를 그대로 쓴다
+const agentPanel = createAgentPanel({
+  api,
+  roomId,
+  summary: () => state.data?.myAgent,
+  meName: () => state.data?.me.name ?? '',
+  rerender: () => renderSheet(),
+  openSheet: (kind) => openAgentSheet(kind),
+  closeSheet: () => sheet.close(),
+  reload: () => load(),
+  openPayout: (payout) => openPayoutSheet(payout),
+});
+
+const AGENT_SHEETS = { invoice: invoiceSheet, dispute: disputeSheet, transfer: transferSheet, payout: payoutSheet, ...agentPanel.sheets };
+
+// 방의 할 일에서 열면 비어 있고, 내 비서 설정에서 열면 저장된 은행·예금주를 채운다. 계좌번호는 끝 4자리만 알아서 새로 입력한다
+function openPayoutSheet(saved = null) {
+  const known = saved && BANKS.some((b) => b.label === saved.bank);
+  state.payoutDraft = saved
+    ? { bank: saved.bank, accountNo: '', holder: saved.holder, other: !known, last4: saved.last4 }
+    : { bank: BANKS[0].label, accountNo: '', holder: state.data.me.name, other: false };
+  state.payoutFromAgent = Boolean(saved) || state.sheet === 'agent';
+  openAgentSheet('payout');
+}
 
 function openAgentSheet(kind, ref = null) {
   state.sheet = kind;
@@ -1258,11 +1327,12 @@ async function agentAct(name, d) {
   } else if (name === 'not-received') {
     await post(`/transfers/${enc(d.id)}/not-received`);
   } else if (name === 'open-payout') {
-    const mine = state.data.me;
-    state.payoutDraft = { bank: BANKS[0].label, accountNo: '', holder: mine.name, other: false };
-    openAgentSheet('payout');
+    openPayoutSheet();
   } else if (name === 'save-payout') {
-    if (await post('/payout', state.payoutDraft)) sheet.close();
+    if (await post('/payout', state.payoutDraft)) {
+      if (state.payoutFromAgent) agentPanel.open(); // 내 비서 설정에서 왔으면 설정으로 돌아간다
+      else sheet.close();
+    }
   } else if (name === 'copy') {
     copyText(d.text, d.key);
   }
@@ -1297,7 +1367,8 @@ function render() {
   $('#nav-add').hidden = false;
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
-  main.innerHTML = [hero(), whoPicker(), disputeLine(), nextCard(), disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
+  meMenu.update();
+  main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), nextCard(), disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
   mountSegs(main);
   // 이의·청구서 시트는 글을 쓰는 중이면 다시 그리지 않는다(타이핑 중 초점을 잃지 않게)
   if (['exp', 'transfer'].includes(state.sheet) || (state.sheet === 'dispute' && !state.rejectDraft) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
@@ -1306,15 +1377,20 @@ function render() {
 // ---------------------------------------------------------------- 이벤트
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
+  if (meMenu.isOpen && !e.target.closest('#me-menu-wrap')) meMenu.close(false); // 메뉴 밖을 누르면 닫는다
   if (!el || el.disabled) return;
+  if (el.dataset.action === 'toggle-me-menu') return meMenu.toggle();
+  if (meMenu.isOpen) meMenu.close(false); // 메뉴 안의 항목(내 비서)은 메뉴를 닫고 진행한다
   if (el.dataset.action === 'toggle-log') return logPop.toggle();
   if (el.dataset.action === 'close-log') return logPop.close();
   if (logPop.isOpen) logPop.close(false); // 기록 패널 안의 버튼(확인하기)은 패널을 닫고 진행한다
   act(el.dataset.action, el.dataset);
 });
 document.addEventListener('keydown', (e) => {
+  agentPanel.onKeydown(e);
   if (e.key === 'Escape') {
-    if (logPop.isOpen) logPop.close();
+    if (meMenu.isOpen) meMenu.close();
+    else if (logPop.isOpen) logPop.close();
     else if (!$('#photo-modal').hidden) closePhoto();
     else sheet.close();
   }
@@ -1330,6 +1406,7 @@ document.addEventListener('input', (e) => {
   }
   if (e.target.dataset?.rd !== undefined && state.rejectDraft) state.rejectDraft.reason = e.target.value;
   if (e.target.dataset?.pf && state.payoutDraft) state.payoutDraft[e.target.dataset.pf] = e.target.value;
+  agentPanel.onInput(e.target);
   const f = e.target.dataset?.field;
   if (f && state.draft) state.draft[f] = e.target.value;
   const i = e.target.dataset?.item;
@@ -1346,6 +1423,7 @@ document.addEventListener('change', (e) => {
   if (e.target.matches?.('input[data-timeline-agree]') && state.disputeDraft?.timeline) state.disputeDraft.timeline.agree = e.target.checked;
 });
 document.addEventListener('change', (e) => {
+  agentPanel.onChange(e.target);
   const f = e.target.dataset?.field;
   if (f && state.draft) state.draft[f] = e.target.value;
   // 받을 계좌의 은행 선택. '목록에 없어요'(빈 값)면 직접 쓰는 칸을 보여 주려고 다시 그린다
@@ -1362,6 +1440,7 @@ const sheet = createSheet($('#sheet-root'), {
     state.focusLine = null;
     state.ref = null;
     state.disputeDraft = null;
+    state.payoutFromAgent = false;
     state.rejectDraft = null;
     state.transferNote = null;
     state.pendingSend = null; // 시트를 닫으면 송금 앱에서 돌아왔는지 더는 묻지 않는다

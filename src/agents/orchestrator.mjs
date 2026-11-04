@@ -12,9 +12,11 @@ import { signQrToken, QR_TTL_MS } from '../payments/qr.mjs';
 import { mediateWithGemini } from './mediate.mjs';
 import { OPEN } from './disputes.mjs';
 import { findBank } from '../../public/banks.js';
+import { ON_DISPUTE, sendWhenLabel } from '../../public/agent-rules.js';
+import { normalizeSettings } from './settings.mjs';
+import { roomMemory } from './memory.mjs';
 
 const STALE = '지출이 바뀌었어요. 청구서를 다시 보낸 뒤 새 금액으로 보내 주세요';
-const DEFAULT_RULES = { autoAccept: 0, sendWhen: 'now', onDispute: 'ask' };
 // 보냈어요 뒤 받는 사람이 답이 없으면 다시 묻는 때(sentAt 기준). 1일 뒤, 3일 뒤 두 번. 그 뒤로는 할 일 카드만 남는다
 const DAY_MS = 24 * 3600_000;
 const RECEIPT_REMINDERS = [1 * DAY_MS, 3 * DAY_MS];
@@ -23,7 +25,7 @@ const TICK_STATUSES = ['scheduled', 'due', 'opened', 'sent'];
 
 export function createOrchestrator({ store, gemini = null, clock = () => new Date(), evidenceFor = async () => [], counterFor = async () => [] }) {
   const say = (roomId, ev) => store.appendEvent(roomId, ev);
-  const settingsOf = async (uid) => (await store.get('agents', uid)) ?? { uid, memory: [], rules: DEFAULT_RULES, payout: null };
+  const settingsOf = async (uid) => normalizeSettings(await store.get('agents', uid), uid);
 
   async function loadRoom(roomId) {
     const room = await store.get('rooms', roomId);
@@ -94,10 +96,11 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
         await say(roomId, { from: m.uid, to: actorUid, kind: 'invoice_accepted', text: acceptedText(r.net), meta: `정해 둔 규칙: ${reasons.join(' · ')}` });
       } else if (decision === 'ask') {
         await say(roomId, {
-          from: m.uid, to: m.uid, kind: 'invoice_asked', text: `${won(-r.net)} 청구서가 왔어요. ${reasons[0]}`,
+          from: m.uid, to: m.uid, kind: 'invoice_asked', text: `${won(-r.net)} 청구서가 왔어요. ${reasons[0]}`, meta: '정해 둔 규칙: 자동 수락 한도 초과',
           action: { type: 'answer_invoice', ref: invoice.id, for: m.uid },
         });
       } else {
+        await say(roomId, { from: m.uid, to: m.uid, kind: 'rule_applied', text: '근거가 있어서 대신 이의를 낼게요', meta: `정해 둔 규칙: ${ON_DISPUTE.evidence}` });
         await raiseDispute(roomId, { by: m.uid, expenseId: found.exp.id, claim: claimFrom(name(m.uid), found), evidence: found.evidence });
       }
     }
@@ -137,7 +140,14 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       ...(evidence.length ? { meta: evidence.some(e => e.locationId) ? '위치 요약 첨부 · 이의 내용에서 확인' : `근거: ${evidence.map((e) => e.summary).join(' · ')}` } : {}),
     });
     // 지출을 낸 사람이 이의를 중재 비서에게 맡겨 두었으면 바로 중재한다. 아니면 낸 사람에게 묻는다(pendingActions)
-    if ((await settingsOf(exp.payer)).rules.onDispute === 'mediator') return mediate(roomId, dispute.id, exp.payer);
+    if ((await settingsOf(exp.payer)).rules.onDispute === 'mediator') {
+      await say(roomId, { from: exp.payer, to: exp.payer, kind: 'rule_applied', text: '이의가 와서 중재 비서에게 맡겼어요', meta: `정해 둔 규칙: ${ON_DISPUTE.mediator}` });
+      return mediate(roomId, dispute.id, exp.payer);
+    }
+    await say(roomId, {
+      from: exp.payer, to: exp.payer, kind: 'dispute_asked', text: `${obj(`‘${exp.title}’`)} 어떻게 할지 주인에게 물어요`, meta: '정해 둔 규칙: 이의가 오면 주인에게 묻기',
+      action: { type: 'agree_dispute', ref: dispute.id, for: exp.payer },
+    });
     return dispute;
   }
 
@@ -164,7 +174,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     if (!parties.includes(actorUid)) throw new HttpError(403, '이의 당사자만 중재를 맡길 수 있어요');
     if (dispute.status !== 'open') throw new HttpError(409, '이미 중재안이 나왔어요');
     if (!exp.items?.length) throw new HttpError(409, '영수증 줄이 없어 중재할 수 없어요. 지출을 고쳐 줄을 넣어 주세요');
-    const memoryByUid = Object.fromEntries(await Promise.all(room.members.map(async (m) => [m.uid, (await settingsOf(m.uid)).memory ?? []])));
+    const memoryByUid = await roomMemory(store, room); // 이 방에 쓰기로 고른 기억만 중재 비서에게 보여 준다(이의 중재는 기억이 근거로 인용될 수 있는 유일한 곳)
     const started = Date.now();
     const out = await mediateWithGemini(gemini, { exp, room, dispute, counter: await counterFor(exp, room), memoryByUid });
     if (dispute.evidence.some(e => e.locationId)) {
@@ -247,6 +257,11 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return `${dayLabel(kst.slice(0, 10))} 09:00`;
   };
 
+  const remindText = (t, now) => {
+    if (t.manual) return `편할 때 보내 주세요. ${whenText(t.remindAt)}까지 받았다는 확인이 없으면 알려 드릴게요`;
+    return new Date(t.remindAt) > now ? `${whenText(t.remindAt)}에 알려 드릴게요` : '곧 알려 드릴게요';
+  };
+
   // 지금 version의 송금을 한 번만 만든다. 이전 version의 아직 보내지 않은 송금은 대체한다
   async function createTransfers(roomId) {
     const { room, expenses, name } = await load(roomId);
@@ -264,14 +279,14 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       const transfer = {
         id: `${roomId}:v${room.version}:t${i + 1}`, roomId, version: room.version, from: edge.from, to: edge.to, amount: edge.amount,
         status: 'scheduled', remindAt: nextSendAt(now, sender.rules.sendWhen), ...paymentOf(receiver.payout, edge.amount),
+        ...(sender.rules.sendWhen === 'manual' ? { manual: true } : {}),
       };
       await store.put('transfers', transfer);
       out.push(transfer);
-      const later = new Date(transfer.remindAt) > now;
       await say(roomId, {
         from: edge.from, to: edge.from, kind: 'transfer_scheduled',
-        text: `${name(edge.to)}에게 ${won(edge.amount)}을 보내요. ${later ? `${whenText(transfer.remindAt)}에 알려 드릴게요` : '곧 알려 드릴게요'}`,
-        meta: later ? '정해 둔 규칙: 월급날에 보내기' : '정해 둔 규칙: 바로 보내기',
+        text: `${name(edge.to)}에게 ${won(edge.amount)}을 보내요. ${remindText(transfer, now)}`,
+        meta: `정해 둔 규칙: ${sendWhenLabel(sender.rules.sendWhen)}`,
       });
       if (!transfer.link) {
         await say(roomId, {
@@ -283,17 +298,20 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return out;
   }
 
-  // 받을 계좌를 정하면 나에게 오는 아직 끝나지 않은 송금에 링크를 채운다
+  // 받을 계좌는 사람마다 하나다. 정하거나 바꾸면 그 사람이 받을 모든 방의 아직 끝나지 않은 송금에 링크를 다시 채운다
   async function setPayout(roomId, actorUid, { bank, accountNo, holder } = {}) {
     if (!String(bank ?? '').trim() || !/\d{6,}/.test(String(accountNo ?? '').replace(/\D/g, ''))) throw new HttpError(400, '은행과 계좌번호를 확인해 주세요');
     const agent = await settingsOf(actorUid);
     // 은행은 목록의 이름으로 통일해 저장한다('국민은행' → 'KB국민은행'). 목록에 없으면 쓴 그대로
     const payout = { bank: (findBank(bank)?.label ?? String(bank).trim()).slice(0, 30), accountNo: String(accountNo).replace(/[^\d-]/g, '').slice(0, 30), holder: String(holder ?? '').trim().slice(0, 30) };
     await store.put('agents', { ...agent, id: actorUid, uid: actorUid, payout });
-    for (const t of (await store.list('transfers', { roomId })).filter((x) => x.to === actorUid && ['scheduled', 'due', 'opened'].includes(x.status))) {
+    const rooms = new Set([roomId]);
+    for (const t of (await store.list('transfers', { to: actorUid })).filter((x) => ['scheduled', 'due', 'opened'].includes(x.status))) {
       await store.put('transfers', { ...t, ...paymentOf(payout, t.amount) });
+      rooms.add(t.roomId);
     }
-    await say(roomId, { from: actorUid, to: 'all', kind: 'payout_set', text: '받을 계좌를 알려 줬어요. 이제 바로 보낼 수 있어요' });
+    const text = agent.payout ? '받을 계좌를 바꿨어요. 아직 보내지 않은 송금에는 새 계좌가 들어가요' : '받을 계좌를 알려 줬어요. 이제 바로 보낼 수 있어요';
+    for (const id of rooms) if (await store.get('rooms', id)) await say(id, { from: actorUid, to: 'all', kind: 'payout_set', text });
     return { ok: true };
   }
 
@@ -384,10 +402,13 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       const { room, name } = await roomOf(t.roomId);
       if (['scheduled', 'due', 'opened'].includes(t.status) && t.version !== room.version) {
         await store.put('transfers', { ...t, status: 'superseded' });
-      } else if (t.status === 'scheduled' && new Date(t.remindAt) <= now) {
+      } else if (t.status === 'scheduled' && t.remindAt && new Date(t.remindAt) <= now) { // remindAt이 없는 예전 직접 보내기는 알리지 않는다
+        // 받는 사람이 받았다고 했으면 confirmed라 여기 오지 않는다. 직접 보내기는 그래서 '확인이 없을 때만' 알리게 된다
         await store.put('transfers', { ...t, status: 'due', dueAt: now.toISOString() });
         await say(t.roomId, {
-          from: t.from, to: t.from, kind: 'transfer_due', text: `${name(t.to)}에게 ${won(t.amount)}을 보낼 때예요`,
+          from: t.from, to: t.from, kind: 'transfer_due',
+          text: t.manual ? `${name(t.to)}에게 보낼 ${won(t.amount)}, 아직 받았다는 확인이 없어요. 보냈다면 보냈어요를 눌러 주세요` : `${name(t.to)}에게 ${won(t.amount)}을 보낼 때예요`,
+          ...(t.manual ? { meta: `정해 둔 규칙: ${sendWhenLabel('manual')}` } : {}),
           action: { type: 'approve_transfer', ref: t.id, for: t.from },
         });
         due++;

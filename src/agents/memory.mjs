@@ -1,9 +1,20 @@
-// 비서들이 공유한 기억(#5의 agents 문서). 메뉴 배분의 입력이다.
+// 비서들이 방마다 정산에 쓰기로 고른 기억(#5의 agents 문서). 메뉴 배분과 중재의 입력이다.
 import { createHash } from 'node:crypto';
+
+// 이 방 정산에 쓰기로 고른 기억(memoryShared). 기본은 어느 방에도 쓰지 않고, 주인이 방마다 고른 것만 쓴다.
+// 모델에게 가는 기억은 모두 여기를 거친다. 정산에 쓰는 것과 방 사람에게 보이는 것은 다르다: 배분 이유에는 기억 내용을 싣지 않는다(allocate.mjs의 publicReason)
+export function sharedMemory(agent, roomId) {
+  const chosen = new Set(agent?.memoryShared?.[roomId] ?? []);
+  return (agent?.memory ?? []).filter((m) => chosen.has(m));
+}
+
+// 방 멤버의 비서 문서 { uid: AgentSettings | null }. 방 응답처럼 기억과 설정 여부를 함께 볼 때 한 번만 읽는다
+export const agentsOf = async (store, room) => Object.fromEntries(await Promise.all(room.members.map(async (m) => [m.uid, await store.get('agents', m.uid)])));
+export const memoryOf = (room, agents) => Object.fromEntries(room.members.map((m) => [m.uid, sharedMemory(agents[m.uid], room.id)]));
 
 // 방 멤버별 기억 { uid: string[] }
 export async function roomMemory(store, room) {
-  return Object.fromEntries(await Promise.all(room.members.map(async (m) => [m.uid, (await store.get('agents', m.uid))?.memory ?? []])));
+  return memoryOf(room, await agentsOf(store, room));
 }
 
 // 배분에 쓴 기억의 지문. 지출에 남겨 두고, 같으면 다시 나눠도 같은 답이라 다시 나누지 않는다.

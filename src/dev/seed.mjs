@@ -9,6 +9,7 @@ const SEND_WHEN = { 바로: 'now', '25일 월급날': { payday: 25 } };
 const ON_DISPUTE = { '중재 비서에게 맡기기': 'mediator', '나에게 묻기': 'ask', '근거가 있으면 이의 제기': 'evidence' };
 const mapKeys = (obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [uid(k), v]));
 
+// 시연 전에 같은 시나리오로 돌아가도록 네 사람의 비서 문서를 시드 값으로 덮어쓴다(다른 데모 방에도 적용된다. 비서 설정은 사람마다 하나)
 export async function seedDemoRoom(store, { id }) {
   const room = {
     ...structuredClone(DEMO_ROOM),
@@ -36,12 +37,15 @@ export async function seedDemoRoom(store, { id }) {
   // 가상 계좌다. 실제 계좌가 아니다.
   for (const [i, m] of DEMO_ROOM.members.entries()) {
     const r = DEMO_RULES[m.uid];
+    const prev = await store.get('agents', uid(m.uid));
     await store.put('agents', {
       id: uid(m.uid),
       uid: uid(m.uid),
       memory: [...DEMO_MEMORY[m.uid]],
+      memoryShared: { ...(prev?.memoryShared ?? {}), [id]: [...DEMO_MEMORY[m.uid]] }, // 데모 기억은 이 방 정산에 쓰기로 골라 둔다(앞서 만든 데모 방도 그대로)
       rules: { autoAccept: r.autoAccept, sendWhen: SEND_WHEN[r.sendWhen] ?? 'now', onDispute: ON_DISPUTE[r.onDispute] ?? 'ask' },
       payout: { bank: '토스뱅크', accountNo: `10000000000${i + 1}`, holder: m.name },
+      onboardedAt: new Date().toISOString(),
     });
   }
 

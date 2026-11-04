@@ -16,11 +16,12 @@ import { seedDemoRoom } from './dev/seed.mjs';
 import { registerExpenseRoutes } from './expenses/routes.mjs';
 import { pendingActions } from './actions.mjs';
 import { createOrchestrator } from './agents/orchestrator.mjs';
+import { createAgentSettings, registerAgentSettingsRoutes } from './agents/settings.mjs';
 import { registerAgentRoutes } from './agents/routes.mjs';
 import { allocateWithGemini } from './agents/allocate.mjs';
 import { createCache } from './agents/cache.mjs';
 import { createEvidenceProvider, counterFor } from './agents/evidence.mjs';
-import { roomMemory, memoryKey } from './agents/memory.mjs';
+import { agentsOf, memoryOf, memoryKey } from './agents/memory.mjs';
 import { mediateWithGemini } from './agents/mediate.mjs';
 import { verifyQrToken } from './payments/qr.mjs';
 
@@ -159,7 +160,8 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       ['expenses', 'invoices', 'disputes', 'transfers'].map((col) => store.list(col, { roomId: room.id })),
     );
     // 배분이 지금의 비서 기억과 맞는지. 맞으면 다시 나눠도 같은 답이라 화면이 '다시 나누기'를 막는다
-    const memoryNow = memoryKey(await roomMemory(store, room));
+    const agents = await agentsOf(store, room);
+    const memoryNow = memoryKey(memoryOf(room, agents));
     return {
       room,
       me,
@@ -167,6 +169,9 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       invoices,
       disputes: disputes.map((d) => redactDispute(d, me.uid, expenses.find((e) => e.id === d.expenseId)?.payer)),
       transfers: transfers.map((t) => redactTransfer(t, me.uid)),
+      myAgent: await agentSettings.summary(me.uid),
+      // 방 사람에게는 누가 비서 설정을 마쳤는지만 보인다(이름 옆 로봇 표시). 규칙·기억은 본인의 myAgent에만 있다(#5)
+      agentReady: room.members.filter((m) => !m.deleted && agents[m.uid]?.onboardedAt).map((m) => m.uid),
       ledger: ledger(room, expenses, room.policy),
       actions: pendingActions({ room, expenses, invoices, disputes, transfers }).filter((x) => x.for === me.uid),
     };
@@ -181,6 +186,8 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   registerExpenseRoutes(routes, { ...ctx, member });
   const orchestrator = createOrchestrator({ store, gemini, clock, evidenceFor, counterFor: dev ? counterFor : async () => [] });
   registerAgentRoutes(routes, { orchestrator, member, overLimit });
+  const agentSettings = createAgentSettings({ store, clock });
+  registerAgentSettingsRoutes(routes, { settings: agentSettings, authenticate, member });
 
   // 때가 된 송금 알림. 배포에서는 Cloud Scheduler가 x-cron-secret을 붙여 부른다. 비밀값이 설정되지 않았으면 열지 않는다
   routes.post('/api/cron/tick', async ({ req }) => {
@@ -192,13 +199,15 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   // 방·계정 API만 줄에 선다(데모 화면 API는 저장소를 쓰지 않는다). 그중 읽기만 하는 요청은 줄에 서지 않는다.
   // 위치 화면(GET …/location)은 읽다가 끝난 동의를 지우므로 쓰기처럼 줄에 선다
   const WRITE_FREE = /\/receipts\/extract$/; // POST지만 저장하지 않는다(사진 → 초안)
+  // 방 주소지만 사람마다 하나인 비서 문서를 고치고, 계좌는 다른 방의 송금까지 고치므로 모든 방의 줄에 선다(#5)
+  const ACROSS_ROOMS = /^\/api\/rooms\/[^/]+\/(payout|agent\/shared)$/;
   async function withStateLock(req, url, params, invoke) {
     if (!/^\/api\/(rooms|me|dev|cron)(\/|$)/.test(url.pathname)) return invoke();
     if ((req.method === 'GET' && !url.pathname.endsWith('/location')) || WRITE_FREE.test(url.pathname)) return invoke();
     // 본문은 줄에 서기 전에 받는다. 본문을 느리게 보내는 요청이 줄을 붙잡지 못하게(영수증 사진이 실리는 지출 남기기만 큰 한도)
     await readBody(req, { limit: /^\/api\/rooms\/[^/]+\/expenses$/.test(url.pathname) ? MAX_RECEIPT : undefined });
     req.stateLock = true;
-    return url.pathname.startsWith('/api/rooms/') && params.id ? locks.room(params.id, invoke) : locks.global(invoke);
+    return url.pathname.startsWith('/api/rooms/') && params.id && !ACROSS_ROOMS.test(url.pathname) ? locks.room(params.id, invoke) : locks.global(invoke);
   }
 
   const server = http.createServer(async (req, res) => {
@@ -226,6 +235,6 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       return send(res, 500, { error: e.message });
     }
   });
-  server.tick = () => stateOperation(async () => { await locationService.sweep(); return orchestrator.tick(); });
+  server.tick = () => locks.global(async () => { await locationService.sweep(); return orchestrator.tick(); });
   return server;
 }
