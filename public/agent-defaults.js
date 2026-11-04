@@ -13,7 +13,7 @@ export function defaultsHtml(view, ui) {
     ? payoutFieldsHtml(ui.payout)
     : `<div class="list"><div class="row"><span class="grow"><span class="title">${esc(p.bank)} •••• ${esc(p.last4)}</span><span class="meta" style="display:block">${esc(p.holder)}</span></span>
         <button type="button" class="btn sm secondary" data-action="payout-edit">바꾸기</button></div></div>`;
-  return `<section class="hero"><h1>내 비서 기본 설정</h1><p class="sub">모든 방에 이 설정으로 들어가요. 방마다 다르게 하고 싶은 규칙은 그 방의 내 비서에서 ‘이 방에서만’을 골라요.</p></section>
+  return `<section class="block-head" id="agent-defaults"><h2>내 비서 기본 설정</h2><p>모든 방에 이 설정으로 들어가요. 방마다 다르게 하고 싶은 규칙은 그 방의 내 비서에서 ‘이 방에서만’을 골라요.</p></section>
     ${group('받을 계좌', payout, '계좌번호는 나에게 돈을 보낼 사람에게만 보여요. 바꾸면 내가 받을 모든 방의 대기 중 송금에 들어가요.')}
     ${group('자동 수락 한도', limitInputHtml(ui.draft))}
     ${group('보낼 시기', sendHtml(ui.draft))}

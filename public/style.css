@@ -1102,6 +1102,11 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
 .join-error { flex-basis: 100%; margin: 0; font-size: 0.8125rem; color: var(--orange); letter-spacing: 0; }
 .join-error:empty { display: none; }
 
+/* 한 화면 안의 큰 묶음 제목(내 계정의 '내 비서 기본 설정'). 화면 제목(h1)과 묶음 이름표(group-label) 사이의 단계 */
+.block-head { margin: 32px 4px 8px; }
+.block-head h2 { margin: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
+.block-head p { margin: 4px 0 0; font-size: 0.875rem; line-height: 1.5; color: var(--label-2); letter-spacing: 0; }
+
 /* 초대 링크 줄(방): 링크와 만료일, 오른쪽에 복사·공유 원형 아이콘(iOS 공유 링크 줄). 링크는 한 줄로 두고 넘치면 끝을 줄이며,
    누르면 통째로 골라진다. 아이콘의 보이는 원은 34px, 누르는 자리는 44px. 누르는 순간 줄어들고, 복사하면 초록 체크로 바뀐다 */
 .invite-url { width: 100%; font: inherit; font-size: 0.9375rem; color: var(--label); background: none; border: 0; padding: 0; text-overflow: ellipsis; cursor: text; }
