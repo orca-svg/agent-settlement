@@ -21,8 +21,8 @@ test('방 만들기: 로그인하면 프로필 이름·색으로 들어가고, �
   assert.ok(html.includes('&lt;재윤&gt;') && !html.includes('<재윤>'), '프로필 이름을 이스케이프해 보여 준다');
   assert.ok(html.includes('#34c759'), '프로필 색');
   assert.ok(!html.includes('account.html#profile'), '프로필로 가는 버튼은 없다(가면 적던 내용을 잃는다)');
-  assert.match(html, /type="date"[^>]*data-cf="start"/, '기간은 달력에서 고른다');
-  assert.match(html, /type="date"[^>]*data-cf="end"/);
+  assert.match(html, /data-action="range-toggle"/, '기간은 한 줄을 눌러 펼친 달력에서 고른다');
+  assert.ok(!html.includes('type="date"'), '브라우저 기본 날짜 칸(연도. 월. 일.)은 쓰지 않는다');
   assert.match(html, /원화/, '지금은 원화 지출만 남길 수 있다고 알린다');
   assert.ok(!html.includes('data-action="seed"'), '배포에는 개발용 데모 방이 없다');
 });

@@ -393,7 +393,7 @@ a.row:active { background: var(--fill); }
 .swatch .check { position: absolute; width: 16px; height: 16px; opacity: 0; pointer-events: none; transition: opacity 150ms ease; }
 .swatch input:checked + .check { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .swatch input, .swatch .check, .avatar.xl { transition: none; } }
-.row + .row::before {
+.row + .row::before, .range-panel + .row::before {
   content: "";
   position: absolute;
   top: 0;
@@ -1046,6 +1046,51 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
 /* 내 방 목록 맨 위 '새 방 만들기': 방 행과 같은 높이로 두고, 강조색은 더하기 원 하나에만 쓴다 */
 .new-room .title { color: var(--tint); }
 .new-room-icon { flex: none; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--tint-soft); color: var(--tint); font-size: 1.125rem; font-weight: 600; line-height: 1; }
+
+/* 기간 고르기: '기간' 한 줄을 누르면 그 아래로 빠른 선택과 한 달 달력이 펼쳐진다(iOS 캘린더의 시작·종료 줄처럼 목록 안에서).
+   시작·끝은 강조색 원, 그 사이는 옅은 띠. 고르기 전의 값('날짜 고르기')만 강조색으로 눌러도 되는 줄임을 알린다 */
+.range-toggle .range-value { color: var(--label-2); }
+.range-toggle .range-value.empty { color: var(--tint); }
+.range-toggle .chev { transition: transform 200ms ease; }
+.range-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.range-panel { position: relative; display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 16px; padding: 4px 16px 8px; }
+.range-panel::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 0.5px; background: var(--sep); }
+.range-panel.entering { animation: range-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1); transform-origin: top; }
+@keyframes range-in { from { opacity: 0; transform: translateY(-8px); } }
+.range-presets { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-top: 52px; }
+.range-presets .pick { min-height: 32px; }
+.range-head { display: flex; align-items: center; justify-content: space-between; }
+.range-head h3 { margin: 0; font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+.range-nav { appearance: none; border: 0; background: none; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: var(--tint); cursor: pointer; transition: background-color 120ms ease; }
+.range-nav:hover { background: var(--fill); }
+.range-nav .chev { color: inherit; }
+.range-nav .chev.flip { transform: scaleX(-1); }
+.range-week, .range-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.range-week span { padding: 4px 0; text-align: center; font-size: 0.75rem; color: var(--label-2); letter-spacing: 0; }
+.range-days .day { appearance: none; border: 0; background: none; padding: 0; font: inherit; color: var(--label); position: relative; height: 44px; display: grid; place-items: center; cursor: pointer; font-variant-numeric: tabular-nums; }
+.range-days .day span { position: relative; z-index: 1; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; transition: background-color 120ms ease; }
+.range-days .day:hover span { background: var(--fill); }
+.range-days .day:active span { transform: scale(0.94); }
+.range-days .day.is-today span { color: var(--tint); font-weight: 600; }
+.range-days .day.in-range::before { content: ""; position: absolute; top: 4px; bottom: 4px; left: 0; right: 0; background: var(--tint-soft); }
+.range-days .day.is-start::before { left: 50%; }
+.range-days .day.is-end::before { right: 50%; }
+.range-days > .in-range:nth-child(7n + 1):not(.is-start)::before { left: 4px; border-radius: 18px 0 0 18px; }
+.range-days > .in-range:nth-child(7n):not(.is-end)::before { right: 4px; border-radius: 0 18px 18px 0; }
+.range-days > .is-start:nth-child(7n)::before, .range-days > .is-end:nth-child(7n + 1)::before { display: none; } /* 주 끝에서 시작·주 처음에서 끝나면 띠가 삐져나오지 않게 */
+.range-days .day:is(.is-start, .is-end) span { background: var(--tint); color: #fff; font-weight: 600; }
+.range-foot { display: flex; align-items: center; gap: 16px; min-height: 44px; margin-top: 4px; }
+.range-hint { flex: 1; font-size: 0.8125rem; color: var(--label-2); letter-spacing: 0; }
+.range-foot .done { font-weight: 600; }
+@media (max-width: 560px) {
+  .range-panel { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .range-presets { flex-direction: row; flex-wrap: wrap; padding-top: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .range-panel.entering { animation: none; }
+  .range-toggle .chev, .range-days .day span { transition: none; }
+  .range-days .day:active span { transform: none; }
+}
 
 /* 상단바 왼쪽: 어느 화면에서든 같은 자리에 '내 방'으로 돌아가는 길(방 만들기·초대·방 화면) */
 .nav-lead { display: flex; align-items: center; gap: 10px; min-width: 0; }

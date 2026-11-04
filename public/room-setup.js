@@ -2,6 +2,7 @@
 import { esc, chip, avatarHtml, GOOGLE_G } from './ui.js';
 import { POLICIES } from './data.js';
 import { initial } from './profile-form.js';
+import { rangePickerHtml, todayIso } from './date-range.js';
 
 export const policyOf = (id) => POLICIES.find((p) => p.id === id) ?? POLICIES[0];
 export const notAgreed = (room) => room.members.filter((m) => !m.deleted && !(room.policyAgreedBy ?? []).includes(m.uid));
@@ -25,17 +26,7 @@ function meRow(profile, dev) {
       <span class="meta" style="display:block">방 사람들에게 이 이름과 색으로 보여요. 프로필을 바꾸면 모든 방에서 함께 바뀌어요</span></span></div>`;
 }
 
-// 달력에서 고른 기간을 짧은 글자로: 같은 달이면 '11월 7일 – 9일', 해가 다르면 연도까지
-export function datesLabel(start, end) {
-  if (!start) return '';
-  const part = (iso) => { const [y, m, d] = iso.split('-').map(Number); return { y, m, d }; };
-  const a = part(start);
-  const day = (x, withYear) => `${withYear ? `${x.y}년 ` : ''}${x.m}월 ${x.d}일`;
-  if (!end || end === start) return day(a, false);
-  const b = part(end);
-  if (a.y !== b.y) return `${day(a, true)} – ${day(b, true)}`;
-  return a.m === b.m ? `${day(a, false)} – ${b.d}일` : `${day(a, false)} – ${day(b, false)}`;
-}
+export { datesLabel } from './date-range.js';
 
 // 로그인 전: 이 자리에서 Google로 로그인한다. 계정 화면으로 갔다 오지 않아 초대 링크를 잃지 않는다
 function signInHtml(why) {
@@ -44,7 +35,7 @@ function signInHtml(why) {
 }
 
 // 방이 없을 때: 방 만들기 폼. 로그인 전이면 로그인부터, 개발용 서버면 데모 방 버튼도 둔다
-export function createRoomHtml(d, { busy = false, error = '', seedFailed = false, dev = false, profile = null } = {}) {
+export function createRoomHtml(d, { busy = false, error = '', seedFailed = false, dev = false, profile = null, picker = {}, today = todayIso() } = {}) {
   const head = `<section class="hero"><h1>새 정산 방</h1>
     <p class="sub">여행·회식 같은 모임을 만들고 초대 링크로 친구를 불러요. 돈을 쓰기 전에 환율을 어떻게 셀지 함께 정해 둬요.</p></section>`;
   const seed = dev ? `<section class="next"><p class="eyebrow">개발용</p><h2>데모 방 만들기</h2>
@@ -54,8 +45,7 @@ export function createRoomHtml(d, { busy = false, error = '', seedFailed = false
   return `${head}
     <section class="group"><div class="list">
       <label class="row field"><span class="grow">방 이름</span><input data-cf="name" value="${esc(d.name)}" placeholder="오사카 2박 3일" maxlength="40"></label>
-      <label class="row field"><span class="grow">시작</span><input type="date" data-cf="start" value="${esc(d.start ?? '')}" aria-label="시작하는 날"></label>
-      <label class="row field"><span class="grow">끝</span><input type="date" data-cf="end" value="${esc(d.end ?? '')}" ${d.start ? `min="${esc(d.start)}"` : ''} aria-label="끝나는 날(하루면 비워 두세요)"></label>
+      ${rangePickerHtml(d, { ...picker, today })}
       ${meRow(profile, dev)}
     </div></section>
     <section class="group"><h2 class="group-label"><span>환율 정책</span><span>외화로 쓴 돈을 원화로 바꾸는 방법</span></h2>

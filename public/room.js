@@ -12,12 +12,13 @@ import { createAgentPanel, personChipHtml } from './agent-panel.js';
 import { notifies } from './agent-rules.js';
 import { readVisits, departure, timelineSummary, expenseWindow, kstTime, keepForSettlement } from './timeline.js';
 import { createRoomHtml, joinHtml, setupHtml, notAgreed, inviteUrl, datesLabel } from './room-setup.js';
+import { pickDay, presetRange, nextFocus, shiftMonth, todayIso } from './date-range.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
 const inviteToken = roomId ? null : new URLSearchParams(location.search).get('invite');
 // #4 방 만들기·참가하기·정책 동의·초대 링크 화면 상태. 방에 보일 이름·색은 입력받지 않고 내 프로필(profile)을 쓴다
-const setup = { create: { name: '', start: '', end: '', policy: 'actual' }, join: {}, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, copied: false, busy: false, error: '' };
+const setup = { create: { name: '', start: '', end: '', policy: 'actual' }, picker: { open: false, month: '', focus: '', entering: false }, join: {}, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, copied: false, busy: false, error: '' };
 // 로그인이 없는 개발용 서버에서만: 처음 방을 만들거나 참가할 때 이 브라우저용 uid를 하나 만든다. 배포에서는 Google 로그인 신원을 쓴다
 const ensureUid = () => currentUid() || (authOptions().dev ? (setCurrentUid(`u-${crypto.randomUUID().slice(0, 8)}`), currentUid()) : null);
 const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null, disputeDone: null, rejectDraft: null, sendBlocked: false, announceBlocked: false, focusLine: null };
@@ -398,9 +399,51 @@ function closePhoto() {
 const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit) || 0), 0);
 
 // #4 방 만들기·참가하기·정책·초대. 복사·공유는 클릭 처리기 안에서 바로 불러야 브라우저가 허락한다
-const SETUP_ACTIONS = new Set(['cf-policy', 'sign-in', 'create-room', 'join-room', 'agree-policy', 'edit-policy', 'set-policy', 'make-invite', 'copy-invite', 'share-invite']);
+const SETUP_ACTIONS = new Set(['range-toggle', 'range-day', 'range-month', 'range-preset', 'range-clear', 'cf-policy','sign-in', 'create-room', 'join-room', 'agree-policy', 'edit-policy', 'set-policy', 'make-invite', 'copy-invite', 'share-invite']);
+// 기간 고르기(방 만들기 폼). 화면을 통째로 다시 그리므로, 방금 누른 자리로 초점을 돌려놓아 키보드로 이어 고를 수 있게 한다
+function rangeAct(name, d) {
+  const p = setup.picker;
+  const c = setup.create;
+  const today = todayIso();
+  let back = '[data-action="range-toggle"]';
+  if (name === 'range-toggle') {
+    p.open = !p.open;
+    p.entering = p.open; // 펼칠 때만 한 번 나타나는 움직임(날짜를 누를 때마다 다시 움직이지 않게)
+    if (p.open) Object.assign(p, { month: (c.start || today).slice(0, 7), focus: c.start || today });
+  }
+  if (name === 'range-month') {
+    p.month = shiftMonth(p.month, Number(d.step));
+    back = `[data-action="range-month"][data-step="${d.step}"]`;
+  }
+  if (name === 'range-day') {
+    Object.assign(c, pickDay(c, d.date));
+    p.focus = d.date;
+    back = `[data-date="${d.date}"]`;
+  }
+  if (name === 'range-preset') {
+    Object.assign(c, presetRange(d.id, c, today));
+    Object.assign(p, { month: c.start.slice(0, 7), focus: c.end });
+    back = `[data-action="range-preset"][data-id="${d.id}"]`;
+  }
+  if (name === 'range-clear') Object.assign(c, { start: '', end: '' });
+  render();
+  p.entering = false;
+  document.querySelector(back)?.focus({ preventScroll: true });
+}
+// 달력 안의 방향키: 초점만 옮기고(달이 바뀌면 그 달을 보여 준다) 고르기는 Enter·Space(버튼 누르기)로 한다
+function rangeKeys(e) {
+  const next = e.target.dataset?.date && nextFocus(e.target.dataset.date, e.key);
+  if (!next) return false;
+  e.preventDefault();
+  Object.assign(setup.picker, { focus: next, month: next.slice(0, 7) });
+  render();
+  document.querySelector(`[data-date="${next}"]`)?.focus();
+  return true;
+}
+
 async function setupAct(name, d) {
   const base = `/api/rooms/${encodeURIComponent(roomId)}`;
+  if (name.startsWith('range-')) return rangeAct(name, d);
   if (name === 'cf-policy') {
     setup.create.policy = d.id;
     return render();
@@ -593,7 +636,7 @@ async function act(name, d) {
 
 // ---------------------------------------------------------------- 화면
 function noRoom() {
-  return createRoomHtml(setup.create, { busy: setup.busy, error: setup.error, seedFailed: state.error?.status === 'seed', dev: authOptions().dev, profile: setup.profile });
+  return createRoomHtml(setup.create, { busy: setup.busy, error: setup.error, seedFailed: state.error?.status === 'seed', dev: authOptions().dev, profile: setup.profile, picker: setup.picker, today: todayIso() });
 }
 
 const isDemoRoom = () => String(roomId).startsWith('demo-');
@@ -1505,10 +1548,12 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   agentPanel.onKeydown(e);
+  if (rangeKeys(e)) return;
   if (e.key === 'Escape') {
     if (meMenu.isOpen) meMenu.close();
     else if (logPop.isOpen) logPop.close();
     else if (!$('#photo-modal').hidden) closePhoto();
+    else if (setup.picker.open && !roomId) rangeAct('range-toggle', {});
     else sheet.close();
   }
   else if (e.key === 'Enter' && e.target.dataset?.rd !== undefined && !e.isComposing) act('reject', { id: state.ref }); // 한글 조합 중의 Enter는 글자를 확정하는 키라 제외
@@ -1516,12 +1561,7 @@ document.addEventListener('keydown', (e) => {
 });
 // 입력칸은 다시 그리지 않고 값만 기억한다(타이핑 중 초점을 잃지 않게)
 document.addEventListener('input', (e) => {
-  if (e.target.dataset?.cf) {
-    setup.create[e.target.dataset.cf] = e.target.value;
-    // 끝나는 날은 시작하는 날보다 앞을 고를 수 없게(달력의 min). 다시 그리지 않아 초점을 지킨다
-    const end = document.querySelector('[data-cf="end"]');
-    if (e.target.dataset.cf === 'start' && end) end.min = e.target.value;
-  }
+  if (e.target.dataset?.cf) setup.create[e.target.dataset.cf] = e.target.value;
   if (e.target.dataset?.dd && state.disputeDraft) {
     state.disputeDraft[e.target.dataset.dd] = e.target.value;
     const send = $('#dispute-send');
