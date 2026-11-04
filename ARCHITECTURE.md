@@ -170,7 +170,7 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | POST | `/api/rooms/:id/disputes/:did/agree` | 중재안에 동의. 양쪽이 동의하면 지출을 다시 나누고 version을 올려 청구서를 다시 보내요 |
 | POST | `/api/rooms/:id/disputes/:did/reject` | 중재안 거부 `{ reason? }`(한 줄, 100자까지). 이의가 끝나고(이의를 낸 사람이 거부하면 `withdrawn`, 지출을 낸 사람이 거부하면 `dismissed`) 지출은 지금 배분 그대로 둔 채 정산이 이어져요. 당사자만(아니면 403), 중재안이 있을 때만(아니면 409). 같은 사람이 다시 보내면 처음 결과를 돌려줘요 |
 | POST | `/api/rooms/:id/payout` | 받을 계좌 `{ bank, accountNo, holder }`. 내가 받을 모든 방의 대기 중 송금에 토스 링크를 채워요. 여러 방을 고치므로 모든 방의 줄에 서요(`src/state-locks.mjs`) |
-| GET | `/api/me/agent` | 내 비서 설정 전체. 계좌번호는 끝 4자리(`payout.last4`)만 내려가요. 방 응답의 `myAgent`는 계좌 유무만 있는 요약이에요 |
+| GET | `/api/me/agent` | 내 비서 설정 전체. 계좌번호는 끝 4자리(`payout.last4`)만 내려가요. 방 응답의 `myAgent`는 계좌 유무만 있는 요약이에요. 방 응답의 `agentReady`는 비서 설정을 마친 멤버 uid 목록이고, 화면은 이름 옆 로봇 표시로만 보여 줘요(규칙·기억은 담지 않아요) |
 | POST | `/api/me/agent/rules` | 규칙 일부 `{ autoAccept?, sendWhen?, onDispute?, notify? }`. 바뀐 칸만 `ruleHistory`에 남아요. 다음 청구서부터 적용되고, 이미 만들어진 청구서·송금은 그대로예요 |
 | POST | `/api/me/agent/onboarding` | 처음 설정 마치기 `{ rules? }` |
 | POST | `/api/me/agent/memory` · `memory/edit` · `memory/delete` | 기억 더하기 `{ text }`, 고치기 `{ from, to }`, 지우기 `{ text }`. 한도를 넘으면 409 |
