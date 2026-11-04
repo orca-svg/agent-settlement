@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRoomHtml, joinHtml, setupHtml, datesLabel, inviteSheetHtml, inviteButtonHtml, leaveSheetHtml } from '../public/room-setup.js';
-import { roomTabs } from '../public/room-list.js';
+import { roomTabs, roomRowsHtml } from '../public/room-list.js';
+import { toastMs } from '../public/toast.js';
 import { nextAfterLogin } from '../public/ui.js';
 
 const profile = { name: '<재윤>', color: '#34c759' };
@@ -202,4 +203,24 @@ test('내 방 목록: 끝난 방이 있을 때만 진행 중 | 끝남 탭으로 
   assert.equal(roomTabs(live, 'done').tab, 'live', '끝난 방이 없어지면 진행 중으로 돌아온다');
   assert.match(roomTabs([{ id: 'c', status: 'done' }]).empty.meta, /‘끝남’에서 볼 수 있어요/);
   assert.equal(roomTabs([]).empty.title, '아직 참여한 방이 없어요');
+});
+
+test('내 방 목록: 평소 줄은 방으로 가는 링크, 편집 중에는 들어가지 않고 줄마다 나가기', () => {
+  const rooms = [{ id: 'r-1', name: '도쿄 <5일>', dates: '8/1–8/5' }, { id: 'r-2', name: '회식' }];
+  const plain = roomRowsHtml(rooms);
+  assert.match(plain, /<a href="room\.html\?room=r-1">/);
+  assert.match(plain, /도쿄 &lt;5일&gt;/, '방 이름은 이스케이프한다');
+  assert.doesNotMatch(plain, /data-leave/);
+
+  const editing = roomRowsHtml(rooms, { editing: true });
+  assert.doesNotMatch(editing, /<a /, '편집 중에는 줄을 눌러도 방에 들어가지 않는다');
+  assert.equal(editing.match(/data-leave="/g).length, 2);
+  assert.match(editing, /id="room-name-0">도쿄 &lt;5일&gt;<\/span>[^]*data-leave="r-1" aria-describedby="room-name-0">나가기/, '나가기는 어느 방인지 이름으로 읽힌다');
+});
+
+test('위쪽 알림은 글이 길수록 오래 두되 2.5~8초 사이', () => {
+  assert.equal(toastMs(''), 2500);
+  const why = '정산이 끝나지 않아 나갈 수 없어요. 남은 일: 재윤에게 보낼 ₩20,387';
+  assert.equal(toastMs(why), 2500 + [...why].length * 60);
+  assert.equal(toastMs('가'.repeat(500)), 8000);
 });
