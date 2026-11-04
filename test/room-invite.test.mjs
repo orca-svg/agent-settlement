@@ -88,6 +88,29 @@ test('두 번 참가해도 멤버는 한 번만 들어간다', async () => {
   assert.equal((await get(`/api/invites/${token}`, 'cs')).json.alreadyMember, true);
 });
 
+test('여럿이 같은 링크로 동시에 참가해도 아무도 빠지지 않는다(참가도 방 상태 줄에 선다)', async () => {
+  // Firestore처럼 읽기에 왕복 시간이 있는 저장소. 줄에 서지 않으면 서로의 '읽고-고쳐-쓰기'가 겹쳐 멤버가 빠진다
+  class SlowStore extends MemoryStore {
+    async get(col, id) { await new Promise((r) => setTimeout(r, 5)); return super.get(col, id); }
+  }
+  const slow = new SlowStore();
+  const app = createApp({ store: slow, gemini: null, clock: () => now, env: { DEV_SEED: '1' } });
+  await new Promise((r) => app.listen(0, r));
+  const at = `http://localhost:${app.address().port}`;
+  const send = (path, uid, body) => fetch(at + path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-demo-user': uid }, body: JSON.stringify(body) }).then((r) => r.json());
+  try {
+    const friends = ['yh', 'ms', 'jh', 'sb', 'dk'];
+    for (const uid of ['me', ...friends]) await send('/api/me', uid, { name: uid, color: '#3478f6' });
+    const { room } = await send('/api/rooms', 'me', { name: '오사카' });
+    const { token } = await send(`/api/rooms/${room.id}/invite`, 'me', {});
+    await Promise.all(friends.map((uid) => send(`/api/invites/${token}/join`, uid, { agree: true })));
+    const members = (await slow.get('rooms', room.id)).members.map((m) => m.uid);
+    assert.deepEqual(members.sort(), ['me', ...friends].sort());
+  } finally {
+    app.close();
+  }
+});
+
 test('잘못된 토큰·만료된 토큰·다시 만들기 전의 토큰은 404', async () => {
   const { roomId, token } = await roomWithInvite();
   assert.equal((await get('/api/invites/nope')).status, 404);

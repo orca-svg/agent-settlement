@@ -2,7 +2,6 @@
 // '정산 시작'(청구서 보내기)은 전원이 정책에 동의해야 열린다. 그 잠금은 src/agents/routes.mjs가 policy.mjs로 건다.
 import { randomUUID, randomBytes } from 'node:crypto';
 import { readJson, send, HttpError } from '../http.mjs';
-import { identify } from '../identity.mjs';
 import { profileOf } from '../accounts.mjs';
 import { POLICIES } from '../../public/data.js';
 import { subj } from '../../public/ui.js';
@@ -91,7 +90,7 @@ export function registerRoomRoutes(routes, { store, clock, member, authenticate 
   routes.get('/api/invites/:token', async ({ req, params }) => {
     const found = await findInvite(store, params.token, clock());
     if (!found) throw new HttpError(404, '만료되었거나 잘못된 초대 링크예요');
-    const who = await identify(req, store);
+    const who = await authenticate(req).catch(() => null); // 링크만 보고 들어온 사람은 아직 로그인 전일 수 있다
     const alreadyMember = !!who && found.room.members.some((m) => m.uid === who.uid && !m.deleted);
     return { room: preview(found.room), expiresAt: found.inv.expiresAt, alreadyMember, settling: isSettling(found.room) };
   });

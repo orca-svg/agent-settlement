@@ -204,7 +204,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   // 방 주소지만 사람마다 하나인 비서 문서를 고치고, 계좌는 다른 방의 송금까지 고치므로 모든 방의 줄에 선다(#5)
   const ACROSS_ROOMS = /^\/api\/rooms\/[^/]+\/(payout|agent\/shared|agent\/rule)$/;
   async function withStateLock(req, url, params, invoke) {
-    if (!/^\/api\/(rooms|me|dev|cron)(\/|$)/.test(url.pathname)) return invoke();
+    if (!/^\/api\/(rooms|me|dev|cron|invites)(\/|$)/.test(url.pathname)) return invoke(); // 참가하기(/api/invites/:token/join)도 방 멤버를 고친다(#4)
     if ((req.method === 'GET' && !url.pathname.endsWith('/location')) || WRITE_FREE.test(url.pathname)) return invoke();
     // 본문은 줄에 서기 전에 받는다. 본문을 느리게 보내는 요청이 줄을 붙잡지 못하게(영수증 사진이 실리는 지출 남기기만 큰 한도)
     await readBody(req, { limit: /^\/api\/rooms\/[^/]+\/expenses$/.test(url.pathname) ? MAX_RECEIPT : undefined });
