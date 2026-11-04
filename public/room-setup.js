@@ -1,5 +1,5 @@
 // 방 만들기·참가하기·환율 정책 동의·초대 링크 화면(#4). HTML만 만들고, 상태와 서버 호출은 room.js가 한다.
-import { esc, chip, avatarHtml, GOOGLE_G } from './ui.js';
+import { esc, chip, avatarHtml, GOOGLE_G, ICON_LINK, ICON_COPY, ICON_SHARE, ICON_DONE } from './ui.js';
 import { POLICIES } from './data.js';
 import { initial } from './profile-form.js';
 import { rangePickerHtml, todayIso } from './date-range.js';
@@ -83,7 +83,10 @@ export function joinHtml(inv, d, { busy = false, error = '', profile = null, dev
 
 // 방 화면: 환율 정책과 초대 링크. 방을 만들 때 이미 정한 정책이라, 모두 동의했으면 한 줄과 '바꾸기'만 둔다.
 // 아직 동의하지 않은 사람이 있을 때만 누가 남았는지 펼친다. 안내는 경고가 아니므로 주황 상자 대신 보통 글로 쓴다
-export function setupHtml({ room, me, avatar, invite, policyEdit, copied, error, canShare }) {
+// 링크 줄 오른쪽의 원형 아이콘 버튼. 보이는 원은 작게, 누르는 자리는 44px(애플 최소 크기)로 둔다
+const iconBtn = (action, label, svg, done = false) => `<button type="button" class="icon-btn${done ? ' done' : ''}" data-action="${action}" aria-label="${label}" title="${label}"><span>${svg}</span></button>`;
+
+export function setupHtml({ room, me, avatar, invite, policyEdit, copied, error, copyError, canShare }) {
   const settling = room.status === 'settling';
   const p = policyOf(room.policy);
   const waiting = notAgreed(room);
@@ -99,12 +102,16 @@ export function setupHtml({ room, me, avatar, invite, policyEdit, copied, error,
     ${errorHtml(error)}</section>`;
   if (settling) return policy;
   const link = invite ? inviteUrl(invite.token) : '';
+  // 링크 한 줄에 링크와 만료일, 그 오른쪽에 복사·공유 아이콘(iOS 공유 링크 줄). 복사하면 그 버튼이 잠깐 체크로 바뀐다.
+  // 새 링크 만들기는 이전 링크를 무효로 하는 보조 동작이라 아래 안내 옆의 글자 버튼으로 둔다
   const inviteBox = invite
-    ? `<div class="list"><label class="row field"><span class="grow">초대 링크</span><input readonly value="${esc(link)}" aria-label="초대 링크" data-select-all></label></div>
-      <p class="group-note">${esc(until(invite.expiresAt))}까지 쓸 수 있어요. 새 링크를 만들면 이 링크는 더 이상 열리지 않아요.</p>
-      <div class="actions"><button class="btn" data-action="copy-invite">${copied ? '복사했어요' : '링크 복사'}</button>
-        ${canShare ? '<button class="btn secondary" data-action="share-invite">공유하기</button>' : ''}
-        <button class="btn plain sm" data-action="make-invite">새 링크 만들기</button></div>`
+    ? `<div class="list"><div class="row invite-row"><span class="new-room-icon" aria-hidden="true">${ICON_LINK}</span>
+        <span class="grow"><input class="invite-url" readonly value="${esc(link)}" aria-label="초대 링크" data-select-all>
+          <span class="meta" style="display:block">${esc(until(invite.expiresAt))}까지 열 수 있어요</span></span>
+        ${copied ? iconBtn('copy-invite', '복사했어요', ICON_DONE, true) : iconBtn('copy-invite', '링크 복사', ICON_COPY)}
+        ${canShare ? iconBtn('share-invite', '공유하기', ICON_SHARE) : ''}</div></div>
+      ${errorHtml(copyError)}<span class="sr-only" role="status">${copied ? '링크를 복사했어요' : ''}</span>
+      <p class="group-note">새 링크를 만들면 이 링크는 더 이상 열리지 않아요. <button type="button" class="text-btn" data-action="make-invite">새 링크 만들기</button></p>`
     : `<p class="group-note">링크를 받은 친구가 방 이름과 환율 정책을 보고 직접 참가해요.</p>
       <div class="actions"><button class="btn secondary" data-action="make-invite">초대 링크 만들기</button></div>`;
   return `${policy}<section class="group"><h2 class="group-label"><span>친구 초대</span><span>${room.members.length}명</span></h2>${inviteBox}</section>`;

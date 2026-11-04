@@ -455,7 +455,7 @@ async function setupAct(name, d) {
   if (name === 'copy-invite') {
     const done = (ok) => {
       setup.copied = ok;
-      setup.error = ok ? '' : '복사하지 못했어요. 링크를 길게 눌러 복사해 주세요.';
+      setup.copyError = ok ? '' : '복사하지 못했어요. 링크를 눌러 통째로 고른 뒤 복사해 주세요.'; // 누른 링크 줄 바로 아래에 알린다
       render();
       if (ok) setTimeout(() => { setup.copied = false; render(); }, 1500);
     };
@@ -1514,7 +1514,7 @@ function render() {
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
   meMenu.update();
-  const roomSetup = setupHtml({ room: state.data.room, me: state.data.me, avatar, invite: setup.invite, policyEdit: setup.policyEdit, copied: setup.copied, error: setup.error, canShare: !!navigator.share });
+  const roomSetup = setupHtml({ room: state.data.room, me: state.data.me, avatar, invite: setup.invite, policyEdit: setup.policyEdit, copied: setup.copied, error: setup.error, copyError: setup.copyError, canShare: !!navigator.share });
   main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), nextCard(), roomSetup, disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
   mountSegs(main);
   // 이의·청구서 시트는 글을 쓰는 중이면 다시 그리지 않는다(타이핑 중 초점을 잃지 않게)

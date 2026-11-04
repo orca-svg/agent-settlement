@@ -72,6 +72,23 @@ test('방 화면: 모두 동의한 정책은 한 줄과 바꾸기만, 안내는 
   assert.ok(!waiting.includes('preview-note'));
 });
 
+test('초대 링크: 링크 줄 안 오른쪽에 복사·공유 아이콘 버튼을 두고, 새 링크 만들기는 아래 글자 버튼으로 낮춘다', () => {
+  globalThis.location ??= { origin: 'http://localhost:4562', pathname: '/room.html' };
+  const me = { uid: 'me', name: '재윤' };
+  const room = { members: [me], policy: 'actual', policyAgreedBy: ['me'], status: 'ready' };
+  const invite = { token: 'AbCdEfGhIjKlMnOpQrStUv_-', expiresAt: '2026-11-11T03:00:00Z' };
+  const html = setupHtml({ room, me, avatar: () => '', invite, canShare: true });
+  assert.match(html, /<button[^>]*class="icon-btn"[^>]*data-action="copy-invite"[^>]*aria-label="링크 복사"/);
+  assert.match(html, /<button[^>]*class="icon-btn"[^>]*data-action="share-invite"[^>]*aria-label="공유하기"/);
+  assert.ok(!html.includes('>링크 복사<') && !html.includes('>공유하기<'), '글자 버튼은 없다');
+  assert.match(html, /<input[^>]*readonly[^>]*data-select-all/, '링크는 눌러서 통째로 고를 수 있다');
+  assert.match(html, /11월 11일까지 열 수 있어요/);
+  assert.match(html, /class="text-btn"[^>]*data-action="make-invite"[^>]*>새 링크 만들기/);
+  const copied = setupHtml({ room, me, avatar: () => '', invite, copied: true, canShare: false });
+  assert.match(copied, /class="icon-btn done"[^>]*data-action="copy-invite"[^>]*aria-label="복사했어요"/, '복사하면 그 버튼이 체크로 바뀌고 읽어 주기도 바뀐다');
+  assert.ok(!copied.includes('share-invite'), '공유를 못 하는 브라우저에는 공유 버튼이 없다');
+});
+
 test('로그인 뒤 돌아갈 곳은 이 서비스의 방·초대 주소만 받는다', () => {
   assert.equal(nextAfterLogin('?next=room.html%3Froom%3Dr-1a2b3c4d'), 'room.html?room=r-1a2b3c4d');
   assert.equal(nextAfterLogin('?next=room.html%3Finvite%3DAbCdEfGhIjKlMnOpQrStUv_-'), 'room.html?invite=AbCdEfGhIjKlMnOpQrStUv_-');

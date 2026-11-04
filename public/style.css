@@ -1102,6 +1102,26 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
 .join-error { flex-basis: 100%; margin: 0; font-size: 0.8125rem; color: var(--orange); letter-spacing: 0; }
 .join-error:empty { display: none; }
 
+/* 초대 링크 줄(방): 링크와 만료일, 오른쪽에 복사·공유 원형 아이콘(iOS 공유 링크 줄). 링크는 한 줄로 두고 넘치면 끝을 줄이며,
+   누르면 통째로 골라진다. 아이콘의 보이는 원은 34px, 누르는 자리는 44px. 누르는 순간 줄어들고, 복사하면 초록 체크로 바뀐다 */
+.invite-url { width: 100%; font: inherit; font-size: 0.9375rem; color: var(--label); background: none; border: 0; padding: 0; text-overflow: ellipsis; cursor: text; }
+.invite-url:focus { outline: none; }
+.icon-btn { appearance: none; border: 0; background: none; padding: 0; width: 44px; height: 44px; flex: none; display: grid; place-items: center; color: var(--tint); cursor: pointer; }
+.icon-btn + .icon-btn { margin-left: -8px; }
+.icon-btn span { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--tint-soft); transition: transform 100ms ease-out, background-color 150ms ease, color 150ms ease; }
+.icon-btn:hover span { background: color-mix(in srgb, var(--tint) 24%, transparent); }
+.icon-btn:active span { transform: scale(0.9); }
+.icon-btn.done { color: var(--green); }
+.icon-btn.done span { background: var(--green-soft); }
+.icon-btn:focus-visible { outline: none; }
+.icon-btn:focus-visible span { outline: 3px solid color-mix(in srgb, var(--tint) 60%, transparent); outline-offset: 2px; }
+.group-note .text-btn { font-size: inherit; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn span { transition: none; }
+  .icon-btn:active span { transform: none; }
+}
+
 /* 상단바 왼쪽: 어느 화면에서든 같은 자리에 '내 방'으로 돌아가는 길(방 만들기·초대·방 화면) */
 .nav-lead { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .nav-back { font-size: 1rem; margin-left: -4px; flex: none; }
