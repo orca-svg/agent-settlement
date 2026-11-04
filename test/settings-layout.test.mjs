@@ -34,3 +34,12 @@ test('목차의 id는 account.html 뼈대의 id와 겹치지 않는다', async (
   assert.ok(ids.length > 0);
   for (const id of ids) assert.ok(!SETTINGS_IDS.includes(id), `account.html의 id="${id}"가 목차 칸과 겹쳐요`);
 });
+
+// 할 일 줄(로그아웃·탈퇴): 왼쪽에 무엇인지, 오른쪽 끝에 버튼 하나. 버튼은 줄 가운데 높이에 맞춘다(CSS .set-action)
+test('할 일 줄은 따로 표시하고, 되돌릴 수 없는 일은 떨어진 카드에 둔다', () => {
+  assert.match(settingRow({ label: '준엽', control: '<button>로그아웃</button>', action: true }), /^<div class="set-row set-action">/);
+  assert.match(settingRow({ label: '준엽', control: '' }), /^<div class="set-row">/);
+  const html = settingsSection({ id: 'account', title: '계정', level: 2, body: ['<p>로그아웃</p>', '<p>탈퇴</p>'] });
+  assert.equal([...html.matchAll(/<div class="set-card">/g)].length, 2, '카드 둘');
+  assert.match(html, /<div class="set-card"><p>로그아웃<\/p><\/div><div class="set-card"><p>탈퇴<\/p><\/div>/);
+});

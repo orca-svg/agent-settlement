@@ -192,6 +192,14 @@ function mountJoinLink(root) {
   };
 }
 
+// 계정 칸의 첫 줄: 버튼 이름을 되풀이하지 않고, 지금 어느 계정으로 로그인했는지를 보이고 오른쪽 끝에 로그아웃을 둔다.
+// 되돌릴 수 없는 탈퇴는 이 줄과 떨어진 카드에 따로 둔다
+function accountRow(profile) {
+  const email = currentUser()?.email;
+  return settingRow({ action: true, label: '로그인한 계정', desc: email ? `Google 계정 · ${esc(email)}` : `${esc(profile.name)}님으로 로그인했어요.`,
+    control: '<button type="button" class="btn sm plain" id="logout">로그아웃</button>' });
+}
+
 // 내 계정: 프로필(이름·색) → 내 비서 기본 설정(받을 계좌·비서 규칙·알림) → 계정을 한 페이지에.
 // 바꾸는 대로 아래 저장 막대가 '저장하지 않은 변경 N개'를 세고, 저장하면 이 화면에 머문 채 결과를 그 자리에서 알린다.
 // status: 방금 저장한 결과(다시 그린 뒤 막대에 잠깐 띄운다)
@@ -201,9 +209,9 @@ function profileView(profile, agent, status = '') {
   panel.innerHTML = `<div class="settings">${tocHtml()}<div class="settings-body">
       ${settingsSection({ id: 'profile', level: 2, title: '프로필', desc: '방 사람들에게 이 이름과 색으로 보여요. 바꾸면 모든 방에서 함께 바뀌어요.', body: profileFormHtml(profile) })}
       <div id="agent-box"></div>
-      ${settingsSection({ id: 'account', level: 2, title: '계정', body: `
-        ${settingRow({ label: '로그아웃', desc: '이 기기에서 로그아웃해요.', control: '<button type="button" class="btn sm plain" id="logout">로그아웃</button>' })}
-        ${settingRow({ label: '계정 탈퇴', desc: '프로필·비서 설정·위치 요약을 지우고 방에서 내 이름과 계정 연결을 끊어요. 함께 정산한 금액은 익명 기록으로 남고, 내야 할 돈이 없어지지는 않아요.', control: '<button type="button" class="btn sm danger" id="delete">계정 탈퇴</button>' })}` })}
+      ${settingsSection({ id: 'account', level: 2, title: '계정', body: [accountRow(profile), settingRow({ action: true, label: '계정 탈퇴',
+        desc: '프로필·비서 설정·위치 요약을 지우고 방에서 내 이름과 계정 연결을 끊어요. 함께 정산한 금액은 익명 기록으로 남고, 내야 할 돈이 없어지지는 않아요.',
+        control: '<button type="button" class="btn sm danger" id="delete">탈퇴하기</button>' })] })}
       <div class="save-bar" id="save-bar" hidden>
         <p class="save-status" id="message" role="status"></p>
         <div class="save-actions" id="save-actions"><button type="button" class="btn sm plain" id="revert">되돌리기</button>

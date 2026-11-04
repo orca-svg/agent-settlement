@@ -1217,6 +1217,14 @@ h3.set-title { font-size: 1.0625rem; font-weight: 600; }
 .set-card > .group { margin: 0; padding: 14px 20px; }
 .set-control .swatches { padding: 0; }
 .set-control > .btn { margin-top: 2px; }
+/* 할 일 줄(로그아웃·탈퇴): 무엇인지는 왼쪽에 남는 폭을 다 쓰고, 버튼은 오른쪽 끝에서 줄 가운데 높이에 맞춘다.
+   좁은 화면에서도 버튼은 그 줄 오른쪽에 남는다(설명만 여러 줄로 접힌다) */
+.set-row.set-action { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px 24px; }
+.set-action .set-name { padding-top: 0; }
+.set-action .set-desc { max-width: 40em; }
+.set-action .set-control > .btn { margin-top: 0; white-space: nowrap; }
+/* 되돌릴 수 없는 일(탈퇴)은 떨어진 카드에 둬, 일상적인 버튼(로그아웃) 옆에서 잘못 누르지 않게 한다 */
+.set-card + .set-card { margin-top: 16px; }
 /* 컨트롤 칸 안에 들어간 한 줄 입력(보낼 시기의 '매달 [25일]')은 줄 모양 없이 이름과 칸만 */
 .set-control .list { background: none; }
 .set-control .row.field { display: flex; gap: 12px; min-height: 0; padding: 0; }

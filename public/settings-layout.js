@@ -20,13 +20,16 @@ export function tocHtml(toc = SETTINGS_TOC) {
   return `<nav class="settings-toc" aria-label="내 계정 목차"><ol>${toc.map(item).join('')}</ol></nav>`;
 }
 
-// label·desc는 화면에 박힌 글이라 이스케이프하지 않는다. 입력칸이 하나면 forId로 이름을 그 칸의 label로 잇는다
-export function settingRow({ label, desc = '', control, forId = '' }) {
+// label·desc는 화면에 박힌 글이라 이스케이프하지 않는다(사용자 값은 부르는 쪽이 이스케이프해 넘긴다). 입력칸이 하나면 forId로 이름을 그 칸의 label로 잇는다.
+// action: 값을 고르는 줄이 아니라 버튼 하나로 하는 일(로그아웃·탈퇴). 버튼을 오른쪽 끝, 줄 가운데 높이에 둔다
+export function settingRow({ label, desc = '', control, forId = '', action = false }) {
   const name = forId ? `<label class="set-name" for="${forId}">${label}</label>` : `<span class="set-name">${label}</span>`;
-  return `<div class="set-row"><div class="set-label">${name}${desc ? `<p class="set-desc">${desc}</p>` : ''}</div><div class="set-control">${control}</div></div>`;
+  return `<div class="set-row${action ? ' set-action' : ''}"><div class="set-label">${name}${desc ? `<p class="set-desc">${desc}</p>` : ''}</div><div class="set-control">${control}</div></div>`;
 }
 
-// 설정 묶음: 제목·설명 아래에 카드 하나. level 2는 맨 위 묶음(프로필·계정), 3은 '내 비서 기본 설정' 아래 칸
+// 설정 묶음: 제목·설명 아래에 카드. level 2는 맨 위 묶음(프로필·계정), 3은 '내 비서 기본 설정' 아래 칸.
+// body를 배열로 주면 카드를 나눠 담는다(되돌릴 수 없는 일을 일상적인 일과 떨어뜨릴 때)
 export function settingsSection({ id, title, desc = '', body, level = 3 }) {
-  return `<section class="set-section" id="${id}" aria-labelledby="${id}-title"><h${level} class="set-title" id="${id}-title">${title}</h${level}>${desc ? `<p class="set-intro">${desc}</p>` : ''}<div class="set-card">${body}</div></section>`;
+  const cards = [].concat(body).map((b) => `<div class="set-card">${b}</div>`).join('');
+  return `<section class="set-section" id="${id}" aria-labelledby="${id}-title"><h${level} class="set-title" id="${id}-title">${title}</h${level}>${desc ? `<p class="set-intro">${desc}</p>` : ''}${cards}</section>`;
 }
