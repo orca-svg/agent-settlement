@@ -1051,8 +1051,9 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
    시작·끝은 강조색 원, 그 사이는 옅은 띠. 고르기 전의 값('날짜 고르기')만 강조색으로 눌러도 되는 줄임을 알린다 */
 .range-toggle .range-value { color: var(--label-2); }
 .range-toggle .range-value.empty { color: var(--tint); }
-.range-toggle .chev { transition: transform 200ms ease; }
-.range-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+/* 그 자리에서 펼치는 줄(기간·초대 링크로 참가하기)은 펼치면 화살표가 아래를 본다 */
+.row[aria-controls] .chev { transition: transform 200ms ease; }
+.row[aria-expanded="true"] .chev { transform: rotate(90deg); }
 .range-panel { position: relative; display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 16px; padding: 4px 16px 8px; }
 .range-panel::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 0.5px; background: var(--sep); }
 .range-panel.entering { animation: range-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1); transform-origin: top; }
@@ -1088,9 +1089,18 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
 }
 @media (prefers-reduced-motion: reduce) {
   .range-panel.entering { animation: none; }
-  .range-toggle .chev, .range-days .day span { transition: none; }
+  .row[aria-controls] .chev, .range-days .day span { transition: none; }
   .range-days .day:active span { transform: none; }
 }
+
+/* 초대 링크로 참가하기(내 방): 펼치면 같은 목록 안에 붙여 넣을 칸과 버튼이 한 줄로, 좁으면 버튼이 아래로 감긴다 */
+.join-link[hidden] { display: none; }
+.join-link { flex-wrap: wrap; gap: 8px 12px; }
+.join-link input { flex: 1 1 220px; min-width: 0; font: inherit; color: var(--label); background: var(--fill); border: 0; border-radius: 10px; padding: 10px 12px; }
+.join-link input::placeholder { color: var(--label-3); }
+.join-link input[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--orange); }
+.join-error { flex-basis: 100%; margin: 0; font-size: 0.8125rem; color: var(--orange); letter-spacing: 0; }
+.join-error:empty { display: none; }
 
 /* 상단바 왼쪽: 어느 화면에서든 같은 자리에 '내 방'으로 돌아가는 길(방 만들기·초대·방 화면) */
 .nav-lead { display: flex; align-items: center; gap: 10px; min-width: 0; }

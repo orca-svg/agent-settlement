@@ -4,6 +4,7 @@ import { initAuth, currentUser, login, logout } from './auth.js';
 import { api } from './room-api.js';
 import { esc, avatarHtml, CHEVRON, GOOGLE_G, nextAfterLogin } from './ui.js';
 import { profileFormHtml, mountProfileForm, initial } from './profile-form.js';
+import { inviteTokenFrom, joinLinkHtml } from './join-link.js';
 const panel = document.querySelector('#account');
 const nav = document.querySelector('#nav-inner');
 // 알림은 방금 누른 버튼 바로 아래에 띄운다. 화면을 다시 그릴 때마다 #message 자리도 함께 그린다
@@ -91,12 +92,38 @@ function roomsView(profile, rooms, config) {
     <section class="group"><div class="list">
       <a class="row new-room" href="room.html"><span class="new-room-icon" aria-hidden="true">+</span><span class="grow"><span class="title">새 방 만들기</span>
         <span class="meta" style="display:block">모임을 만들고 초대 링크로 친구를 불러요</span></span>${CHEVRON}</a>
+      ${joinLinkHtml()}
       ${rooms.map((r) => linkRow(`room.html?room=${encodeURIComponent(r.id)}`, esc(r.name), esc(r.dates || ''))).join('')
         || '<div class="row"><span class="grow meta">아직 참여한 방이 없어요. 새 방을 만들거나 친구에게 초대 링크를 받으면 여기에 보여요.</span></div>'}
     </div></section>${demoRows('둘러보기', config.dev)}`;
   say(notice);
   notice = '';
   nav.querySelector('#open-profile').onclick = openProfile;
+  mountJoinLink(panel);
+}
+
+// 초대 링크로 참가하기: 줄을 누르면 그 자리에 입력칸을 펼치고 바로 붙여 넣게 초점을 둔다.
+// 알아본 토큰으로만 이 서비스의 초대 화면에 가고, 알아볼 수 없으면 입력칸 바로 아래에 알린다
+function mountJoinLink(root) {
+  const toggle = root.querySelector('#join-toggle');
+  const form = root.querySelector('#join-link');
+  const input = form.querySelector('#join-input');
+  const error = form.querySelector('#join-error');
+  toggle.onclick = () => {
+    const open = form.hidden;
+    form.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    if (open) input.focus();
+  };
+  input.oninput = () => { error.textContent = ''; input.removeAttribute('aria-invalid'); };
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const token = inviteTokenFrom(input.value);
+    if (token) return void location.assign(`room.html?invite=${encodeURIComponent(token)}`);
+    input.setAttribute('aria-invalid', 'true');
+    error.textContent = input.value.trim() ? '초대 링크를 알아볼 수 없어요. 친구에게 받은 링크를 그대로 붙여 넣어 주세요.' : '받은 초대 링크를 붙여 넣어 주세요.';
+    input.focus();
+  };
 }
 
 // 프로필: 왼쪽 위 '내 방'은 바꾼 것을 버리고 돌아가고, 오른쪽 위 '저장'은 저장한 뒤 내 방으로 간다
