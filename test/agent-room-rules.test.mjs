@@ -7,7 +7,8 @@ import { seedDemoRoom } from '../src/dev/seed.mjs';
 import { createOrchestrator } from '../src/agents/orchestrator.mjs';
 import { createAgentSettings, rulesIn, normalizeSettings } from '../src/agents/settings.mjs';
 import { createApp } from '../src/app.mjs';
-import { roomRuleHtml } from '../public/agent-panel.js';
+import { roomRuleHtml, sendHtml } from '../public/agent-panel.js';
+import { sendWhenLabel } from '../public/agent-rules.js';
 
 const A = 'room-a';
 const B = 'room-b';
@@ -46,7 +47,16 @@ test('한 방의 자동 수락 한도를 0원으로 정하면 그 방 청구서�
   assert.equal((await invoiceOf(store, B, 'cs')).status, 'accepted');
 });
 
-test('보낼 시기를 한 방에서만 직접 보내기로 정한다', async () => {
+// #59 '직접'은 날짜를 직접 고르는 것으로 읽혀 입력칸을 찾게 만든다. 날짜 없이 내가 편할 때 보내는 모드라서 이름을 '편할 때'로 쓴다
+test('보낼 시기의 세 번째 선택지는 \'편할 때\'이고, 요약과 기록도 같은 말을 쓴다', () => {
+  const html = sendHtml({ mode: 'manual', payday: 25 });
+  assert.match(html, /<button[^>]*role="radio"[^>]*aria-checked="true"[^>]*data-id="manual"[^>]*>편할 때</);
+  assert.ok(!html.includes('직접'), '\'직접\'이라는 말은 쓰지 않는다');
+  assert.ok(!html.includes('<select'), '날짜를 고르는 칸은 없다(지정일에만 있다)');
+  assert.equal(sendWhenLabel('manual'), '편할 때 보내기');
+});
+
+test('보낼 시기를 한 방에서만 편할 때 보내기로 정한다', async () => {
   const { store, orch, settings } = await twoRooms();
   await settings.setRoomRules('cs', A, { sendWhen: 'manual' });
   await orch.sendInvoices(A, 'me');
