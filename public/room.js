@@ -312,6 +312,24 @@ async function confirmLine(eid, itemId) {
   await load();
 }
 
+// 비서가 짐작한 대로 한꺼번에 확정한다. eid가 있으면 그 지출만(고쳐 둔 줄은 고친 대로), 없으면 방의 모든 지출
+async function confirmGuesses(eid) {
+  if (state.busy === 'confirm-guesses') return;
+  state.busy = 'confirm-guesses';
+  try {
+    const path = eid ? `/expenses/${encodeURIComponent(eid)}/confirm-guesses` : '/confirm-guesses';
+    await api(`/api/rooms/${encodeURIComponent(roomId)}${path}`, { method: 'POST', body: eid ? { edits: state.edits[eid] ?? {} } : {} });
+    if (eid) delete state.edits[eid];
+    else state.edits = {};
+    state.formError = '';
+  } catch (e) {
+    state.formError = e.message;
+  } finally {
+    state.busy = null;
+  }
+  await load();
+}
+
 function expenseChip(e) {
   if (!e.items?.length) return chip('1/N');
   if (!e.alloc) return chip('메뉴별로 나누기 전');
@@ -342,6 +360,14 @@ function linesHtml(exp) {
   }).join('');
 }
 
+// 확인할 줄이 여럿이면 줄마다 누르지 않고 한 번에 확정한다. 고쳐 둔 줄은 고친 대로, 나머지는 비서가 짐작한 대로(서버 confirm-guesses)
+function bulkConfirmHtml(exp, busy) {
+  const n = exp.items.filter((it) => isFlagged(exp.alloc?.[it.id])).length;
+  if (n < 2 || busy) return '';
+  return `<div class="line-foot" style="margin-bottom:10px"><span class="grow meta">확인할 줄 ${n}개</span>
+    <button class="btn sm secondary" data-action="confirm-guesses" data-id="${esc(exp.id)}">${n}줄 모두 짐작한 대로 확인</button></div>`;
+}
+
 function expSheetHtml(exp) {
   const { room } = state.data;
   const { krw, how } = toKrw(exp, room, room.policy);
@@ -351,7 +377,7 @@ function expSheetHtml(exp) {
   const lines = exp.items?.length
     ? `<section class="group"><h3 class="group-label"><span>영수증 ${exp.items.length}줄 · 어떻게 나눌까요</span><span>${esc(state.allocSource[exp.id] ?? (exp.alloc ? '' : '나누기 전'))}</span></h3>
         ${busy ? '<div class="next" aria-busy="true" style="margin:0 0 12px"><h2 style="font-size:1.0625rem">비서들이 기억으로 나누는 중이에요</h2><div class="progress"><i></i></div></div>' : ''}
-        <div class="list">${linesHtml(exp)}</div>
+        ${bulkConfirmHtml(exp, busy)}<div class="list">${linesHtml(exp)}</div>
         <p class="group-note">${exp.alloc ? '이름을 눌러 고친 뒤 확인하면 그 줄은 더 묻지 않아요.' : '각자의 비서가 공유한 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄은 짐작하지 않고 물어봐요.'}</p>
         <button class="btn ${exp.alloc ? 'secondary' : ''}" style="width:100%;margin-top:10px" data-action="allocate-exp" data-id="${esc(exp.id)}" ${busy || ab.disabled ? 'disabled' : ''}>${ab.label}</button>
         ${ab.hint ? `<p class="group-note" style="margin-top:8px">${esc(ab.hint)}</p>` : ''}</section>`
@@ -658,6 +684,8 @@ async function act(name, d) {
     if (set.has(d.p)) set.delete(d.p); else set.add(d.p);
     if (set.size) edits[d.line] = exp.present.filter((u) => set.has(u));
     renderSheet();
+  } else if (name === 'confirm-guesses' || name === 'confirm-all-guesses') {
+    confirmGuesses(name === 'confirm-guesses' ? d.id : null);
   } else if (name === 'confirm-line') {
     if (state.focusLine?.exp === d.exp && state.focusLine.line === d.line) state.focusLine = null; // 확인했으니 강조는 거둔다
     confirmLine(d.exp, d.line);
@@ -919,8 +947,10 @@ function actionButtons(a, size = '') {
   const cls = `btn ${size}`.trim();
   const id = esc(a.ref);
   switch (a.type) {
-    case 'confirm_line':
-      return `<button class="${cls}" data-action="open-exp" data-id="${esc(a.expenseId)}" data-line="${esc(a.itemId)}">확인하기</button>`;
+    case 'confirm_line': {
+      const total = flaggedLines(state.data.expenses, isFlagged).reduce((n, g) => n + g.lines.length, 0);
+      return `<button class="${cls}" data-action="open-exp" data-id="${esc(a.expenseId)}" data-line="${esc(a.itemId)}">확인하기</button>${total > 1 ? `<button class="${cls} secondary" data-action="confirm-all-guesses">${total}줄 모두 짐작한 대로 확인</button>` : ''}`;
+    }
     case 'answer_invoice':
       return `<button class="${cls}" data-action="open-invoice" data-id="${id}">청구서 보기</button>`;
     case 'agree_dispute':
@@ -1009,7 +1039,8 @@ function blockedHtml(n, announce) {
     <p class="blocked-title">${ALERT}${esc(n.title)}</p>
     <p class="blocked-lead">${esc(n.lead)}</p>
     <ul>${n.rows.map((r) => `<li><span class="blocked-what">${esc(r.what)}<small>${esc(r.who)}</small></span>
-      <button class="btn sm secondary" data-action="open-exp" data-id="${esc(r.expId)}" data-line="${esc(r.lineId)}" aria-label="${esc(`${r.what} ${r.label}`)}">${esc(r.label)}</button></li>`).join('')}</ul></div>`;
+      <button class="btn sm secondary" data-action="open-exp" data-id="${esc(r.expId)}" data-line="${esc(r.lineId)}" aria-label="${esc(`${r.what} ${r.label}`)}">${esc(r.label)}</button></li>`).join('')}</ul>
+    <div class="actions" style="margin-top:10px"><button class="btn sm" data-action="confirm-all-guesses">남은 ${n.total}줄 모두 짐작한 대로 확인</button></div></div>`;
 }
 
 // 눌러서 막힌 버튼 자리에서 알린다. 그리는 사이 잃은 초점을 돌려주고, 안내가 화면 밖이면 보이게 한 뒤, 버튼을 흔든다

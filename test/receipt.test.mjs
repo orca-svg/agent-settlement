@@ -115,3 +115,11 @@ test('달러 방(#55): 센트까지 읽고, 엔·원은 정수로 맞춘다', as
   assert.equal(jpy.total, 7860);
   assert.ok(jpy.items.every((it) => Number.isInteger(it.unit)));
 });
+
+test('손글씨 전표의 正자 획 수량(一·丅·下·正)을 숫자로 세라고 모델에 알린다', async () => {
+  let system = '';
+  await extractReceipt({ model: 'fake', generate: async (p) => { system = p.system; return ok; } }, { image, room: DEMO_ROOM });
+  assert.match(system, /正자 획으로 적혀 있으면 획 수를 qty로/);
+  assert.match(system, /一=1, 丅\(T 모양\)=2, 下=3/);
+  assert.match(system, /취소선으로 지운 줄도 넣지 않는다/);
+});

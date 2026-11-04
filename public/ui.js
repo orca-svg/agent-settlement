@@ -153,6 +153,7 @@ export function blockedNotice(groups, { me, nameOf }) {
   return {
     title: '청구서를 아직 보낼 수 없어요',
     lead: `비서가 짐작하지 않고 물어본 줄이 ${total}줄 남았어요.`,
+    total,
     rows: groups.map((g) => {
       const [first] = g.lines;
       const more = g.lines.length - 1;

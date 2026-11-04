@@ -139,6 +139,47 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     return { expense: saved, source: out.source, how: out.how, latencyMs };
   });
 
+  // 비서가 짐작한 배분을 그대로 확정한다(줄마다 누르는 번거로움을 덜려고). 근거가 약해 사람에게 물은 줄만 확정하고,
+  // 아직 나누지 않은 줄은 짐작이 없어 건드리지 않는다. edits: 화면에서 고쳐 둔 줄 { 줄 id: 먹은 사람 }은 짐작 대신 그 값으로
+  function confirmGuesses(exp, uid, edits = {}) {
+    const lines = (exp.items ?? []).filter((it) => isFlagged(exp.alloc?.[it.id]));
+    if (!lines.length) return null;
+    const alloc = { ...exp.alloc };
+    for (const it of lines) {
+      const picked = Array.isArray(edits[it.id]) && edits[it.id].length ? exp.present.filter((u) => edits[it.id].includes(u)) : null;
+      if (picked && !picked.length) throw new HttpError(400, '함께 있지 않았던 사람은 고를 수 없어요');
+      alloc[it.id] = { ...alloc[it.id], ...(picked ? { consumers: picked, reason: '직접 고쳤어요' } : {}), confirmed: true, confirmedBy: uid };
+    }
+    return { before: exp, saved: { ...exp, split: 'items', alloc }, count: lines.length };
+  }
+  // 확정한 지출을 저장하고 방 version은 한 번만 올린다(청구서는 한 번만 다시 보내면 된다)
+  async function saveGuesses(room, me, done) {
+    if (!done.length) return { expenses: [], confirmed: 0 };
+    for (const { saved } of done) await store.put('expenses', saved);
+    await store.put('rooms', { ...room, version: room.version + 1 });
+    const count = done.reduce((n, d) => n + d.count, 0);
+    const what = done.length === 1 ? `‘${done[0].saved.title}’의 ${count}줄을` : `지출 ${done.length}건의 ${count}줄을`;
+    await store.appendEvent(room.id, { from: me.uid, to: 'all', kind: 'lines_confirmed', text: `${what} 비서가 짐작한 대로 확인했어요` });
+    for (const { before, saved } of done) await supersedeDisputes(store, room.id, before, saved);
+    return { expenses: done.map((d) => d.saved), confirmed: count };
+  }
+
+  // 지출 하나의 확인할 줄을 모두 짐작대로(고쳐 둔 줄은 고친 대로) 확정한다. { edits? }
+  routes.post('/api/rooms/:id/expenses/:eid/confirm-guesses', async ({ req, params }) => {
+    const { room, me, exp } = await roomExpense(req, params.id, params.eid);
+    const { edits } = await readJson(req);
+    const done = confirmGuesses(exp, me.uid, edits && typeof edits === 'object' ? edits : {});
+    return saveGuesses(room, me, done ? [done] : []);
+  });
+
+  // 방의 모든 지출에서 확인할 줄을 짐작대로 확정한다(청구서 보내기가 막혔을 때 한 번에)
+  routes.post('/api/rooms/:id/confirm-guesses', async ({ req, params }) => {
+    const { room, me } = await member(req, params.id);
+    open(room);
+    const done = (await store.list('expenses', { roomId: room.id })).map((e) => confirmGuesses(e, me.uid)).filter(Boolean);
+    return saveGuesses(room, me, done);
+  });
+
   // 줄 하나를 사람이 확정한다. 확정한 줄은 확신도와 관계없이 더 묻지 않는다.
   routes.post('/api/rooms/:id/expenses/:eid/lines/:itemId', async ({ req, params }) => {
     const { room, me, exp } = await roomExpense(req, params.id, params.eid);

@@ -242,3 +242,49 @@ test('나간 뒤에 탈퇴하면 나간 방의 기록도 익명으로 바뀐다'
   assert.ok(!saved.members.some((m) => m.uid === 'ms' || m.name === '민수'));
   assert.ok(saved.members.some((m) => m.deleted && m.name === '탈퇴한 사용자'));
 });
+
+// ---------------------------------------------------------------- 짐작한 대로 한꺼번에 확인
+// 근거가 없어 비서가 물은 줄(규칙 배분은 확신 0.35)을 줄마다 누르지 않고 한 번에 확정한다
+const lines = (n) => Array.from({ length: n }, (_, i) => ({ id: `l${i + 1}`, name: `정식 ${i + 1}`, qty: 1, unit: 1000 * (i + 1), tags: ['1인 식사'] }));
+async function guessed(roomId, payer, present, n) {
+  const { json } = await spend(roomId, payer, present, { amount: undefined, items: lines(n), source: 'receipt' });
+  const { json: al } = await post(`/api/rooms/${roomId}/expenses/${json.expense.id}/allocate`, payer);
+  assert.ok(Object.values(al.expense.alloc).every((a) => a.confidence < 0.7), '근거가 없어 모두 확인이 필요한 줄');
+  return al.expense;
+}
+
+test('지출 하나의 확인할 줄을 짐작한 대로 한 번에 확정하고, 고쳐 둔 줄은 고친 대로 확정한다(방 version은 한 번)', async () => {
+  const { roomId } = await roomOf(['me', 'cs']);
+  const exp = await guessed(roomId, 'me', ['me', 'cs'], 3);
+  const before = (await room(roomId)).version;
+  const { status, json } = await post(`/api/rooms/${roomId}/expenses/${exp.id}/confirm-guesses`, 'cs', { edits: { l2: ['me'] } });
+  assert.equal(status, 200);
+  assert.equal(json.confirmed, 3);
+  const saved = await store.get('expenses', exp.id);
+  assert.ok(Object.values(saved.alloc).every((a) => a.confirmed && a.confirmedBy === 'cs'));
+  assert.deepEqual(saved.alloc.l1.consumers, exp.alloc.l1.consumers, '짐작 그대로');
+  assert.deepEqual(saved.alloc.l2.consumers, ['me'], '고친 줄은 고친 대로');
+  assert.equal((await room(roomId)).version, before + 1);
+  assert.match((await store.listEvents(roomId)).at(-1).text, /‘저녁’의 3줄을 비서가 짐작한 대로 확인했어요/);
+  assert.equal((await post(`/api/rooms/${roomId}/expenses/${exp.id}/confirm-guesses`, 'cs', {})).json.confirmed, 0, '두 번 눌러도 다시 바꾸지 않는다');
+  assert.equal((await post(`/api/rooms/${roomId}/expenses/${exp.id}/confirm-guesses`, 'cs', { edits: { l1: ['stranger'] } })).status, 200, '확인할 줄이 없으면 고친 값도 보지 않는다');
+});
+
+test('방의 모든 지출에서 확인할 줄을 한꺼번에 확정하면 청구서를 보낼 수 있다', async () => {
+  const { roomId } = await roomOf(['me', 'cs']);
+  await guessed(roomId, 'me', ['me', 'cs'], 2);
+  await guessed(roomId, 'cs', ['me', 'cs'], 2); // 줄이 하나뿐이면 누구 몫인지 뻔해서(obvious) 묻지 않는다
+  assert.equal((await post(`/api/rooms/${roomId}/invoices/send`, 'me')).status, 409, '확인할 줄이 있으면 막힌다');
+  const { json } = await post(`/api/rooms/${roomId}/confirm-guesses`, 'me');
+  assert.equal(json.confirmed, 4);
+  assert.equal(json.expenses.length, 2);
+  assert.match((await store.listEvents(roomId)).at(-1).text, /지출 2건의 4줄을 비서가 짐작한 대로 확인했어요/);
+  assert.equal((await post(`/api/rooms/${roomId}/invoices/send`, 'me')).status, 200);
+});
+
+test('함께 있지 않았던 사람으로 고친 줄은 확정하지 않는다(400)', async () => {
+  const { roomId } = await roomOf(['me', 'cs', 'yh']);
+  const exp = await guessed(roomId, 'me', ['me', 'cs'], 2);
+  assert.equal((await post(`/api/rooms/${roomId}/expenses/${exp.id}/confirm-guesses`, 'me', { edits: { l1: ['yh'] } })).status, 400);
+  assert.ok(Object.values((await store.get('expenses', exp.id)).alloc).every((a) => !a.confirmed), '하나도 확정하지 않았다');
+});
