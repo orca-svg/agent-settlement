@@ -1,7 +1,7 @@
 // #2 내 계정. 로그인하면 '내 방'이 첫 화면이고, 오른쪽 위 내 아바타를 누르면 '내 계정'(설정) 화면으로 간다.
 // 내 계정은 웹 설정 페이지처럼 모든 설정을 한 페이지에 두고(넓은 화면은 왼쪽 목차가 따라온다), 바꾼 것이 있을 때만
 // 화면 아래에 저장 막대가 뜬다. 저장하지 않고 떠나려 하면(왼쪽 위 '내 방', 브라우저 뒤로, 탭 닫기) 버릴지 묻는다
-import { initAuth, currentUser, login, logout } from './auth.js';
+import { initAuth, currentUser, login, logout, authOptions } from './auth.js';
 import { api } from './room-api.js';
 import { esc, avatarHtml, CHEVRON, GOOGLE_G, ICON_LINK, nextAfterLogin, mountSegs, segArrowKeys } from './ui.js';
 import { roomTabs, roomRowsHtml } from './room-list.js';
@@ -10,7 +10,7 @@ import { toast } from './toast.js';
 import { reduceMotion } from './motion.js';
 import { profileFormHtml, mountProfileForm, initial } from './profile-form.js';
 import { inviteTokenFrom, joinFormHtml } from './join-link.js';
-import { defaultsHtml, defaultsBody, defaultsChanges } from './agent-defaults.js';
+import { defaultsHtml, defaultsBody, defaultsChanges, sampleFill } from './agent-defaults.js';
 import { draftFromRules, limitNote } from './agent-panel.js';
 import { payoutDraftFrom } from './payout-form.js';
 import { SETTINGS_IDS, tocHtml, settingRow, settingsSection } from './settings-layout.js';
@@ -316,7 +316,7 @@ function profileView(profile, agent, status = '') {
     panel.querySelector('#save-actions').hidden = !n;
   };
   const drawAgent = () => {
-    box.innerHTML = defaultsHtml(agent, ui);
+    box.innerHTML = defaultsHtml(agent, ui, { demo: authOptions().demo });
     mountSegs(box);
   };
   drawAgent();
@@ -327,9 +327,11 @@ function profileView(profile, agent, status = '') {
     if (!el) return;
     if (el.dataset.action === 'agent-set') ui.draft[el.dataset.field] = el.dataset.id;
     if (el.dataset.action === 'payout-edit') ui.editPayout = true;
+    if (el.dataset.action === 'agent-sample') ui = sampleFill(ui, profile.name);
     drawAgent();
     syncBar();
     if (el.dataset.action === 'payout-edit') box.querySelector('[data-pf="accountNo"]')?.focus();
+    if (el.dataset.action === 'agent-sample') saveButton.focus(); // 채웠으면 다음은 저장
   };
   // 입력칸은 다시 그리지 않고 값만 기억한다(타이핑 중 초점을 잃지 않게)
   box.oninput = (e) => {

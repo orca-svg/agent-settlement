@@ -47,7 +47,7 @@ export function tasks(s) {
     {
       title: '비서에게 맡길 범위 정하기',
       steps: [
-        { text: '내 계정의 ‘내 비서 기본 설정’에서 받을 계좌, 자동 수락 한도, 보낼 시기, 이의 처리를 정해요', note: '보낼 시기는 바로·지정일·편할 때 중에서 골라요. 자동 수락 한도를 5만 원처럼 청구서보다 작게 두면 task 4에서 비서가 먼저 물어봐요.', done: Boolean(s.agent?.onboardedAt), show: '#agent', go: { href: 'account.html#agent', label: '내 계정으로 가기' } },
+        { text: '내 계정의 ‘내 비서 기본 설정’에서 ‘샘플 계좌·한도로 채우기’를 누르고 ‘저장’해요', note: '숫자를 직접 넣지 않아도 가짜 계좌와 5만 원 한도가 채워져요. 한도가 청구서보다 작아서 task 4에서 비서가 먼저 물어봐요. 보낼 시기(바로·지정일·편할 때)와 이의 처리도 골라 볼 수 있어요.', done: Boolean(s.agent?.onboardedAt), show: '[data-action="agent-sample"]', go: { href: 'account.html#agent', label: '내 계정으로 가기' } },
         { text: '방의 ‘내 계정’ 메뉴 › ‘이 방의 내 비서’에서 ‘이 방에서만’ 값을 정해 봐요', note: '이 방에만 다른 한도나 보낼 시기를 쓸 수 있어요. 고르지 않으면 기본 설정을 따라요.', optional: true, done: Object.keys(s.agent?.roomRules?.[room?.id] ?? {}).length > 0, show: '#nav-me', go: inRoom },
       ],
     },
@@ -68,7 +68,7 @@ export function tasks(s) {
         { text: '다시 온 청구서를 ‘이대로 받기’로 받아요', note: '중재안대로 다시 나눈 금액이에요.', done: myPay.length > 0 || left, show: '[data-action="open-invoice"]', go: inRoom },
         { text: '‘보내러 가기’에서 밀어서 보내요', note: '실제로는 금액과 계좌가 채워진 토스 송금 화면이 열려요. 데모에서는 그 직전에 멈춰요.', done: myPay.some((t) => !['scheduled', 'due'].includes(t.status)) || left, show: '[data-action="open-transfer"]' },
         { text: '돌아와서 ‘보냈어요’를 누르면 철수가 ‘받았어요’로 확인해요', done: myPay.some((t) => ['sent', 'confirmed'].includes(t.status)) || left, show: '[data-action="mark-sent"]' },
-        { text: '방이 ‘정산 완료’가 되면 ‘내 계정’ 메뉴의 ‘이 방에서 나가기’로 마무리해요', note: '나가지 않으면 끝난 방은 내 방의 ‘끝남’에 기록으로 남아요.', done: left, show: '#nav-me', go: !left && inRoom },
+        { text: '방이 ‘정산 완료’가 되면 정산 완료 카드의 ‘이 방에서 나가기’로 마무리해요', note: '나가지 않으면 끝난 방은 내 방의 ‘끝남’에 기록으로 남아요.', done: left, show: '.next.done [data-action="open-leave"]', go: !left && inRoom },
       ],
     },
   ];

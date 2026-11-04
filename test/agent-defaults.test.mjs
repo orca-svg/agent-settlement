@@ -2,7 +2,8 @@
 // 모든 방에 이 설정으로 들어간다. 방마다 다른 값은 그 방의 내 비서에서 '이 방에서만'으로 정한다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultsHtml, defaultsBody, defaultsChanges } from '../public/agent-defaults.js';
+import { defaultsHtml, defaultsBody, defaultsChanges, sampleFill } from '../public/agent-defaults.js';
+import { readFileSync } from 'node:fs';
 import { payoutFieldsHtml, payoutDraftFrom } from '../public/payout-form.js';
 import { draftFromRules } from '../public/agent-panel.js';
 
@@ -74,4 +75,25 @@ test('계좌 입력칸은 방의 계좌 시트와 같은 모양이다: 은행 �
   assert.match(html, /data-pf="bank"[^>]*value="경남은행"/);
   assert.match(html, /지금은 •••• 1234/);
   assert.deepEqual(payoutDraftFrom(null, '재윤'), { bank: '토스뱅크', accountNo: '', holder: '재윤', other: false });
+});
+
+test('체험 데모: ‘샘플 계좌·한도로 채우기’ 한 번이면 계좌와 한도가 채워지고, 저장하면 처음 설정을 마친다', () => {
+  const v = { rules: { autoAccept: 0, sendWhen: 'now', onDispute: 'ask', notify: 'actions' }, payout: null, ruleHistory: [] };
+  assert.doesNotMatch(defaultsHtml(v, ui(v)), /data-action="agent-sample"/, '실제 계정에는 두지 않는다');
+  assert.match(defaultsHtml(v, ui(v), { demo: true }), /<button type="button" class="btn sm secondary" data-action="agent-sample">샘플 계좌·한도로 채우기<\/button>/);
+  const filled = sampleFill(ui(v), '나');
+  assert.equal(filled.editPayout, true);
+  assert.equal(filled.payout.holder, '나');
+  assert.match(filled.payout.accountNo.replace(/\D/g, ''), /^\d{6,}$/, '서버가 받는 계좌번호 모양');
+  assert.equal(filled.draft.autoAccept, '50000', '청구서보다 작게 두어 task 4에서 비서가 먼저 묻는다');
+  const body = defaultsBody(v, filled);
+  assert.ok(body.payout, '계좌가 저장 대상이 된다');
+  assert.equal(body.rules?.autoAccept, 50_000, '규칙이 바뀌어 저장하면 처음 설정을 마친 것으로 친다');
+  assert.match(defaultsHtml(v, filled, { demo: true }), /data-pf="accountNo" value="110-555-012345"/, '채운 값이 입력칸에 보인다');
+});
+
+test('체험 데모 체크리스트: ‘보여 주기’가 샘플 채우기 버튼과 정산 완료 카드의 나가기 버튼을 짚는다', () => {
+  const guide = readFileSync(new URL('../public/demo/guide.js', import.meta.url), 'utf8');
+  assert.match(guide, /‘샘플 계좌·한도로 채우기’[^\n]*show: '\[data-action="agent-sample"\]'/);
+  assert.match(guide, /정산 완료 카드의 ‘이 방에서 나가기’[^\n]*show: '\.next\.done \[data-action="open-leave"\]'/);
 });
