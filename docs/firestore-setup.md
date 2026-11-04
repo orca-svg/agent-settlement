@@ -7,7 +7,7 @@
 - 영수증 사진은 Firestore 문서 한도(1MiB)를 넘을 수 있어서 Cloud Storage `receipts/{지출 id}`에 둬요.
 - 보안 규칙: `firestore.rules`(방 멤버만 읽기, 송금은 당사자만, 쓰기는 모두 서버만), `storage.rules`(전부 서버만).
 - 방 화면은 서버가 Firestore이고 로그인한 상태면 비서 기록을 `onSnapshot`으로 받아요. 그 밖에는 2초 폴링이에요. 실시간 연결이 거부되면 폴링으로 이어 가고, 다음에 방을 열 때 실시간을 다시 시도해요.
-- Firestore는 읽은 문서 수만큼 돈이 들어서 자주 도는 읽기를 줄였어요. `tick()`(1분마다)은 할 일이 있는 송금(`scheduled`·`due`·`opened`·`sent`)만 읽고, 방은 tick 한 번에 방마다 한 번만 읽어요. 내 방 목록과 프로필 변경은 `roomsOf(uid)`로 `_memberUids` 색인을 써서 내 방만 읽어요.
+- Firestore는 읽은 문서 수만큼 돈이 들어서 자주 도는 읽기를 줄였어요. `tick()`(1분마다)은 할 일이 있는 송금(`scheduled`·`due`·`opened`·`sent`)만 읽고, 방은 tick 한 번에 방마다 한 번만 읽어요. 내 방 목록과 프로필 변경은 `roomsOf(uid)`로 `_memberUids` 색인을 써서 내 방만 읽어요. 또 서버는 Firestore 앞에 읽기 캐시(`src/store/cached.mjs`)를 둬서, 한 번 읽은 문서·목록은 60초 동안 메모리에서 돌려주고 쓰기가 있으면 그 컬렉션을 비워요.
 - 돈 계산은 원래 서버가 해요. 화면은 지출 입력(줄·단가·함께한 사람)만 보내고, 몫·차액·청구서·송금은 서버가 `public/core.js`로 계산해요. Firestore 위에서도 "몫의 합 = 결제액, 차액의 합 = 0"을 테스트로 확인했어요.
 - 비로그인 데모(`index.html`)는 저장소를 쓰지 않아서 그대로예요.
 
@@ -32,7 +32,7 @@
    gcloud run services update agent-settlement --region asia-northeast1 --project <project> --update-env-vars STORE=firestore,FIREBASE_STORAGE_BUCKET=<버킷 이름>
    ```
 
-   `--max-instances 1`은 그대로 둬요. 서버 안의 요청 줄(`src/state-locks.mjs`), QR 토큰, AI 캐시가 인스턴스 하나를 전제로 해요(`ARCHITECTURE.md` 참고). 문제가 생기면 `gcloud run services update-traffic agent-settlement --region asia-northeast1 --project <project> --to-revisions <전환 전 리비전>=100`으로 메모리 저장소 리비전에 되돌려요. 되돌려도 Firestore 데이터는 그대로 남고, 다시 앞으로 갈 때는 `--to-revisions` 대신 `--to-latest`를 써요.
+   `--max-instances 1`은 그대로 둬요. 서버 안의 요청 줄(`src/state-locks.mjs`), QR 토큰, AI 캐시, 읽기 캐시가 인스턴스 하나를 전제로 해요(`ARCHITECTURE.md` 참고). 문제가 생기면 `gcloud run services update-traffic agent-settlement --region asia-northeast1 --project <project> --to-revisions <전환 전 리비전>=100`으로 메모리 저장소 리비전에 되돌려요. 되돌려도 Firestore 데이터는 그대로 남고, 다시 앞으로 갈 때는 `--to-revisions` 대신 `--to-latest`를 써요.
 7. **`PAYOUT_ENC_KEY`는 Firestore에 계좌가 들어간 뒤로 절대 바꾸지 않아요.** 바뀌면 잠긴 계좌를 못 풀어서 `tick()`이 멈추고, 모든 방의 송금 알림이 멈춰요.
 
 ## 프로젝트 없이 에뮬레이터로

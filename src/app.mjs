@@ -76,7 +76,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   // #3 저장소는 여러 인스턴스에서 같은 보장을 트랜잭션으로 해야 한다.
   const locks = createStateLocks();
   const dev = env.DEV_SEED === '1' && env.NODE_ENV !== 'production' && !env.FIREBASE_PROJECT_ID && !auth;
-  const identify = createIdentity({ auth, dev });
+  const identify = createIdentity({ auth, dev, now: () => clock().getTime() });
   const locationService = createLocationService({ store, clock });
   evidenceFor ??= createEvidenceProvider({ locationService, dev });
   const origins = (env.ALLOWED_ORIGINS || 'https://orca-svg.github.io').split(',');

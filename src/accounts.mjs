@@ -1,6 +1,7 @@
 import { HttpError, readJson } from './http.mjs';
 import { revokeQrLinks, revokeUserQr } from './payments/qr.mjs';
 import { randomProfileColor } from '../public/profile-colors.js';
+import { forgetVerified } from './identity.mjs';
 export function registerAccountRoutes(routes, { store, authenticate, auth, clock, onErased = () => {} }) {
   routes.get('/api/me/deletion', async ({ req }) => {
     const me = await authenticate(req, { allowDeleting: true });
@@ -41,6 +42,7 @@ export function registerAccountRoutes(routes, { store, authenticate, auth, clock
     onErased();
     try { await auth.deleteUser(me.uid); }
     catch (e) { if (e.code !== 'auth/user-not-found') throw e; }
+    forgetVerified(auth, me.uid);
     return { deleted: true, sharedHistory: 'anonymized' };
   });
 }
