@@ -1,0 +1,32 @@
+// 내 계정의 '내 비서 기본 설정'(#5). 받을 계좌와 자동 수락 한도·보낼 시기·이의 처리·알림을 정하면 모든 방에 이 설정으로 들어간다.
+// 방마다 다른 값은 그 방의 내 비서에서 '이 방에서만'으로 정한다. 여기서는 HTML과 보낼 것만 만들고, 저장은 account.js가 한다
+import { esc } from './ui.js';
+import { limitInputHtml, sendHtml, disputeHtml, notifyHtml, historyHtml, rulesFromDraft, draftFromRules } from './agent-panel.js';
+import { payoutFieldsHtml } from './payout-form.js';
+
+const group = (label, body, note = '') => `<section class="group"><h2 class="group-label"><span>${label}</span></h2>${body}${note ? `<p class="group-note">${note}</p>` : ''}</section>`;
+
+// ui: { draft: 규칙 초안(draftFromRules), payout: 계좌 초안(payoutDraftFrom), editPayout: 계좌 입력칸을 펼쳤는지 }
+export function defaultsHtml(view, ui) {
+  const p = view.payout;
+  const payout = ui.editPayout || !p
+    ? payoutFieldsHtml(ui.payout)
+    : `<div class="list"><div class="row"><span class="grow"><span class="title">${esc(p.bank)} •••• ${esc(p.last4)}</span><span class="meta" style="display:block">${esc(p.holder)}</span></span>
+        <button type="button" class="btn sm secondary" data-action="payout-edit">바꾸기</button></div></div>`;
+  return `<section class="block-head" id="agent-defaults"><h2>내 비서 기본 설정</h2><p>모든 방에 이 설정으로 들어가요. 방마다 다르게 하고 싶은 규칙은 그 방의 내 비서에서 ‘이 방에서만’을 골라요.</p></section>
+    ${group('받을 계좌', payout, '계좌번호는 나에게 돈을 보낼 사람에게만 보여요. 바꾸면 내가 받을 모든 방의 대기 중 송금에 들어가요.')}
+    ${group('자동 수락 한도', limitInputHtml(ui.draft))}
+    ${group('보낼 시기', sendHtml(ui.draft))}
+    ${group('이의 처리', disputeHtml(ui.draft))}
+    ${group('알림', notifyHtml(ui.draft))}
+    ${historyHtml(view)}`;
+}
+
+// 저장할 것: 저장된 기본 설정과 달라진 규칙(같으면 null), 새 계좌번호를 적었을 때만 계좌(아니면 null)
+export function defaultsBody(view, ui) {
+  const rules = rulesFromDraft(ui.draft);
+  const changed = JSON.stringify(rules) !== JSON.stringify(rulesFromDraft(draftFromRules(view.rules)));
+  const p = ui.payout;
+  const payout = ui.editPayout && String(p.accountNo).trim() ? { bank: p.bank, accountNo: p.accountNo, holder: p.holder } : null;
+  return { rules: changed ? rules : null, payout };
+}

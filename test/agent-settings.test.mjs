@@ -11,7 +11,7 @@ import { evidenceFor } from '../src/agents/evidence.mjs';
 import { pendingActions } from '../src/actions.mjs';
 import { createApp } from '../src/app.mjs';
 import { notifies, DEFAULT_RULES, ruleChangeText } from '../public/agent-rules.js';
-import { draftFromRules, rulesFromDraft, memoryRowsHtml, historyHtml, limitInputHtml, limitPresetsHtml, meChipHtml, personChipHtml, AGENT_MARK } from '../public/agent-panel.js';
+import { draftFromRules, rulesFromDraft, memoryRowsHtml, historyHtml, limitInputHtml, limitPresetsHtml, meChipHtml, personChipHtml, AGENT_MARK, createAgentPanel } from '../public/agent-panel.js';
 
 const ROOM = 'demo-t';
 async function setup({ evidence = false, store = new MemoryStore() } = {}) {
@@ -565,6 +565,7 @@ test('방 머리의 칩: 비서 설정을 마친 사람에게 로봇 표시, 설
 
   const before = meChipHtml(me, { onboarded: false, autoAccept: 0, sendWhen: 'now', hasPayout: false });
   assert.ok(before.includes('<span class="person-tag">설정 전</span>') && !before.includes('agent-mark'), '설정 전이면 로봇 대신 꼬리표');
+  assert.match(before, /data-action="open-agent-setup"/, '설정 전이면 칩이 처음 설정을 연다(방 안의 큰 안내 카드 대신)');
   const noAccount = meChipHtml(me, { onboarded: true, autoAccept: 0, sendWhen: 'now', hasPayout: false });
   assert.ok(noAccount.includes('agent-mark') && noAccount.includes('<span class="person-tag">계좌 없음</span>'));
   assert.equal(meChipHtml({ name: '<b>', avatar: '' }, null), '<span class="person">&lt;b&gt;</span>', '서버가 요약을 주지 않으면 그냥 칩이다');
@@ -632,4 +633,9 @@ test('서버의 주기 작업(server.tick)이 돌아 때가 된 송금을 알린
   const { due } = await server.tick();
   assert.ok(due > 0);
   assert.ok((await store.list('transfers', { roomId: ROOM })).every((t) => t.status === 'due'));
+});
+
+test('방 화면에 처음 설정 큰 카드를 띄우지 않는다: 비서는 사람마다 하나라 방에서 경고처럼 묻지 않는다', () => {
+  const panel = createAgentPanel({ api: async () => ({}), roomId: 'r1', summary: () => ({ onboarded: false, autoAccept: 0, sendWhen: 'now', hasPayout: false }), meName: () => '나', rerender() {}, openSheet() {}, closeSheet() {}, reload: async () => {}, openPayout() {} });
+  assert.equal(panel.nudgeHtml(), '');
 });

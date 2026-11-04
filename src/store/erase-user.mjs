@@ -24,7 +24,7 @@ export function eraseUserSnapshot(cols, events, uid, now = new Date()) {
     const savedRoom = reference(room);
     savedRoom.members = savedRoom.members.map(m => m.uid === anonymous ? { uid: anonymous, name: '탈퇴한 사용자', deleted: true } : m);
     next.get('rooms').set(roomId, savedRoom);
-    for (const col of ['expenses', 'invoices', 'disputes', 'transfers', 'receipts']) {
+    for (const col of ['expenses', 'invoices', 'disputes', 'transfers', 'receipts', 'invites']) { // invites: 링크를 만든 사람(createdBy)만 끊고 링크는 남긴다
       for (const [id, original] of [...next.get(col) || []]) {
         if (original.roomId !== roomId) continue;
         const saved = reference(original);

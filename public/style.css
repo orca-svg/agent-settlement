@@ -340,6 +340,7 @@ a.row:active { background: var(--fill); }
   font: inherit;
   font-size: 1.0625rem;
   color: var(--tint);
+  text-decoration: none;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -392,7 +393,7 @@ a.row:active { background: var(--fill); }
 .swatch .check { position: absolute; width: 16px; height: 16px; opacity: 0; pointer-events: none; transition: opacity 150ms ease; }
 .swatch input:checked + .check { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .swatch input, .swatch .check, .avatar.xl { transition: none; } }
-.row + .row::before {
+.row + .row::before, .range-panel + .row::before {
   content: "";
   position: absolute;
   top: 0;
@@ -972,6 +973,9 @@ body.pop-open { overflow: hidden; }
 }
 .danger-text { color: var(--orange); }
 .agent-step { font-size: 0.8125rem; font-weight: 600; color: var(--tint); letter-spacing: 0; }
+/* 처음 설정은 묶음 카드 없이 한 줄로 쌓으므로, 안내 글도 질문·선택지와 같은 왼쪽 선에 둔다 */
+.agent-setup .group-note { padding-left: 0; padding-right: 0; }
+.agent-setup > .group-note:first-child { margin-bottom: 16px; }
 .agent-q { font-size: 1.375rem; line-height: 1.25; font-weight: 700; letter-spacing: -0.02em; margin: 4px 0 16px; }
 .agent-nav { display: flex; gap: 8px; margin: 20px 0 8px; }
 .agent-save { margin-bottom: 22px; }
@@ -992,8 +996,8 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
 .person.me .chev { width: 6px; height: 10px; color: var(--label-3); }
 /* 비서 설정을 마친 사람: 이름 옆 로봇. 이름보다 한 단계 옅게 두어 이름을 가리지 않는다 */
 .agent-mark { display: inline-flex; color: var(--label-2); margin-left: -2px; }
-/* 내 칩의 할 일 꼬리표(설정 전·계좌 없음): 이름보다 작게, 색과 글자를 함께 */
-.person-tag { font-size: 0.6875rem; font-weight: 600; line-height: 1; padding: 3px 6px; border-radius: 999px; color: var(--orange); background: var(--orange-soft); }
+/* 내 칩의 할 일 꼬리표(설정 전·계좌 없음): 경고가 아니라 할 일이라 주황 대신 강조색. 이름보다 작게, 색과 글자를 함께 */
+.person-tag { font-size: 0.6875rem; font-weight: 600; line-height: 1; padding: 3px 6px; border-radius: 999px; color: var(--tint); background: var(--tint-soft); }
 
 /* 우측 상단 내 프로필 메뉴: 내 계정과 이 방의 내 비서 */
 .me-menu-wrap { position: relative; }
@@ -1037,3 +1041,113 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
 }
 @keyframes me-menu-in { from { opacity: 0; transform: scale(0.96) translateY(-4px); } }
 @media (prefers-reduced-motion: reduce) { .me-menu { animation: none; } }
+
+/* ---------- 방 만들기 입구(#4) ---------- */
+/* 내 방 목록 맨 위 '새 방 만들기': 방 행과 같은 높이로 두고, 강조색은 더하기 원 하나에만 쓴다 */
+.new-room .title { color: var(--tint); }
+.new-room-icon { flex: none; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--tint-soft); color: var(--tint); font-size: 1.125rem; font-weight: 600; line-height: 1; }
+
+/* 기간 고르기: '기간' 한 줄을 누르면 그 아래로 빠른 선택과 한 달 달력이 펼쳐진다(iOS 캘린더의 시작·종료 줄처럼 목록 안에서).
+   시작·끝은 강조색 원, 그 사이는 옅은 띠. 고르기 전의 값('날짜 고르기')만 강조색으로 눌러도 되는 줄임을 알린다 */
+.range-toggle .range-value { color: var(--label-2); }
+.range-toggle .range-value.empty { color: var(--tint); }
+/* 그 자리에서 펼치는 줄(기간·초대 링크로 참가하기)은 펼치면 화살표가 아래를 본다 */
+.row[aria-controls] .chev { transition: transform 200ms ease; }
+.row[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.range-panel { position: relative; display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 16px; padding: 4px 16px 8px; }
+.range-panel::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 0.5px; background: var(--sep); }
+.range-panel.entering { animation: range-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1); transform-origin: top; }
+@keyframes range-in { from { opacity: 0; transform: translateY(-8px); } }
+.range-presets { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-top: 52px; }
+.range-presets .pick { min-height: 32px; }
+.range-head { display: flex; align-items: center; justify-content: space-between; }
+.range-head h3 { margin: 0; font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+.range-nav { appearance: none; border: 0; background: none; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: var(--tint); cursor: pointer; transition: background-color 120ms ease; }
+.range-nav:hover { background: var(--fill); }
+.range-nav .chev { color: inherit; }
+.range-nav .chev.flip { transform: scaleX(-1); }
+.range-week, .range-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.range-week span { padding: 4px 0; text-align: center; font-size: 0.75rem; color: var(--label-2); letter-spacing: 0; }
+.range-days .day { appearance: none; border: 0; background: none; padding: 0; font: inherit; color: var(--label); position: relative; height: 44px; display: grid; place-items: center; cursor: pointer; font-variant-numeric: tabular-nums; }
+.range-days .day span { position: relative; z-index: 1; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; transition: background-color 120ms ease; }
+.range-days .day:hover span { background: var(--fill); }
+.range-days .day:active span { transform: scale(0.94); }
+.range-days .day.is-today span { color: var(--tint); font-weight: 600; }
+.range-days .day.in-range::before { content: ""; position: absolute; top: 4px; bottom: 4px; left: 0; right: 0; background: var(--tint-soft); }
+.range-days .day.is-start::before { left: 50%; }
+.range-days .day.is-end::before { right: 50%; }
+.range-days > .in-range:nth-child(7n + 1):not(.is-start)::before { left: 4px; border-radius: 18px 0 0 18px; }
+.range-days > .in-range:nth-child(7n):not(.is-end)::before { right: 4px; border-radius: 0 18px 18px 0; }
+.range-days > .is-start:nth-child(7n)::before, .range-days > .is-end:nth-child(7n + 1)::before { display: none; } /* 주 끝에서 시작·주 처음에서 끝나면 띠가 삐져나오지 않게 */
+.range-days .day:is(.is-start, .is-end) span { background: var(--tint); color: #fff; font-weight: 600; }
+.range-foot { display: flex; align-items: center; gap: 16px; min-height: 44px; margin-top: 4px; }
+.range-hint { flex: 1; font-size: 0.8125rem; color: var(--label-2); letter-spacing: 0; }
+.range-foot .done { font-weight: 600; }
+@media (max-width: 560px) {
+  .range-panel { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .range-presets { flex-direction: row; flex-wrap: wrap; padding-top: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .range-panel.entering { animation: none; }
+  .row[aria-controls] .chev, .range-days .day span { transition: none; }
+  .range-days .day:active span { transform: none; }
+}
+
+/* 초대 링크로 참가하기(내 방): 펼치면 같은 목록 안에 붙여 넣을 칸과 버튼이 한 줄로, 좁으면 버튼이 아래로 감긴다 */
+.join-link[hidden] { display: none; }
+.join-link { flex-wrap: wrap; gap: 8px 12px; }
+.join-link input { flex: 1 1 220px; min-width: 0; font: inherit; color: var(--label); background: var(--fill); border: 0; border-radius: 10px; padding: 10px 12px; }
+.join-link input::placeholder { color: var(--label-3); }
+.join-link input[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--orange); }
+.join-error { flex-basis: 100%; margin: 0; font-size: 0.8125rem; color: var(--orange); letter-spacing: 0; }
+.join-error:empty { display: none; }
+
+/* 한 화면 안의 큰 묶음 제목(내 계정의 '내 비서 기본 설정'). 화면 제목(h1)과 묶음 이름표(group-label) 사이의 단계 */
+.block-head { margin: 32px 4px 8px; }
+.block-head h2 { margin: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
+.block-head p { margin: 4px 0 0; font-size: 0.875rem; line-height: 1.5; color: var(--label-2); letter-spacing: 0; }
+
+/* 초대 링크 줄(방): 링크와 만료일, 오른쪽에 복사·공유 원형 아이콘(iOS 공유 링크 줄). 링크는 한 줄로 두고 넘치면 끝을 줄이며,
+   누르면 통째로 골라진다. 아이콘의 보이는 원은 34px, 누르는 자리는 44px. 누르는 순간 줄어들고, 복사하면 초록 체크로 바뀐다 */
+.invite-url { width: 100%; font: inherit; font-size: 0.9375rem; color: var(--label); background: none; border: 0; padding: 0; text-overflow: ellipsis; cursor: text; }
+.invite-url:focus { outline: none; }
+.icon-btn { appearance: none; border: 0; background: none; padding: 0; width: 44px; height: 44px; flex: none; display: grid; place-items: center; color: var(--tint); cursor: pointer; }
+.icon-btn + .icon-btn { margin-left: -8px; }
+.icon-btn span { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--tint-soft); transition: transform 100ms ease-out, background-color 150ms ease, color 150ms ease; }
+.icon-btn:hover span { background: color-mix(in srgb, var(--tint) 24%, transparent); }
+.icon-btn:active span { transform: scale(0.9); }
+.icon-btn.done { color: var(--green); }
+.icon-btn.done span { background: var(--green-soft); }
+.icon-btn:focus-visible { outline: none; }
+.icon-btn:focus-visible span { outline: 3px solid color-mix(in srgb, var(--tint) 60%, transparent); outline-offset: 2px; }
+.group-note .text-btn { font-size: inherit; }
+/* 참여자 줄 끝의 + (친구 초대). 칩과 같은 높이의 원, 강조색은 이 점 하나에만 */
+.person.add { justify-content: center; align-self: stretch; aspect-ratio: 1; min-width: 30px; padding: 0; color: var(--tint); background: var(--tint-soft); transition: transform 100ms ease-out, background-color 120ms ease; }
+.person.add:hover { background: color-mix(in srgb, var(--tint) 24%, transparent); }
+.person.add:active { transform: scale(0.92); }
+/* 초대 시트: 친구가 받을 초대 화면을 작게 미리 보여 준다(받는 쪽 화면과 같은 위계: 작은 머리말 → 방 이름 → 기간·사람 → 정책) */
+.invite-preview { background: var(--card); border-radius: var(--radius); padding: 14px 16px; }
+.invite-preview .eyebrow { margin: 0; font-size: 0.75rem; font-weight: 600; color: var(--tint); letter-spacing: 0; }
+.invite-preview-title { margin: 2px 0 4px; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
+.invite-preview .meta { margin: 2px 0 0; font-size: 0.8125rem; color: var(--label-2); letter-spacing: 0; }
+.invite-waiting { --inset: 16px; }
+.invite-dot { width: 8px; height: 8px; margin: 0 10px 0 11px; border-radius: 50%; background: var(--tint); animation: invite-wait 2s ease-in-out infinite; }
+@keyframes invite-wait { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) {
+  .invite-dot { animation: none; }
+  .person.add:active { transform: none; }
+}
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn span { transition: none; }
+  .icon-btn:active span { transform: none; }
+}
+
+/* 상단바 왼쪽: 어느 화면에서든 같은 자리에 '내 방'으로 돌아가는 길(방 만들기·초대·방 화면) */
+.nav-lead { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.nav-back { font-size: 1rem; margin-left: -4px; flex: none; }
+
+/* 방의 내 비서: 규칙마다 [기본 설정 | 이 방에서만]. 기본 설정을 따르면 그 값을 글로만, 이 방에서만이면 고치는 칸을 그 아래에 둔다 */
+.room-rule-body { margin-top: 10px; }
+.room-rule-body > .group-note:only-child { padding-top: 0; }
+.group-note a { color: var(--tint); text-decoration: none; font-weight: 500; }
