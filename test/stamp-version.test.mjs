@@ -36,13 +36,13 @@ test('stampJs: 바깥 주소, 이미 버전이 붙은 주소, import가 아닌 �
 test('stampHtml: 스크립트와 스타일시트에만 ?v=를 붙이고, 페이지 링크와 바깥 주소는 그대로', () => {
   const html = [
     '<link rel="stylesheet" href="style.css">',
-    '<a class="nav-btn" href="room.html">실제 방 열기</a>',
+    '<a class="nav-text nav-back" href="account.html">내 방</a>',
     '<script type="module" src="room.js"></script>',
     '<img src="https://example.com/y.png" alt="">',
   ].join('\n');
   assert.equal(stampHtml(html, 'abc1234'), [
     '<link rel="stylesheet" href="style.css?v=abc1234">',
-    '<a class="nav-btn" href="room.html">실제 방 열기</a>',
+    '<a class="nav-text nav-back" href="account.html">내 방</a>',
     '<script type="module" src="room.js?v=abc1234"></script>',
     '<img src="https://example.com/y.png" alt="">',
   ].join('\n'));
