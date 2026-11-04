@@ -11,7 +11,7 @@ let now = new Date('2026-11-03T10:00:00Z');
 let server;
 let base;
 before(async () => {
-  server = createApp({ store, gemini: null, clock: () => now, env: {} });
+  server = createApp({ store, gemini: null, clock: () => now, env: { DEV_SEED: '1' } });
   await new Promise((r) => server.listen(0, r));
   base = `http://localhost:${server.address().port}`;
 });
@@ -28,9 +28,14 @@ const call = async (method, path, uid, body) => {
 const post = (path, uid, body = {}) => call('POST', path, uid, body);
 const get = (path, uid) => call('GET', path, uid);
 
-// 방장 me가 방을 만들고 초대 토큰을 받는다
+// 방에 보이는 이름·색은 각자의 프로필(로그인 계정, #2)을 따른다
+const profile = (uid, name, color = '#3478f6') => post('/api/me', uid, { name, color });
+
+// 방장 me(프로필 '재윤')가 방을 만들고 초대 토큰을 받는다. 철수(cs)도 프로필이 있다
 async function roomWithInvite(policy = 'actual') {
-  const { json } = await post('/api/rooms', 'me', { name: '오사카', myName: '재윤', policy });
+  await profile('me', '재윤');
+  await profile('cs', '철수', '#ff9500');
+  const { json } = await post('/api/rooms', 'me', { name: '오사카', policy });
   const roomId = json.room.id;
   const { json: inv } = await post(`/api/rooms/${roomId}/invite`, 'me');
   return { roomId, token: inv.token };
@@ -60,7 +65,7 @@ test('링크만 있으면 참가 화면을 볼 수 있고, 기억·계좌 같은
 
 test('완료 기준 1: 링크로 들어온 친구가 방 멤버 목록에 보인다', async () => {
   const { roomId, token } = await roomWithInvite();
-  const join = await post(`/api/invites/${token}/join`, 'cs', { agree: true, name: '철수' });
+  const join = await post(`/api/invites/${token}/join`, 'cs', { agree: true });
   assert.deepEqual(join.json, { roomId });
   const { status, json } = await get(`/api/rooms/${roomId}`, 'cs');
   assert.equal(status, 200);
@@ -121,7 +126,7 @@ test('정책이 바뀌면 바꾼 사람만 동의한 상태로 돌아간다', as
 
 test('완료 기준 2: 전원이 정책에 동의해야 정산 시작(청구서 보내기)이 열린다', async () => {
   const { roomId, token } = await roomWithInvite();
-  await post(`/api/invites/${token}/join`, 'cs', { agree: true, name: '철수' });
+  await post(`/api/invites/${token}/join`, 'cs', { agree: true });
 
   const blocked = await post(`/api/rooms/${roomId}/invoices/send`, 'me');
   assert.equal(blocked.status, 409);
@@ -140,7 +145,38 @@ test('정산을 시작하면 초대·참가·정책 변경을 막는다', async 
   assert.equal((await post(`/api/rooms/${roomId}/policy`, 'me', { policy: 'settle' })).status, 409);
 });
 
-test('방을 만들 때 적은 내 이름이 멤버 이름이 된다', async () => {
-  const { json } = await post('/api/rooms', 'me', { name: '회식', myName: '  재윤  ' });
-  assert.deepEqual(json.room.members, [{ uid: 'me', name: '재윤' }]);
+test('방에 보이는 이름·색은 내 프로필을 따르고, 따로 적은 이름은 쓰지 않는다', async () => {
+  await profile('me', '재윤', '#34c759');
+  const { json } = await post('/api/rooms', 'me', { name: '회식', myName: '다른 이름' });
+  assert.deepEqual(json.room.members, [{ uid: 'me', name: '재윤', color: '#34c759' }]);
+  const { token } = (await post(`/api/rooms/${json.room.id}/invite`, 'me')).json;
+  await profile('yh', '영희', '#ff2d55');
+  await post(`/api/invites/${token}/join`, 'yh', { agree: true, name: '가짜 이름' });
+  assert.deepEqual((await store.get('rooms', json.room.id)).members.at(-1), { uid: 'yh', name: '영희', color: '#ff2d55' });
+});
+
+test('프로필이 아직 없는 계정은 로그인 이름으로 프로필을 만들어 들어간다', async () => {
+  const { json } = await post('/api/rooms', 'newbie', { name: '첫 방' });
+  const [m] = json.room.members;
+  assert.equal(m.name, 'newbie'); // 개발용 신원의 이름은 uid다(배포에서는 Google 이름)
+  assert.match(m.color, /^#[0-9a-f]{6}$/i);
+  assert.deepEqual(await store.get('users', 'newbie'), { id: 'newbie', name: m.name, color: m.color });
+});
+
+test('탈퇴한 계정은 방을 만들거나 참가할 수 없다', async () => {
+  const { token } = await roomWithInvite();
+  await store.put('deletedUsers', { id: 'gone' });
+  assert.equal((await post('/api/rooms', 'gone', { name: '탈퇴 뒤 방' })).status, 401);
+  assert.equal((await post(`/api/invites/${token}/join`, 'gone', { agree: true })).status, 401);
+});
+
+test('초대 링크를 만든 사람이 탈퇴하면 초대 문서에서도 계정 연결이 끊기고, 링크는 그대로 쓸 수 있다', async () => {
+  const { roomId, token } = await roomWithInvite();
+  await post(`/api/invites/${token}/join`, 'cs', { agree: true });
+  const { token: fresh } = (await post(`/api/rooms/${roomId}/invite`, 'cs')).json; // 철수가 만든 링크
+  await store.eraseUser('cs');
+  const inv = await store.get('invites', roomId);
+  assert.notEqual(inv.createdBy, 'cs');
+  assert.match(inv.createdBy, /^deleted-/);
+  assert.equal((await post(`/api/invites/${fresh}/join`, 'yh', { agree: true })).status, 200, '남은 멤버를 위해 링크는 산다');
 });

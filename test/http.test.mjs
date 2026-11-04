@@ -23,7 +23,7 @@ const memory = { 나: ['맥주를 좋아해요'], 철수: ['술자리에서 하�
 
 test('GET /api/config → { mode: gemini, model: fake }', async () => {
   const res = await fetch(base + '/api/config');
-  assert.deepEqual(await res.json(), { mode: 'gemini', model: 'fake' });
+  assert.deepEqual(await res.json(), { mode: 'gemini', model: 'fake', auth: { firebase: null, dev: false, emulator: null } });
 });
 
 test('POST /api/allocate (가짜 Gemini가 오차즈케를 빼먹음) → 그 줄은 규칙 배분으로 채우고 filled: true', async () => {
@@ -71,7 +71,7 @@ test('Gemini가 없으면 config는 rules, 배분은 규칙으로', async () => 
   const s = createApp({ store: new MemoryStore(), gemini: null, env: {} });
   await new Promise((r) => s.listen(0, r));
   const b = `http://localhost:${s.address().port}`;
-  assert.deepEqual(await (await fetch(b + '/api/config')).json(), { mode: 'rules', model: null });
+  assert.deepEqual(await (await fetch(b + '/api/config')).json(), { mode: 'rules', model: null, auth: { firebase: null, dev: false, emulator: null } });
   const out = await (await fetch(b + '/api/allocate', { method: 'POST', body: JSON.stringify({ memory }) })).json();
   assert.equal(out.source, 'rules');
   assert.deepEqual(out.lines.oolong.consumers, ['영희']);

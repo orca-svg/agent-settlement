@@ -1,4 +1,4 @@
-// 계좌 칸만 잠그는 Store 래퍼(#8, #10): 진짜 저장소에는 잠긴 글자만, 래퍼로 꺼내면 평문.
+// 계좌·위치 요약 칸만 잠그는 Store 래퍼(#8, #10): 진짜 저장소에는 잠긴 글자만, 래퍼로 꺼내면 평문.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MemoryStore } from '../src/store/memory.mjs';
@@ -41,6 +41,82 @@ test('transfers.link·fallback: 잠그고, get·list 모두 풀어서 돌려준�
   assert.ok(!JSON.stringify(raw).includes('100000000002'));
   assert.deepEqual(await store.get('transfers', t.id), t);
   assert.deepEqual(await store.list('transfers', { roomId: 'r1' }), [t]);
+});
+
+// #7 위치 근거(#10): 본인 제출 시각과 그것으로 만든 문장. 찾을 때 쓰는 uid·roomId는 잠그지 않는다
+const LEFT = {
+  id: 'loc-1', uid: 'me', roomId: 'r1', expenseId: 'e1', source: 'timeline_export', createdAt: '2026-11-01T12:00:00.000Z',
+  leftAt: '20:15', nextAt: '20:28', nextHome: true,
+  summary: '첫 주문(17:45) 때 머물던 곳을 20:15에 떠났어요 · 20:28 집에 도착 · Google 지도 타임라인(본인 제출)',
+};
+
+test('locationEvidence: 시각·요약 5칸은 잠기고, 찾는 데 쓰는 칸은 평문', async () => {
+  const { inner, store } = make();
+  const stay = {
+    id: 'loc-2', uid: 'me', roomId: 'r1', expenseId: 'e2', source: 'timeline_export', createdAt: LEFT.createdAt,
+    stayedUntil: '20:45', summary: '첫 주문(17:45)부터 결제(20:45)까지 같은 곳에 있었어요 · Google 지도 타임라인(본인 제출)',
+  };
+  await store.put('locationEvidence', LEFT);
+  await store.put('locationEvidence', stay);
+  const raw = await inner.get('locationEvidence', 'loc-1');
+  for (const f of ['summary', 'leftAt', 'nextAt', 'nextHome']) assert.ok(isSealed(raw[f]), `${f}가 잠기지 않음`);
+  assert.ok(isSealed((await inner.get('locationEvidence', 'loc-2')).stayedUntil));
+  assert.deepEqual([raw.uid, raw.roomId, raw.expenseId, raw.source], ['me', 'r1', 'e1', 'timeline_export']);
+  assert.doesNotMatch(JSON.stringify(await inner.list('locationEvidence')), /20:15|20:28|20:45|떠났어요|있었어요/);
+  assert.deepEqual(await store.list('locationEvidence', { uid: 'me', roomId: 'r1' }), [LEFT, stay]);
+});
+
+test('locationEvidence: 도착 시각이 없으면 null 그대로, false도 잠갔다가 false로 푼다', async () => {
+  const { inner, store } = make();
+  const doc = { ...LEFT, nextAt: null, nextHome: false };
+  await store.put('locationEvidence', doc);
+  const raw = await inner.get('locationEvidence', doc.id);
+  assert.equal(raw.nextAt, null);
+  assert.ok(isSealed(raw.nextHome));
+  assert.deepEqual(await store.get('locationEvidence', doc.id), doc);
+});
+
+test('locationEvidence: 잠긴 시각으로는 찾을 수 없다', async () => {
+  const { store } = make();
+  await assert.rejects(store.list('locationEvidence', { leftAt: '20:15' }), /잠긴 칸/);
+});
+
+// 이의(#7, #10): 위치 요약을 베낀 근거와, 그것을 보고 쓴 중재안
+const DISPUTE = {
+  id: 'r1:d-1', roomId: 'r1', expenseId: 'e1', by: 'me', status: 'proposed', agreedBy: [],
+  claim: '나의 위치 요약만으로 참석 여부를 확정할 수 없어 부담 항목 확인을 요청해요.',
+  evidence: [{ kind: 'left_at', time: '20:15', summary: LEFT.summary, locationId: 'loc-1', source: 'timeline_export', requiresHumanApproval: true }],
+  proposal: {
+    summary: '20:15 이전 주문은 넷이, 이후 주문은 나를 뺀 셋이 나눠요.',
+    alloc: { 'line-1': { consumers: ['cs', 'yh'], confidence: 0.6, reason: '20:15 이후 주문', confirmed: false } },
+    source: 'rules',
+  },
+};
+
+test('disputes.evidence·proposal: 잠그고, get·list 모두 원래 모양으로 푼다', async () => {
+  const { inner, store } = make();
+  await store.put('disputes', DISPUTE);
+  const raw = await inner.get('disputes', DISPUTE.id);
+  assert.ok(isSealed(raw.evidence) && isSealed(raw.proposal));
+  assert.equal(raw.claim, DISPUTE.claim); // 위치 근거로 낸 이의의 claim은 일반 문장이라 잠그지 않는다
+  assert.doesNotMatch(JSON.stringify(raw), /20:15|떠났어요|타임라인/);
+  assert.deepEqual(await store.get('disputes', DISPUTE.id), DISPUTE);
+  assert.deepEqual(await store.list('disputes', { roomId: 'r1' }), [DISPUTE]);
+});
+
+test('빈 목록은 null처럼 잠그지 않는다(넣을 때도, 진짜 저장소에 직접 들어 있어도)', async () => {
+  const { inner, store } = make();
+  const { proposal, ...rest } = DISPUTE;
+  const empty = { ...rest, id: 'r1:d-2', status: 'open', evidence: [] };
+  await store.put('disputes', empty);
+  assert.deepEqual((await inner.get('disputes', empty.id)).evidence, []);
+  assert.deepEqual(await store.get('disputes', empty.id), empty);
+  // 탈퇴 처리(erase-user.mjs)처럼 래퍼를 거치지 않고 []를 써 넣어도 읽힌다
+  await inner.put('disputes', { ...empty, id: 'r1:d-3' });
+  assert.deepEqual((await store.get('disputes', 'r1:d-3')).evidence, []);
+  // 비어 있지 않은 평문은 지금처럼 에러
+  await inner.put('disputes', { ...empty, id: 'r1:d-4', evidence: [{ kind: 'text', summary: '가짜 근거' }] });
+  await assert.rejects(store.get('disputes', 'r1:d-4'), /잠기지 않은 값/);
 });
 
 test('null·없는 칸은 잠그지 않고 그대로', async () => {
@@ -212,4 +288,44 @@ test('통합: 받을 계좌를 새로 정해도 저장소에는 잠긴 글자만
   assert.equal((await store.get('agents', 'yh')).payout.accountNo, '123-456-789012');
   const t = (await store.list('transfers', { roomId: 'demo-e' })).find((x) => x.to === 'yh');
   assert.equal(t.fallback.accountNo, '123456789012');
+});
+
+// #7·#10 통합: 로그인(가짜 ID 토큰)한 사용자가 타임라인 붙이기 → 이의 → 중재까지 가도
+// 진짜 저장소에는 시각·요약이 없고, 당사자 화면에는 평문이 내려간다
+test('통합: 위치 요약을 붙여 이의·중재까지 가도 저장소에는 시각·요약이 없고, 당사자 화면에는 평문', async (t) => {
+  const { inner, store } = make();
+  await seedDemoRoom(store, { id: 'room-one' });
+  const exp = await store.get('expenses', 'room-one-izakaya');
+  await store.put('expenses', { ...exp, date: '2026-11-01' }); // 결제 20:45(KST), 주문 시각이 없어 17:45부터
+  const auth = { verifyIdToken: async (token) => ({ uid: token, name: '테스트 사용자', auth_time: 0 }), deleteUser: async () => {} };
+  const server = createApp({ store, auth, clock: () => new Date('2026-11-01T12:00:00Z') });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const call = async (path, uid, body) => {
+    const res = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {
+      method: body ? 'POST' : 'GET',
+      headers: { authorization: `Bearer ${uid}` },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    assert.equal(res.status, 200, `${path} → ${res.status} ${await res.clone().text()}`);
+    return res.json();
+  };
+
+  await call('/api/rooms/room-one/location/timeline', 'me', { agree: true, expenseId: exp.id, leftAt: '20:15', nextAt: '20:28', nextHome: true });
+  const raised = await call('/api/rooms/room-one/disputes', 'me', { expenseId: exp.id, claim: '참석 근거를 확인해 주세요' });
+  const proposed = await call(`/api/rooms/room-one/disputes/${encodeURIComponent(raised.id)}/mediate`, 'me', {});
+  assert.equal(proposed.status, 'proposed');
+
+  // 위치 기록과 이의 문서 어디에도 시각·요약·중재안 문장이 평문으로 없다
+  const rawOf = (col) => JSON.stringify([...(inner.cols.get(col)?.values() ?? [])]);
+  const docs = rawOf('locationEvidence') + rawOf('disputes');
+  for (const s of ['20:15', '20:28', '떠났어요', '본인 제출', '이전 주문은']) assert.ok(!docs.includes(s), `저장소에 '${s}'가 평문으로 남음`);
+  // 비서 기록·청구서까지 포함한 저장소 전체에도 요약 문장은 없다
+  const dump = await rawDump(inner);
+  for (const s of ['떠났어요', '본인 제출', '이전 주문은']) assert.ok(!dump.includes(s), `저장소 어딘가에 '${s}'`);
+
+  // 이의를 낸 당사자 화면에는 평문
+  const view = (await call('/api/rooms/room-one', 'me')).disputes.find((d) => d.id === raised.id);
+  assert.match(view.evidence[0].summary, /20:15에 떠났어요/);
+  assert.match(view.proposal.summary, /20:15 이전 주문은/);
 });

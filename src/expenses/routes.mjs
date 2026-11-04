@@ -4,8 +4,10 @@ import { readJson, send, HttpError } from '../http.mjs';
 import { toKrw, won } from '../../public/core.js';
 import { subj, topic, obj, whose } from '../../public/ui.js';
 import { MAX_RECEIPT } from '../http.mjs';
-import { allocateWithGemini } from '../agents/allocate.mjs';
+import { allocateWithGemini, publicReason } from '../agents/allocate.mjs';
+import { roomMemory, memoryKey } from '../agents/memory.mjs';
 import { isFlagged } from '../actions.mjs';
+import { supersedeDisputes } from '../agents/disputes.mjs';
 import { validateExpense } from './validate.mjs';
 import { extractReceipt } from './receipt.mjs';
 
@@ -60,10 +62,11 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     const next = checked.expense;
     const lineKey = (e) => JSON.stringify((e.items ?? []).map((it) => [it.id, it.qty, it.unit]));
     const keepAlloc = exp.alloc && next.items && lineKey(next) === lineKey(exp) && next.present.join() === exp.present.join();
-    const saved = { ...next, id: exp.id, roomId: room.id, createdBy: exp.createdBy, ...(exp.hasReceipt ? { hasReceipt: true } : {}), ...(keepAlloc ? { alloc: exp.alloc } : {}) };
+    const saved = { ...next, id: exp.id, roomId: room.id, createdBy: exp.createdBy, ...(exp.hasReceipt ? { hasReceipt: true } : {}), ...(keepAlloc ? { alloc: exp.alloc, allocMemory: exp.allocMemory } : {}) };
     await store.put('expenses', saved);
     await store.put('rooms', { ...room, version: room.version + 1 });
     await store.appendEvent(room.id, { from: 'system', to: 'all', kind: 'expense_edited', text: `${subj(me.name)} ${obj(`‘${saved.title}’`)} 고쳤어요` });
+    await supersedeDisputes(store, room.id, exp, saved);
     return { expense: saved };
   });
 
@@ -74,6 +77,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     await store.delete('receipts', exp.id);
     await store.put('rooms', { ...room, version: room.version + 1 });
     await store.appendEvent(room.id, { from: 'system', to: 'all', kind: 'expense_deleted', text: `${subj(me.name)} ${obj(`‘${exp.title}’`)} 지웠어요` });
+    await supersedeDisputes(store, room.id, exp);
     return { deleted: exp.id };
   });
 
@@ -89,13 +93,18 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
   routes.post('/api/rooms/:id/expenses/:eid/allocate', async ({ req, params }) => {
     const { room, me, exp } = await roomExpense(req, params.id, params.eid);
     if (!exp.items?.length) throw new HttpError(400, '영수증 줄이 있는 지출만 나눌 수 있어요');
+    const memory = await roomMemory(store, room);
+    // 이미 나눴고 그때와 기억이 같으면 같은 답이 나올 뿐이다. 다시 나누면 확인한 줄이 지워지고 버전이 올라
+    // 보낸 청구서까지 밀려나니, 아무것도 바꾸지 않는다(화면은 allocFresh로 버튼을 미리 막는다)
+    if (exp.alloc && exp.allocMemory === memoryKey(memory)) throw new HttpError(409, '바뀐 것이 없어 다시 나누지 않았어요. 지출을 고치거나 비서의 기억이 바뀌면 다시 나눌 수 있어요');
     if (overLimit(`uid:${me.uid}`)) throw new HttpError(429, '요청이 너무 많아요. 10분 뒤에 다시 시도해 주세요.');
-    const memory = Object.fromEntries(await Promise.all(room.members.map(async (m) => [m.uid, (await store.get('agents', m.uid))?.memory ?? []])));
     const started = Date.now();
     const out = await allocateWithGemini(gemini, exp, room, memory, { cache: allocCache });
     const latencyMs = Date.now() - started;
-    const alloc = Object.fromEntries(Object.entries(out.alloc).map(([id, a]) => [id, { consumers: a.consumers, confidence: a.confidence, reason: a.reason }]));
-    const saved = { ...exp, split: 'items', alloc };
+    // 묻지 않아도 정해진 배분(obvious)의 이유는 사람 수·줄 수뿐이라 그대로 두고, 나머지는 기억이 새지 않는 이유로 바꾼다
+    const reasonOf = (id, a) => (out.how === 'obvious' ? a.reason : publicReason(exp.items.find((it) => it.id === id), a, exp, room));
+    const alloc = Object.fromEntries(Object.entries(out.alloc).map(([id, a]) => [id, { consumers: a.consumers, confidence: a.confidence, reason: reasonOf(id, a) }]));
+    const saved = { ...exp, split: 'items', alloc, allocMemory: memoryKey(memory) };
     await store.put('expenses', saved);
     await store.put('rooms', { ...room, version: room.version + 1 });
     const used = Object.values(memory).reduce((n, list) => n + list.length, 0);
@@ -103,9 +112,9 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     await store.appendEvent(room.id, {
       from: exp.createdBy, to: 'all', kind: 'allocated',
       text: out.how === 'obvious' ? `${topic(`‘${exp.title}’`)} ${out.why}` : `${exp.title} 영수증 ${exp.items.length}줄을 비서들이 공유한 기억 ${used}개로 나눴어요.`,
-      meta: out.how === 'obvious' ? 'allocate · AI 호출 없음'
-        : out.how === 'cache' ? `allocate · ${label} · 이전 답 재사용`
-        : `allocate · ${label} · ${(latencyMs / 1000).toFixed(1)}초`,
+      meta: out.how === 'obvious' ? '나눈 방법: AI 없이 규칙으로'
+        : out.how === 'cache' ? `나눈 방법: ${label} · 이전 답 재사용`
+        : `나눈 방법: ${label} · ${(latencyMs / 1000).toFixed(1)}초 걸렸어요`,
     });
     for (const it of exp.items.filter((x) => isFlagged(alloc[x.id]))) {
       await store.appendEvent(room.id, {
@@ -114,6 +123,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
         action: { type: 'confirm_line', ref: `${exp.id}:${it.id}`, for: exp.createdBy },
       });
     }
+    await supersedeDisputes(store, room.id, exp, saved);
     console.log(`[allocate] ${out.how} ${out.source} ${latencyMs}ms`);
     return { expense: saved, source: out.source, how: out.how, latencyMs };
   });
@@ -136,6 +146,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     await store.put('rooms', { ...room, version: room.version + 1 });
     const names = consumers.map((u) => room.members.find((m) => m.uid === u)?.name ?? u).join('·');
     await store.appendEvent(room.id, { from: me.uid, to: 'all', kind: 'line_confirmed', text: `${topic(`‘${item.name}’`)} ${whose(names)} 몫으로 확인했어요` });
+    await supersedeDisputes(store, room.id, exp, saved);
     return { expense: saved };
   });
 }

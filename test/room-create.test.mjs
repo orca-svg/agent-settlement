@@ -8,7 +8,7 @@ const store = new MemoryStore();
 let server;
 let base;
 before(async () => {
-  server = createApp({ store, gemini: null, env: {} });
+  server = createApp({ store, gemini: null, env: { DEV_SEED: '1' } });
   await new Promise((r) => server.listen(0, r));
   base = `http://localhost:${server.address().port}`;
 });
@@ -29,6 +29,7 @@ test('방을 만들면 만든 사람만 멤버이고, 고른 정책에 동의한
   assert.equal(room.name, '오사카 여행'); // 공백 정리
   assert.equal(room.dates, '11월 7일 – 9일');
   assert.deepEqual(room.members.map((m) => m.uid), ['me']);
+  assert.match(room.members[0].color, /^#[0-9a-f]{6}$/i, '멤버에는 프로필 색이 들어간다');
   assert.equal(room.policy, 'payday');
   assert.deepEqual(room.policyAgreedBy, ['me']);
   assert.equal(room.status, 'ready');

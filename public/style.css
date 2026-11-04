@@ -210,6 +210,7 @@ h1, h2, h3, p { margin: 0; }
   flex: none;
 }
 .avatar.lg { width: 32px; height: 32px; font-size: 0.875rem; }
+.avatar.xl { width: 64px; height: 64px; font-size: 1.75rem; transition: background-color 200ms ease; }
 .avatar.agent { border-radius: 8px; }
 
 /* ---------- 다음 할 일 카드 ---------- */
@@ -227,6 +228,26 @@ h1, h2, h3, p { margin: 0; }
 .next h2 { font-size: 1.375rem; line-height: 1.25; font-weight: 700; letter-spacing: -0.02em; }
 .next p { color: var(--label-2); font-size: 0.9375rem; letter-spacing: 0; }
 .next .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+/* 방금 한 일(중재안 동의). 시트가 닫힌 뒤 다음 할 일 카드 바로 위에 한 줄로 남긴다.
+   초록 글자는 옅은 초록 바탕에서 대비가 모자라서 글자는 본문색으로, 초록은 체크 표시에만 쓴다 */
+.done-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--green-soft);
+  color: var(--label);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  letter-spacing: 0;
+  scroll-margin-top: calc(60px + env(safe-area-inset-top));
+}
+.done-note svg { flex: none; width: 18px; height: 18px; margin-top: 1px; color: var(--green); }
+/* 거부로 끝난 이의는 초록 체크가 아니라 회색 ✕. 색을 못 봐도 동의와 구분된다 */
+.done-note.ended { background: var(--fill); }
+.done-note.ended svg { color: var(--label-2); }
 .progress { height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; }
 .progress i {
   display: block;
@@ -251,6 +272,8 @@ h1, h2, h3, p { margin: 0; }
   cursor: pointer;
   transition: transform 100ms ease-out, opacity 100ms ease-out;
 }
+/* 링크로 만든 버튼도 버튼과 똑같이 보이게(밑줄·방문 색 없이) */
+a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 .btn:active { transform: scale(0.97); opacity: 0.85; }
 .btn.secondary { background: var(--tint-soft); color: var(--tint); }
 .btn.plain { background: var(--fill); color: var(--label); }
@@ -293,6 +316,82 @@ h1, h2, h3, p { margin: 0; }
   background: none;
   border: 0;
 }
+/* 링크로 만든 행(계정 화면의 내 방·데모)도 버튼 행과 같은 글자색으로. 눌리는 곳임은 화살표(›)가 알린다 */
+a.row { color: inherit; text-decoration: none; cursor: pointer; }
+a.row:active { background: var(--fill); }
+/* 목록 안의 명령 행(로그아웃·탈퇴). 화살표 없이 글자색이 눌리는 곳임을 알린다 */
+.row.act { --inset: 16px; color: var(--tint); cursor: pointer; }
+.row.act.danger { color: var(--danger); }
+
+/* 한 단 화면(내 계정). 넓은 화면에서도 가운데에 읽기 좋은 폭으로 */
+.solo { max-width: 520px; margin: 0 auto; padding: 24px 20px 40px; }
+.solo .group-note a, .solo .form-error a { color: var(--tint); text-decoration: none; }
+.nav-brand { font-weight: 600; color: var(--label); text-decoration: none; }
+/* 상단바·꼬리말도 본문과 같은 폭에 맞춰 왼쪽 선을 하나로 */
+.solo-page .nav-inner, .solo-page .foot { max-width: 520px; }
+/* 내 계정 상단바: 왼쪽(나가기)·가운데(제목)·오른쪽(저장·내 아바타) 세 칸. 가운데 제목은 늘 가운데 */
+.solo-page .nav-inner { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+.nav-heading { font-weight: 600; }
+.nav-end { justify-self: end; display: flex; }
+.nav-text {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 1.0625rem;
+  color: var(--tint);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.nav-text.strong { font-weight: 600; }
+.nav-text:active { opacity: 0.5; }
+.nav-text:disabled { opacity: 0.4; cursor: default; }
+/* 내 아바타 버튼. 보이는 원은 32px지만 누를 수 있는 곳은 44px */
+.nav-avatar { appearance: none; border: 0; background: none; padding: 6px; margin: -6px; border-radius: 50%; cursor: pointer; transition: transform 100ms ease-out; }
+.nav-avatar:active { transform: scale(0.92); }
+.nav-avatar .avatar { display: grid; }
+#message:empty { display: none; }
+
+/* Google 로그인 버튼: 흰(어두우면 짙은) 바탕에 G 로고. 다른 파란 버튼과 헷갈리지 않게 브랜드 모양을 따른다 */
+.btn.google {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--card);
+  color: var(--label);
+  box-shadow: inset 0 0 0 1px var(--sep);
+}
+.btn.google svg { width: 18px; height: 18px; flex: none; }
+
+/* 프로필 미리보기와 색 견본. 고르는 순간 미리보기 아바타 색이 바뀐다(눌림은 누르는 순간 줄어들어 알린다) */
+.profile-preview { display: grid; justify-items: center; gap: 8px; padding: 4px 0 20px; }
+.profile-preview .title { font-size: 1.0625rem; font-weight: 600; }
+/* 견본은 늘 한 줄. 견본 수(8~9개)에 맞춰 칸을 나눠 좁은 폰에서도 두 줄로 꺾이지 않게 한다 */
+.swatches { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 12px 12px; }
+.swatch { position: relative; display: grid; place-items: center; height: 40px; cursor: pointer; }
+.swatch input {
+  appearance: none;
+  margin: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--c);
+  cursor: pointer;
+  transition: box-shadow 150ms ease, transform 100ms ease-out;
+}
+/* 고른 것은 바깥 고리(모양)와 체크(기호)로 함께 알린다. 색만으로 구분하지 않는다 */
+.swatch input:checked { box-shadow: 0 0 0 2.5px var(--card), 0 0 0 4.5px var(--c); }
+.swatch input:active { transform: scale(0.9); }
+.swatch input:focus-visible { outline: 3px solid color-mix(in srgb, var(--tint) 60%, transparent); outline-offset: 5px; }
+.swatch .check { position: absolute; width: 16px; height: 16px; opacity: 0; pointer-events: none; transition: opacity 150ms ease; }
+.swatch input:checked + .check { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .swatch input, .swatch .check, .avatar.xl { transition: none; } }
 .row + .row::before {
   content: "";
   position: absolute;
@@ -327,6 +426,39 @@ button.row:active { background: var(--fill); }
 .tile.drink { background: #af52de; }
 .tile.shop { background: #34c759; }
 .tile.bus { background: #007aff; }
+.tile.pin { background: #8e8e93; }
+.badges { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.group-actions { display: flex; gap: 12px; padding: 4px 12px 0; }
+
+/* iOS식 스위치. 켜면 무엇이 일어나는지는 같은 행의 제목이 말한다 */
+.switch {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 51px;
+  height: 31px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--fill-2);
+  cursor: pointer;
+  transition: background-color 200ms ease;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: #fff; /* 어두운 화면에서도 손잡이는 흰색 */
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16);
+  transition: transform 250ms cubic-bezier(0.3, 0.7, 0.4, 1);
+}
+.switch:checked { background: var(--green); }
+.switch:checked::after { transform: translateX(20px); }
+@media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition: none; } }
+@media (prefers-contrast: more) { .switch { outline: 1px solid var(--label-3); } }
 
 .chip {
   display: inline-flex;
@@ -459,11 +591,30 @@ button.row:active { background: var(--fill); }
   letter-spacing: 0;
 }
 
+/* ---------- 청구서가 막혔을 때의 안내: 버튼을 누른 자리(버튼 아래)에서 까닭·남은 줄·갈 곳을 알린다 ---------- */
+.blocked { display: grid; gap: 4px; padding: 14px; border-radius: 12px; background: var(--orange-soft); }
+.next .blocked p { margin: 0; }
+.next .blocked-title { display: flex; align-items: center; gap: 6px; font-size: 1rem; font-weight: 600; color: var(--label); letter-spacing: 0; }
+.blocked-title svg { flex: none; color: var(--orange); }
+.next .blocked-lead { font-size: 0.875rem; color: var(--label-2); }
+.blocked ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.blocked li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 10px 10px 14px; border-radius: 10px; background: var(--card); }
+.blocked-what { flex: 1 1 150px; min-width: 0; display: grid; gap: 2px; font-size: 0.9375rem; font-weight: 500; line-height: 1.35; }
+.blocked-what small { font-size: 0.8125rem; font-weight: 400; color: var(--label-2); }
+.blocked .btn { min-height: 44px; }
+/* 움직임 줄이기: 흔드는 대신 글자만 잠깐 밑줄로 강조한다(위치·색은 그대로) */
+.btn[data-nudge] { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
+
+/* 지출 시트에서 막힌 줄로 안내받아 왔을 때: 테두리로 가리킨다(색에만 기대지 않는다) */
+.line.focus { box-shadow: inset 0 0 0 2px var(--orange); }
+.line-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
 /* ---------- 비서끼리 채널 ---------- */
 .channel {
   position: sticky;
   top: 64px;
   max-height: calc(100vh - 80px);
+  max-height: calc(100dvh - 80px);
   overflow: auto;
   overscroll-behavior: contain;
   background: var(--card);
@@ -479,23 +630,35 @@ button.row:active { background: var(--fill); }
   display: grid;
   grid-template-columns: 24px 1fr;
   gap: 10px;
-  padding: 10px 16px;
-  border-top: 0.5px solid var(--sep);
+  padding: 8px 16px;
 }
 .log li.enter { animation: rise 320ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
-.log .who { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0; display: flex; justify-content: space-between; gap: 8px; }
+/* 누가 누구에게: 이름은 굵게, 받는 사람은 흐리게. 시각은 분까지만 */
+.log .who { font-size: 0.75rem; font-weight: 600; color: var(--label-2); letter-spacing: 0; display: flex; justify-content: space-between; gap: 8px; margin-bottom: 3px; }
+.log .who .to { font-weight: 400; color: var(--label-3); }
 .log .who time { font-weight: 400; color: var(--label-3); font-variant-numeric: tabular-nums; }
-.log .text { font-size: 0.9375rem; margin-top: 1px; letter-spacing: -0.005em; }
-.log .meta {
-  margin-top: 4px;
-  font: 0.75rem/1.4 ui-monospace, "SF Mono", Menlo, monospace;
-  color: var(--label-2);
-  background: var(--card-2);
-  border-radius: 6px;
-  padding: 4px 6px;
+/* 비서가 한 말은 말풍선. 아바타 쪽 위 모서리만 덜 둥글게 해 누가 말했는지 잇는다 */
+.log .text {
+  display: inline-block;
+  max-width: 100%;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 16px 16px 16px 16px;
+  border-top-left-radius: 6px;
+  background: var(--fill);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  letter-spacing: -0.005em;
   overflow-wrap: anywhere;
 }
+/* 근거는 말풍선 밖에 접어 둔다. 펼치면 비서가 따른 규칙과 수치가 보인다 */
+.log details.why { margin-top: 4px; }
+.log details.why > summary { list-style: none; cursor: pointer; font-size: 0.75rem; color: var(--label-2); letter-spacing: 0; }
+.log details.why > summary::-webkit-details-marker { display: none; }
+.log details.why > summary::after { content: " ›"; }
+.log details.why[open] > summary::after { content: " ⌄"; }
+.log details.why > p { margin: 4px 0 0; padding: 6px 10px; border-radius: 10px; background: var(--card-2); font-size: 0.8125rem; line-height: 1.45; color: var(--label-2); letter-spacing: 0; overflow-wrap: anywhere; }
 .log .tag { margin-top: 5px; }
 .empty { padding: 14px 16px; color: var(--label-2); font-size: 0.9375rem; }
 .notif {
@@ -522,7 +685,10 @@ button.row:active { background: var(--fill); }
   bottom: 0;
   margin: 0 auto;
   max-width: 640px;
+  /* iOS의 vh는 도구 막대가 숨은 큰 화면 기준이라, 막대가 보이면 시트 위쪽(제목·닫기)이 주소창 뒤로 밀린다.
+     지금 보이는 높이(dvh)를 쓰고, dvh를 모르는 옛 브라우저는 앞 줄의 vh를 쓴다(test/style.test.mjs가 확인) */
   max-height: 92vh;
+  max-height: 92dvh;
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -579,6 +745,8 @@ button.row:active { background: var(--fill); }
   letter-spacing: 0;
 }
 .pick:active { transform: scale(0.95); }
+/* 기본 여백(왼쪽 3px)은 왼쪽에 얼굴이 붙는 사람 고르기용이다. 글자만 있는 캡슐(공유 중·금액 버튼)은 좌우를 같게 해 글자가 가운데 오게 한다 */
+.pick:not(:has(.avatar)) { padding: 3px 10px; justify-content: center; }
 .pick .avatar { width: 20px; height: 20px; font-size: 0.6875rem; opacity: 0.35; }
 .pick[aria-pressed="true"] { background: var(--tint-soft); color: var(--tint); }
 .pick[aria-pressed="true"] .avatar { opacity: 1; }
@@ -643,13 +811,10 @@ button.row:active { background: var(--fill); }
 .slider.pressed .slider-thumb { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24); }
 .slider-hint { font-size: 0.75rem; color: var(--label-3); text-align: center; margin-top: 6px; }
 
-/* 컴퓨터(넓은 화면)에서만 보이는 QR. 휴대폰은 토스가 바로 열리니 필요 없다 */
-.qr-desktop { display: none; margin-top: 16px; text-align: center; }
+/* 컴퓨터에서 휴대폰으로 넘기는 QR. 보일지는 room.js가 sendMode로 그릴 때 정하니 여기서 숨기지 않는다 */
+.qr-desktop { margin-top: 16px; text-align: center; }
 .qr-desktop img { border-radius: 12px; width: 220px; height: 220px; }
 .qr-wait { width: 220px; height: 220px; margin: 0 auto; display: grid; place-items: center; border-radius: 12px; background: var(--fill); color: var(--label-2); font-size: 0.8125rem; line-height: 1.5; padding: 16px; box-sizing: border-box; }
-@media (min-width: 640px) {
-  .qr-desktop { display: block; }
-}
 
 .phone-label { font-size: 0.8125rem; color: var(--label-2); margin-bottom: 10px; display: flex; gap: 6px; align-items: center; }
 .done-mark {
@@ -669,6 +834,9 @@ button.row:active { background: var(--fill); }
   place-items: center;
 }
 
+/* 꼬리말 링크(개인정보 처리방침)는 흐린 안내 글과 구분되게 본문 글자색·굵은 글씨로 보이고, 밑줄로 링크임을 보인다
+   (표준 개인정보 보호지침 제20조①: 글자 크기·색상 등으로 다른 고지사항과 구분) */
+.foot a { color: var(--label); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .foot {
   max-width: 1120px;
   margin: 0 auto;
@@ -694,6 +862,11 @@ button.row:active { background: var(--fill); }
   @keyframes fade { from { opacity: 0; } }
 }
 
+/* ---------- 이의 시트: 동의·거부 버튼. 아이콘을 앞에 붙여 글자와 모양으로도 구분한다 ---------- */
+.stack { display: grid; gap: 8px; }
+.btn.lead { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
+.btn.lead svg { flex: none; width: 18px; height: 18px; }
+
 /* ---------- 지우기(되돌릴 수 없는 동작은 한 번 더 누르게) ---------- */
 .btn.danger { background: var(--danger-soft); color: var(--danger); }
 .btn.danger.armed { background: var(--danger); color: #fff; }
@@ -703,13 +876,13 @@ button.row:active { background: var(--fill); }
 .photo-modal[hidden] { display: none; }
 .photo-modal .photo-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.72); opacity: 0; transition: opacity 200ms ease; }
 .photo-modal figure {
-  position: relative; margin: 0; max-width: min(92vw, 720px); max-height: 88vh;
+  position: relative; margin: 0; max-width: min(92vw, 720px); max-height: 88vh; max-height: 88dvh;
   display: grid; gap: 10px; justify-items: center;
   opacity: 0; transform: scale(0.96); transition: opacity 200ms ease, transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .photo-modal.shown .photo-scrim, .photo-modal.shown figure { opacity: 1; }
 .photo-modal.shown figure { transform: none; }
-.photo-modal img { max-width: 100%; max-height: calc(88vh - 56px); border-radius: 14px; object-fit: contain; background: #fff; }
+.photo-modal img { max-width: 100%; max-height: calc(88vh - 56px); max-height: calc(88dvh - 56px); border-radius: 14px; object-fit: contain; background: #fff; }
 .photo-modal figcaption { display: flex; gap: 8px; }
 @media (prefers-reduced-motion: reduce) { .photo-modal figure { transform: none; } }
 
@@ -737,6 +910,7 @@ button.row:active { background: var(--fill); }
   right: 12px;
   width: min(400px, calc(100vw - 24px));
   max-height: min(72vh, 600px);
+  max-height: min(72dvh, 600px);
   overflow: auto;
   overscroll-behavior: contain;
   background: var(--card);
@@ -766,7 +940,7 @@ body.pop-open { overflow: hidden; }
 .pop-todo { margin: 0 12px 10px; background: var(--orange-soft); border-radius: 12px; padding: 10px 12px; }
 .pop-todo b { display: block; font-size: 0.75rem; color: var(--orange); font-weight: 600; letter-spacing: 0; }
 .pop-todo p { margin: 2px 0 8px; font-size: 0.9375rem; font-weight: 600; }
-.pop-todo .actions { display: flex; gap: 8px; }
+.pop-todo .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .log details.more { margin-top: 4px; }
 .log details.more > summary { list-style: none; cursor: pointer; font-size: 0.8125rem; color: var(--tint); font-weight: 600; letter-spacing: 0; }
 .log details.more > summary::-webkit-details-marker { display: none; }
@@ -779,3 +953,92 @@ body.pop-open { overflow: hidden; }
 }
 @media (prefers-reduced-transparency: reduce) { .log-scrim { background: rgba(0, 0, 0, 0.45); } }
 @media (prefers-contrast: more) { .log-pop { outline: 1px solid var(--label-3); } }
+
+/* ---------- 내 비서 설정(#5) ---------- */
+.agent-presets { flex-wrap: wrap; }
+.agent-mem { gap: 8px; }
+.agent-mem-text { appearance: none; flex: 1; min-width: 0; border: 0; background: none; padding: 4px 0; font: inherit; color: var(--label); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.agent-mem-text:focus-visible { outline: 2px solid var(--tint); outline-offset: 2px; border-radius: 4px; }
+.agent-mem.editing { flex-wrap: wrap; }
+.agent-mem.editing input {
+  flex: 1 1 100%;
+  min-width: 0;
+  font: inherit;
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: var(--fill);
+  color: var(--label);
+}
+.danger-text { color: var(--orange); }
+.agent-step { font-size: 0.8125rem; font-weight: 600; color: var(--tint); letter-spacing: 0; }
+.agent-q { font-size: 1.375rem; line-height: 1.25; font-weight: 700; letter-spacing: -0.02em; margin: 4px 0 16px; }
+.agent-nav { display: flex; gap: 8px; margin: 20px 0 8px; }
+.agent-save { margin-bottom: 22px; }
+.agent-save[hidden] { display: none; }
+.agent-status { color: var(--tint); }
+.agent-history summary { cursor: pointer; font-size: 0.9375rem; font-weight: 500; padding: 4px 0; }
+.agent-history ol { list-style: none; margin: 8px 0 0; padding: 0; }
+.agent-history li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 0.875rem; border-top: 0.5px solid var(--sep, rgba(127, 127, 127, 0.3)); letter-spacing: 0; }
+.agent-history time { flex: none; color: var(--label-2); font-size: 0.8125rem; }
+
+/* ---------- 내 비서 입구(#5) ---------- */
+/* 방 머리의 내 칩은 '내 비서' 입구를 겸한다. 누를 수 있다는 것을 테두리·화살표·호버·커서로 알린다 */
+/* font 축약형은 .person의 글자 크기·굵기를 본문 값으로 되돌리므로 글꼴 종류만 물려받는다(다른 칩과 같은 크기) */
+button.person { appearance: none; border: 0; font-family: inherit; line-height: inherit; color: inherit; cursor: pointer; }
+.person.me { padding-right: 10px; box-shadow: inset 0 0 0 1px var(--tint-soft); transition: transform 100ms ease-out, background 100ms ease-out; }
+.person.me:hover { background: var(--tint-soft); }
+.person.me:active { transform: scale(0.97); }
+.person.me .chev { width: 6px; height: 10px; color: var(--label-3); }
+/* 비서 설정을 마친 사람: 이름 옆 로봇. 이름보다 한 단계 옅게 두어 이름을 가리지 않는다 */
+.agent-mark { display: inline-flex; color: var(--label-2); margin-left: -2px; }
+/* 내 칩의 할 일 꼬리표(설정 전·계좌 없음): 이름보다 작게, 색과 글자를 함께 */
+.person-tag { font-size: 0.6875rem; font-weight: 600; line-height: 1; padding: 3px 6px; border-radius: 999px; color: var(--orange); background: var(--orange-soft); }
+
+/* 우측 상단 내 프로필 메뉴: 내 계정과 이 방의 내 비서 */
+.me-menu-wrap { position: relative; }
+.nav-btn.nav-me { padding: 0 12px 0 4px; }
+.nav-btn.nav-me .avatar { width: 28px; height: 28px; font-size: 0.8125rem; }
+/* 메뉴는 누른 버튼 바로 아래에서 열린다(왼쪽 끝을 버튼에 맞춘다). 버튼 오른쪽에 종·지출 남기기가 있어 화면 안에 들어온다 */
+.me-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  transform-origin: top left;
+  animation: me-menu-in 180ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  display: grid;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+}
+.me-menu[hidden] { display: none; }
+.me-menu [role="menuitem"] {
+  appearance: none;
+  border: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  font-size: 0.9375rem;
+  color: var(--label);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.me-menu [role="menuitem"]:hover, .me-menu [role="menuitem"]:focus-visible { background: var(--tint-soft); }
+.me-menu [role="menuitem"][hidden] { display: none; }
+/* 좁은 화면에서도 얼굴만 남겨 둔다(주 버튼만 남기는 규칙의 예외) */
+@media (max-width: 520px) {
+  .nav-actions .nav-btn.nav-me { display: inline-flex; padding: 0 4px; }
+  .nav-me-label { display: none; }
+}
+@keyframes me-menu-in { from { opacity: 0; transform: scale(0.96) translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .me-menu { animation: none; } }
+
+/* ---------- 방 만들기 입구(#4) ---------- */
+/* 내 방 목록 맨 위 '새 방 만들기': 방 행과 같은 높이로 두고, 강조색은 더하기 원 하나에만 쓴다 */
+.new-room .title { color: var(--tint); }
+.new-room-icon { flex: none; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--tint-soft); color: var(--tint); font-size: 1.125rem; font-weight: 600; line-height: 1; }

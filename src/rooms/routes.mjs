@@ -3,6 +3,7 @@
 import { randomUUID, randomBytes } from 'node:crypto';
 import { readJson, send, HttpError } from '../http.mjs';
 import { identify } from '../identity.mjs';
+import { profileOf } from '../accounts.mjs';
 import { POLICIES } from '../../public/data.js';
 import { subj } from '../../public/ui.js';
 import { isSettling } from './policy.mjs';
@@ -11,8 +12,11 @@ const POLICY_IDS = POLICIES.map((p) => p.id); // 'actual' | 'payday' | 'settle'
 const policyLabel = (id) => POLICIES.find((p) => p.id === id)?.label ?? id;
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 초대 링크는 7일 뒤 만료
 
-// 표시 이름: 공백 정리, 20자까지. 비었으면 신원의 이름을 쓴다
-const cleanName = (s, fallback) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 20) || fallback;
+// 방에 보일 이름·색은 따로 받지 않고 내 프로필(#2, users 문서)을 쓴다. 프로필을 바꾸면 모든 방의 멤버가 함께 바뀐다(POST /api/me)
+const memberOf = async (store, who) => {
+  const { name, color } = await profileOf(store, who);
+  return { uid: who.uid, name, color };
+};
 
 // 초대 문서는 방마다 하나(id = roomId). 다시 만들면 덮어써서 이전 링크는 바로 무효가 된다.
 // 토큰은 18바이트 난수(base64url 24자)라 추측할 수 없다. 클라이언트는 이 컬렉션을 직접 읽지 못한다(서버만).
@@ -33,11 +37,11 @@ const preview = (room) => ({
   members: room.members.filter((m) => !m.deleted).map((m) => ({ name: m.name })),
 });
 
-export function registerRoomRoutes(routes, { store, clock, member }) {
+export function registerRoomRoutes(routes, { store, clock, member, authenticate }) {
   // 방 만들기. 만든 사람이 첫 멤버가 되고, 고른 환율 정책에 이미 동의한 것으로 친다.
+  // 로그인한 사람만(탈퇴 처리 중인 계정은 막는다, authenticate)
   routes.post('/api/rooms', async ({ req, res }) => {
-    const who = await identify(req, store);
-    if (!who) throw new HttpError(401, '누구인지 알려 주세요');
+    const who = await authenticate(req);
 
     const body = await readJson(req);
     const name = String(body.name ?? '').replace(/\s+/g, ' ').trim();
@@ -45,13 +49,13 @@ export function registerRoomRoutes(routes, { store, clock, member }) {
     if (name.length > 40) throw new HttpError(400, '방 이름은 40자까지예요');
     const policy = body.policy ?? 'actual';
     if (!POLICY_IDS.includes(policy)) throw new HttpError(400, '환율 정책을 다시 골라 주세요');
-    const myName = cleanName(body.myName, who.name);
+    const me = await memberOf(store, who);
 
     const room = {
       id: `r-${randomUUID().slice(0, 8)}`,
       name,
       dates: String(body.dates ?? '').trim().slice(0, 40),
-      members: [{ uid: who.uid, name: myName }],
+      members: [me],
       currency: 'KRW',
       fx: null, // 외화 방(환율 표)은 나중 단계에서
       policy,
@@ -61,7 +65,7 @@ export function registerRoomRoutes(routes, { store, clock, member }) {
       createdBy: who.uid,
     };
     await store.put('rooms', room);
-    await store.appendEvent(room.id, { from: 'system', to: 'all', kind: 'room_created', text: `${subj(myName)} 방을 만들었어요` });
+    await store.appendEvent(room.id, { from: 'system', to: 'all', kind: 'room_created', text: `${subj(me.name)} 방을 만들었어요` });
     send(res, 201, { room });
   });
 
@@ -94,8 +98,7 @@ export function registerRoomRoutes(routes, { store, clock, member }) {
 
   // 참가하기. 참가 동의(agree: true)가 있어야 한다. 이미 멤버면 그대로 방 id를 돌려준다
   routes.post('/api/invites/:token/join', async ({ req, params }) => {
-    const who = await identify(req, store);
-    if (!who) throw new HttpError(401, '누구인지 알려 주세요');
+    const who = await authenticate(req);
     const found = await findInvite(store, params.token, clock());
     if (!found) throw new HttpError(404, '만료되었거나 잘못된 초대 링크예요');
     const { room } = found;
@@ -104,8 +107,9 @@ export function registerRoomRoutes(routes, { store, clock, member }) {
     if (body.agree !== true) throw new HttpError(400, '참가에 동의해 주세요');
     if (isSettling(room)) throw new HttpError(409, '이미 정산을 시작한 방이에요');
 
-    const name = cleanName(body.name, who.name);
-    await store.put('rooms', { ...room, members: [...room.members, { uid: who.uid, name }] });
+    const joined = await memberOf(store, who);
+    const { name } = joined;
+    await store.put('rooms', { ...room, members: [...room.members, joined] });
     await store.appendEvent(room.id, {
       from: 'system',
       to: 'all',
