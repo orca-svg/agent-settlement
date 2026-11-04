@@ -18,14 +18,23 @@ function policyPicker(current, action) {
 
 const PRIVACY = 'https://github.com/orca-svg/agent-settlement/blob/main/PRIVACY.md';
 
-// 방에 보일 나: 프로필 이름·색을 그대로 쓴다(입력받지 않는다). 바꾸려면 프로필로 간다
+// 방에 보일 나: 프로필 이름·색을 그대로 쓴다(입력받지 않는다). 프로필로 가는 버튼은 두지 않는다(가면 적던 내용을 잃는다)
 function meRow(profile, dev) {
-  if (!profile) {
-    return dev ? '<div class="row"><span class="grow meta">개발용 신원으로 들어가요. 이름은 계정 화면의 프로필에서 바꿔요.</span></div>' : '';
-  }
+  if (!profile) return dev ? '<div class="row"><span class="grow meta">개발용 신원으로 들어가요.</span></div>' : '';
   return `<div class="row">${avatarHtml(initial(profile.name), profile.color)}<span class="grow"><span class="title">${esc(profile.name)}</span>
-      <span class="meta" style="display:block">방 사람들에게 이 이름과 색으로 보여요</span></span>
-      <a class="btn plain sm" href="account.html#profile">프로필에서 바꾸기</a></div>`;
+      <span class="meta" style="display:block">방 사람들에게 이 이름과 색으로 보여요. 프로필을 바꾸면 모든 방에서 함께 바뀌어요</span></span></div>`;
+}
+
+// 달력에서 고른 기간을 짧은 글자로: 같은 달이면 '11월 7일 – 9일', 해가 다르면 연도까지
+export function datesLabel(start, end) {
+  if (!start) return '';
+  const part = (iso) => { const [y, m, d] = iso.split('-').map(Number); return { y, m, d }; };
+  const a = part(start);
+  const day = (x, withYear) => `${withYear ? `${x.y}년 ` : ''}${x.m}월 ${x.d}일`;
+  if (!end || end === start) return day(a, false);
+  const b = part(end);
+  if (a.y !== b.y) return `${day(a, true)} – ${day(b, true)}`;
+  return a.m === b.m ? `${day(a, false)} – ${b.d}일` : `${day(a, false)} – ${day(b, false)}`;
 }
 
 // 로그인 전: 이 자리에서 Google로 로그인한다. 계정 화면으로 갔다 오지 않아 초대 링크를 잃지 않는다
@@ -36,7 +45,7 @@ function signInHtml(why) {
 
 // 방이 없을 때: 방 만들기 폼. 로그인 전이면 로그인부터, 개발용 서버면 데모 방 버튼도 둔다
 export function createRoomHtml(d, { busy = false, error = '', seedFailed = false, dev = false, profile = null } = {}) {
-  const head = `<section class="hero"><p class="eyebrow"><a href="account.html">내 방 목록</a></p><h1>새 정산 방</h1>
+  const head = `<section class="hero"><h1>새 정산 방</h1>
     <p class="sub">여행·회식 같은 모임을 만들고 초대 링크로 친구를 불러요. 돈을 쓰기 전에 환율을 어떻게 셀지 함께 정해 둬요.</p></section>`;
   const seed = dev ? `<section class="next"><p class="eyebrow">개발용</p><h2>데모 방 만들기</h2>
       <p>${seedFailed ? '서버가 개발용 시드를 막았어요. <code>DEV_SEED=1 npm start</code>로 서버를 다시 켜 주세요.' : '오사카 2박 3일 지출 7건과 4명의 비서 설정이 들어간 방을 만들어요.'}</p>
@@ -45,7 +54,8 @@ export function createRoomHtml(d, { busy = false, error = '', seedFailed = false
   return `${head}
     <section class="group"><div class="list">
       <label class="row field"><span class="grow">방 이름</span><input data-cf="name" value="${esc(d.name)}" placeholder="오사카 2박 3일" maxlength="40"></label>
-      <label class="row field"><span class="grow">기간</span><input data-cf="dates" value="${esc(d.dates)}" placeholder="11월 7일 – 9일" maxlength="40"></label>
+      <label class="row field"><span class="grow">시작</span><input type="date" data-cf="start" value="${esc(d.start ?? '')}" aria-label="시작하는 날"></label>
+      <label class="row field"><span class="grow">끝</span><input type="date" data-cf="end" value="${esc(d.end ?? '')}" ${d.start ? `min="${esc(d.start)}"` : ''} aria-label="끝나는 날(하루면 비워 두세요)"></label>
       ${meRow(profile, dev)}
     </div></section>
     <section class="group"><h2 class="group-label"><span>환율 정책</span><span>외화로 쓴 돈을 원화로 바꾸는 방법</span></h2>
@@ -84,31 +94,31 @@ export function joinHtml(inv, d, { busy = false, error = '', profile = null, dev
       <div class="actions"><button class="btn" data-action="join-room" ${busy ? 'disabled' : ''}>${busy ? '들어가는 중…' : '참가하기'}</button></div></section>`;
 }
 
-// 방 화면: 환율 정책 동의 현황과 초대 링크
+// 방 화면: 환율 정책과 초대 링크. 방을 만들 때 이미 정한 정책이라, 모두 동의했으면 한 줄과 '바꾸기'만 둔다.
+// 아직 동의하지 않은 사람이 있을 때만 누가 남았는지 펼친다. 안내는 경고가 아니므로 주황 상자 대신 보통 글로 쓴다
 export function setupHtml({ room, me, avatar, invite, policyEdit, copied, error, canShare }) {
   const settling = room.status === 'settling';
   const p = policyOf(room.policy);
   const waiting = notAgreed(room);
   const iAgreed = (room.policyAgreedBy ?? []).includes(me.uid);
-  const people = room.members.filter((m) => !m.deleted).map((m) => `<div class="row">${avatar(m.uid)}<span class="grow">${esc(m.name)}${m.uid === me.uid ? ' (나)' : ''}</span>
-      ${(room.policyAgreedBy ?? []).includes(m.uid) ? chip('동의함', 'ok') : chip('동의 전', 'warn')}</div>`).join('');
-  const policyButtons = settling ? '' : `<div class="actions">${iAgreed ? '' : '<button class="btn" data-action="agree-policy">이 정책에 동의해요</button>'}
-      <button class="btn plain sm" data-action="edit-policy">${policyEdit ? '그만 바꾸기' : '정책 바꾸기'}</button></div>`;
-  const policy = `<section class="group"><h2 class="group-label"><span>환율 정책 · ${esc(p.label)}</span>
-      <span>${settling ? '정산 중이라 바꿀 수 없어요' : waiting.length ? `${waiting.length}명 동의 전` : '모두 동의했어요'}</span></h2>
-    <div class="list">${people}</div>
-    <p class="preview-note" style="margin:8px 0">${esc(p.desc)}${settling ? '' : ' 정책을 바꾸면 모두 다시 동의해야 해요.'}</p>
-    ${policyEdit && !settling ? policyPicker(room.policy, 'set-policy') : ''}
-    ${errorHtml(error)}${policyButtons}</section>`;
+  const people = waiting.length ? `<div class="list" style="margin-top:8px">${room.members.filter((m) => !m.deleted).map((m) => `<div class="row">${avatar(m.uid)}<span class="grow">${esc(m.name)}${m.uid === me.uid ? ' (나)' : ''}</span>
+      ${(room.policyAgreedBy ?? []).includes(m.uid) ? chip('동의함', 'ok') : chip('동의 전')}</div>`).join('')}</div>` : '';
+  const change = settling ? '' : `<button class="btn plain sm" data-action="edit-policy">${policyEdit ? '그만 바꾸기' : '바꾸기'}</button>`;
+  const policy = `<section class="group"><h2 class="group-label"><span>환율 정책</span><span>${settling ? '정산 중이라 바꿀 수 없어요' : waiting.length ? `${waiting.length}명 동의 전` : ''}</span></h2>
+    <div class="list"><div class="row"><span class="grow"><span class="title">${esc(p.label)}</span><span class="meta" style="display:block">${esc(p.desc)}</span></span>${change}</div></div>
+    ${people}
+    ${!settling && !iAgreed ? '<div class="actions" style="margin-top:10px"><button class="btn" data-action="agree-policy">이 정책에 동의해요</button></div>' : ''}
+    ${policyEdit && !settling ? `<p class="group-note">바꾸면 모두 다시 동의해야 해요.</p>${policyPicker(room.policy, 'set-policy')}` : ''}
+    ${errorHtml(error)}</section>`;
   if (settling) return policy;
   const link = invite ? inviteUrl(invite.token) : '';
   const inviteBox = invite
     ? `<div class="list"><label class="row field"><span class="grow">초대 링크</span><input readonly value="${esc(link)}" aria-label="초대 링크" data-select-all></label></div>
-      <p class="preview-note" style="margin:8px 0">${esc(until(invite.expiresAt))}까지 쓸 수 있어요. 새 링크를 만들면 이 링크는 더 이상 열리지 않아요.</p>
+      <p class="group-note">${esc(until(invite.expiresAt))}까지 쓸 수 있어요. 새 링크를 만들면 이 링크는 더 이상 열리지 않아요.</p>
       <div class="actions"><button class="btn" data-action="copy-invite">${copied ? '복사했어요' : '링크 복사'}</button>
         ${canShare ? '<button class="btn secondary" data-action="share-invite">공유하기</button>' : ''}
         <button class="btn plain sm" data-action="make-invite">새 링크 만들기</button></div>`
-    : `<p class="preview-note" style="margin:0 0 8px">링크를 받은 친구는 방 이름과 환율 정책을 보고 직접 참가해요.</p>
+    : `<p class="group-note">링크를 받은 친구가 방 이름과 환율 정책을 보고 직접 참가해요.</p>
       <div class="actions"><button class="btn secondary" data-action="make-invite">초대 링크 만들기</button></div>`;
   return `${policy}<section class="group"><h2 class="group-label"><span>친구 초대</span><span>${room.members.length}명</span></h2>${inviteBox}</section>`;
 }

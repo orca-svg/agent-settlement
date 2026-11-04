@@ -992,8 +992,8 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
 .person.me .chev { width: 6px; height: 10px; color: var(--label-3); }
 /* 비서 설정을 마친 사람: 이름 옆 로봇. 이름보다 한 단계 옅게 두어 이름을 가리지 않는다 */
 .agent-mark { display: inline-flex; color: var(--label-2); margin-left: -2px; }
-/* 내 칩의 할 일 꼬리표(설정 전·계좌 없음): 이름보다 작게, 색과 글자를 함께 */
-.person-tag { font-size: 0.6875rem; font-weight: 600; line-height: 1; padding: 3px 6px; border-radius: 999px; color: var(--orange); background: var(--orange-soft); }
+/* 내 칩의 할 일 꼬리표(설정 전·계좌 없음): 경고가 아니라 할 일이라 주황 대신 강조색. 이름보다 작게, 색과 글자를 함께 */
+.person-tag { font-size: 0.6875rem; font-weight: 600; line-height: 1; padding: 3px 6px; border-radius: 999px; color: var(--tint); background: var(--tint-soft); }
 
 /* 우측 상단 내 프로필 메뉴: 내 계정과 이 방의 내 비서 */
 .me-menu-wrap { position: relative; }
@@ -1042,3 +1042,12 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
 /* 내 방 목록 맨 위 '새 방 만들기': 방 행과 같은 높이로 두고, 강조색은 더하기 원 하나에만 쓴다 */
 .new-room .title { color: var(--tint); }
 .new-room-icon { flex: none; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--tint-soft); color: var(--tint); font-size: 1.125rem; font-weight: 600; line-height: 1; }
+
+/* 상단바 왼쪽: 어느 화면에서든 같은 자리에 '내 방'으로 돌아가는 길(방 만들기·초대·방 화면) */
+.nav-lead { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.nav-back { font-size: 1rem; margin-left: -4px; flex: none; }
+
+/* 내 비서: 규칙마다 '이 방에 적용'. 끈 규칙의 입력은 흐리게 두되(모든 방 기본값은 여전히 고칠 수 있다) 무엇으로 하는지 글로 알린다 */
+.rule-scope { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
+.rule-scope .group-note { margin: 0; padding: 0; }
+.group.is-off .list, .group.is-off .seg, .group.is-off .agent-presets { opacity: 0.5; }

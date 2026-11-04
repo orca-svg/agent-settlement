@@ -11,13 +11,13 @@ import { BANKS } from './banks.js';
 import { createAgentPanel, personChipHtml } from './agent-panel.js';
 import { notifies } from './agent-rules.js';
 import { readVisits, departure, timelineSummary, expenseWindow, kstTime, keepForSettlement } from './timeline.js';
-import { createRoomHtml, joinHtml, setupHtml, notAgreed, inviteUrl } from './room-setup.js';
+import { createRoomHtml, joinHtml, setupHtml, notAgreed, inviteUrl, datesLabel } from './room-setup.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
 const inviteToken = roomId ? null : new URLSearchParams(location.search).get('invite');
 // #4 방 만들기·참가하기·정책 동의·초대 링크 화면 상태. 방에 보일 이름·색은 입력받지 않고 내 프로필(profile)을 쓴다
-const setup = { create: { name: '', dates: '', policy: 'actual' }, join: { agree: false }, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, copied: false, busy: false, error: '' };
+const setup = { create: { name: '', start: '', end: '', policy: 'actual' }, join: { agree: false }, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, copied: false, busy: false, error: '' };
 // 로그인이 없는 개발용 서버에서만: 처음 방을 만들거나 참가할 때 이 브라우저용 uid를 하나 만든다. 배포에서는 Google 로그인 신원을 쓴다
 const ensureUid = () => currentUid() || (authOptions().dev ? (setCurrentUid(`u-${crypto.randomUUID().slice(0, 8)}`), currentUid()) : null);
 const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null, disputeDone: null, rejectDraft: null, sendBlocked: false, announceBlocked: false, focusLine: null };
@@ -440,8 +440,9 @@ async function setupAct(name, d) {
     if (name === 'create-room') {
       const c = setup.create;
       need(c.name.trim(), '방 이름을 적어 주세요');
+      need(!c.start || !c.end || c.end >= c.start, '끝나는 날이 시작하는 날보다 빨라요');
       ensureUid();
-      const { room } = await api('/api/rooms', { method: 'POST', body: c });
+      const { room } = await api('/api/rooms', { method: 'POST', body: { name: c.name, dates: datesLabel(c.start, c.end), policy: c.policy } });
       location.search = `?room=${encodeURIComponent(room.id)}`;
       return;
     }
@@ -1516,7 +1517,12 @@ document.addEventListener('keydown', (e) => {
 });
 // 입력칸은 다시 그리지 않고 값만 기억한다(타이핑 중 초점을 잃지 않게)
 document.addEventListener('input', (e) => {
-  if (e.target.dataset?.cf) setup.create[e.target.dataset.cf] = e.target.value;
+  if (e.target.dataset?.cf) {
+    setup.create[e.target.dataset.cf] = e.target.value;
+    // 끝나는 날은 시작하는 날보다 앞을 고를 수 없게(달력의 min). 다시 그리지 않아 초점을 지킨다
+    const end = document.querySelector('[data-cf="end"]');
+    if (e.target.dataset.cf === 'start' && end) end.min = e.target.value;
+  }
   if (e.target.dataset?.jf) setup.join[e.target.dataset.jf] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
   if (e.target.dataset?.dd && state.disputeDraft) {
     state.disputeDraft[e.target.dataset.dd] = e.target.value;

@@ -79,6 +79,17 @@ export function memoryRowsHtml(view, roomId, ui = {}) {
   }).join('');
 }
 
+// 규칙마다 '이 방에 적용'. 내 비서 규칙은 모든 방의 기본이고, 이 방에서 끄면 그 규칙만 안전한 기본값으로 동작한다
+const OFF_NOTES = {
+  autoAccept: '이 방에서는 모든 청구서를 먼저 물어봐요.',
+  sendWhen: '이 방에서는 바로 보내기로 해요.',
+  onDispute: '이 방에서는 이의가 오면 나에게 물어봐요.',
+};
+export function ruleScopeHtml(field, off) {
+  return `<div class="rule-scope"><button type="button" class="pick" aria-pressed="${!off}" data-action="rule-scope" data-field="${esc(field)}">이 방에 적용</button>
+    ${off ? `<span class="group-note">${esc(OFF_NOTES[field])} 다른 방은 그대로예요.</span>` : ''}</div>`;
+}
+
 export function historyHtml(view) {
   if (!view.ruleHistory.length) return '';
   return `<section class="group"><details class="agent-history"><summary>규칙 변경 기록 ${view.ruleHistory.length}개</summary>
@@ -100,11 +111,12 @@ export function meChipHtml({ name, avatar }, s) {
   if (!s) return `<span class="person">${avatar}${esc(name)}</span>`;
   const tag = !s.onboarded ? '설정 전' : !s.hasPayout ? '계좌 없음' : '';
   const rules = `${autoAcceptLabel(s.autoAccept)} · ${sendWhenLabel(s.sendWhen)}`;
-  return `<button type="button" class="person me" data-action="open-agent" title="내 비서: ${esc(rules)}" aria-label="내 비서 열기. ${esc(rules)}${tag ? `. ${tag}` : ''}">${avatar}${esc(name)}`
+  // 처음 설정 전이면 칩이 바로 처음 설정을 연다(방 안에 큰 안내 카드를 띄우지 않는다)
+  return `<button type="button" class="person me" data-action="${s.onboarded ? 'open-agent' : 'open-agent-setup'}" title="내 비서: ${esc(rules)}" aria-label="내 비서 열기. ${esc(rules)}${tag ? `. ${tag}` : ''}">${avatar}${esc(name)}`
     + `${s.onboarded ? AGENT_MARK : ''}${tag ? `<span class="person-tag">${tag}</span>` : ''}${CHEVRON}</button>`;
 }
 
-const ACTIONS = new Set(['open-agent', 'open-agent-setup', 'agent-set', 'agent-preset', 'agent-save-rules', 'mem-add', 'mem-edit', 'mem-edit-save', 'mem-del', 'mem-share', 'agent-payout', 'setup-next', 'setup-back', 'setup-skip', 'setup-done']);
+const ACTIONS = new Set(['open-agent', 'open-agent-setup', 'rule-scope', 'agent-set', 'agent-preset', 'agent-save-rules', 'mem-add', 'mem-edit', 'mem-edit-save', 'mem-del', 'mem-share', 'agent-payout', 'setup-next', 'setup-back', 'setup-skip', 'setup-done']);
 
 export function createAgentPanel({ api, roomId, summary, meName, rerender, openSheet, closeSheet, reload, openPayout }) {
   // errorAt·noticeAt: 글을 누른 버튼 가까이에 보여 주려고 어느 구역의 글인지 기억한다(시트가 길어서 맨 위에 두면 안 보인다)
@@ -156,6 +168,7 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
 
   function agentSheet() {
     const v = ui.view;
+    const offIn = (field) => (v?.rulesOff?.[roomId] ?? []).includes(field);
     if (!v) return { title: '내 비서', html: errorHtml('top') };
     const d = ui.draft;
     const full = v.memory.length >= v.memoryLimit;
@@ -164,9 +177,10 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
       : '<div class="row"><span class="grow">아직 받을 계좌가 없어요</span><button type="button" class="btn sm" data-action="agent-payout">등록</button></div>';
     return {
       title: `${meName()}의 비서`,
-      html: `<section class="group"><h3 class="group-label"><span>자동 수락 한도</span></h3>${limitInputHtml(d)}</section>
-        <section class="group"><h3 class="group-label"><span>보낼 시기</span></h3>${sendHtml(d)}</section>
-        <section class="group"><h3 class="group-label"><span>이의 처리</span></h3>${disputeHtml(d)}</section>
+      html: `<p class="group-note" style="margin-top:0">내 비서는 하나라서 여기서 정한 규칙과 기억이 모든 방에 적용돼요. 이 방에만 빼고 싶은 것은 '이 방에 적용'을 꺼요.</p>
+        <section class="group${offIn('autoAccept') ? ' is-off' : ''}"><h3 class="group-label"><span>자동 수락 한도</span></h3>${ruleScopeHtml('autoAccept', offIn('autoAccept'))}${limitInputHtml(d)}</section>
+        <section class="group${offIn('sendWhen') ? ' is-off' : ''}"><h3 class="group-label"><span>보낼 시기</span></h3>${ruleScopeHtml('sendWhen', offIn('sendWhen'))}${sendHtml(d)}</section>
+        <section class="group${offIn('onDispute') ? ' is-off' : ''}"><h3 class="group-label"><span>이의 처리</span></h3>${ruleScopeHtml('onDispute', offIn('onDispute'))}${disputeHtml(d)}</section>
         <section class="group"><h3 class="group-label"><span>알림</span></h3>${seg('알림 수준', 'notify', Object.entries(NOTIFY), d.notify)}</section>
         <div id="agent-save-wrap" class="agent-save" ${dirty() ? '' : 'hidden'}>
           <button class="btn" id="agent-save" style="width:100%" data-action="agent-save-rules" ${ui.busy ? 'disabled' : ''}>규칙 저장</button>
@@ -194,8 +208,8 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
     ];
     const last = ui.step === step.length - 1;
     return {
-      title: '비서 설정',
-      html: `<p class="eyebrow agent-step">${ui.step + 1}/${step.length}단계</p><h3 class="agent-q">${esc(step[ui.step][0])}</h3>
+      title: '내 비서 설정',
+      html: `<p class="group-note" style="margin-top:0">한 번 정하면 모든 방에 적용돼요. 방마다 빼고 싶은 것은 나중에 그 방에서 고를 수 있어요.</p><p class="eyebrow agent-step">${ui.step + 1}/${step.length}단계</p><h3 class="agent-q">${esc(step[ui.step][0])}</h3>
         ${step[ui.step][1]}${errorHtml('setup')}
         <div class="agent-nav">${ui.step ? '<button type="button" class="btn plain" data-action="setup-back">이전</button>' : ''}
           <button type="button" class="btn" style="flex:1" data-action="${last ? 'setup-done' : 'setup-next'}" ${ui.busy ? 'disabled' : ''}>${last ? '시작하기' : '다음'}</button></div>
@@ -240,6 +254,10 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
       ui.editing = null;
       return send('/api/me/agent/memory/delete', { text });
     }
+    if (name === 'rule-scope') {
+      const off = (ui.view.rulesOff?.[roomId] ?? []).includes(d.field);
+      return send(`/api/rooms/${encodeURIComponent(roomId)}/agent/rule`, { field: d.field, on: off }, { at: 'rules', notice: off ? '이 방에도 다시 적용해요.' : '이 방에서는 빼고, 다른 방은 그대로예요.' });
+    }
     if (name === 'mem-share') {
       const text = mem(d.i);
       const hidden = (ui.view.memoryHidden?.[roomId] ?? []).includes(text);
@@ -266,11 +284,8 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
     act,
     open: () => open('agent'),
     chipHtml: (member, avatar) => meChipHtml({ name: member.name, avatar }, summary()),
-    nudgeHtml: () => (summary() && !summary().onboarded
-      ? `<section class="next"><p class="eyebrow">처음 설정</p><h2>내 비서가 어디까지 할지 정해 주세요</h2>
-        <p>정하기 전에는 모든 청구서를 먼저 나에게 물어봐요.</p>
-        <div class="actions"><button class="btn" data-action="open-agent-setup">설정하기</button></div></section>`
-      : ''),
+    // 비서는 사람마다 하나라 방마다 묻지 않는다. 처음 설정은 내 칩의 '설정 전' 꼬리표로 들어간다
+    nudgeHtml: () => '',
     // 입력칸은 다시 그리지 않고 값만 기억한다(타이핑 중 초점을 잃지 않게)
     onInput(el) {
       if (el.dataset?.ag === 'autoAccept' && ui.draft) {

@@ -170,7 +170,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       invoices,
       disputes: disputes.map((d) => redactDispute(d, me.uid, expenses.find((e) => e.id === d.expenseId)?.payer)),
       transfers: transfers.map((t) => redactTransfer(t, me.uid)),
-      myAgent: await agentSettings.summary(me.uid),
+      myAgent: await agentSettings.summary(me.uid, room.id),
       // 방 사람에게는 누가 비서 설정을 마쳤는지만 보인다(이름 옆 로봇 표시). 규칙·기억은 본인의 myAgent에만 있다(#5)
       agentReady: room.members.filter((m) => !m.deleted && agents[m.uid]?.onboardedAt).map((m) => m.uid),
       ledger: ledger(room, expenses, room.policy),
@@ -202,7 +202,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   // 위치 화면(GET …/location)은 읽다가 끝난 동의를 지우므로 쓰기처럼 줄에 선다
   const WRITE_FREE = /\/receipts\/extract$/; // POST지만 저장하지 않는다(사진 → 초안)
   // 방 주소지만 사람마다 하나인 비서 문서를 고치고, 계좌는 다른 방의 송금까지 고치므로 모든 방의 줄에 선다(#5)
-  const ACROSS_ROOMS = /^\/api\/rooms\/[^/]+\/(payout|agent\/shared)$/;
+  const ACROSS_ROOMS = /^\/api\/rooms\/[^/]+\/(payout|agent\/shared|agent\/rule)$/;
   async function withStateLock(req, url, params, invoke) {
     if (!/^\/api\/(rooms|me|dev|cron)(\/|$)/.test(url.pathname)) return invoke();
     if ((req.method === 'GET' && !url.pathname.endsWith('/location')) || WRITE_FREE.test(url.pathname)) return invoke();

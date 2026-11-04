@@ -13,7 +13,7 @@ import { mediateWithGemini } from './mediate.mjs';
 import { OPEN } from './disputes.mjs';
 import { findBank } from '../../public/banks.js';
 import { ON_DISPUTE, sendWhenLabel } from '../../public/agent-rules.js';
-import { normalizeSettings } from './settings.mjs';
+import { normalizeSettings, rulesIn } from './settings.mjs';
 import { roomMemory } from './memory.mjs';
 
 const STALE = '지출이 바뀌었어요. 청구서를 다시 보낸 뒤 새 금액으로 보내 주세요';
@@ -26,6 +26,11 @@ const TICK_STATUSES = ['scheduled', 'due', 'opened', 'sent'];
 export function createOrchestrator({ store, gemini = null, clock = () => new Date(), evidenceFor = async () => [], counterFor = async () => [] }) {
   const say = (roomId, ev) => store.appendEvent(roomId, ev);
   const settingsOf = async (uid) => normalizeSettings(await store.get('agents', uid), uid);
+  // 이 방에서 쓰는 비서 설정: 규칙은 내 비서 규칙에서 이 방에 적용하지 않기로 한 것만 기본값으로 바꾼다
+  const settingsIn = async (uid, roomId) => {
+    const s = await settingsOf(uid);
+    return { ...s, rules: rulesIn(s, roomId) };
+  };
 
   async function loadRoom(roomId) {
     const room = await store.get('rooms', roomId);
@@ -79,7 +84,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       const r = rows[m.uid];
       const base = { id: `${roomId}:v${room.version}:${m.uid}`, roomId, version: room.version, to: m.uid, owed: r.owed, paid: r.paid, net: r.net };
       const found = await firstEvidence(m.uid, room, expenses, ended);
-      const { decision, reasons } = evaluateInvoice({ invoice: base, settings: await settingsOf(m.uid), evidence: found?.evidence ?? [] });
+      const { decision, reasons } = evaluateInvoice({ invoice: base, settings: await settingsIn(m.uid, roomId), evidence: found?.evidence ?? [] });
       // 청구서는 방 사람 모두가 읽고 위치 요약을 지워도 남으므로 요약 글은 빼고, 붙었다는 사실만 hasLocationSummary로 둔다
       const hidden = new Set((found?.evidence ?? []).filter(e => e.locationId).map(e => e.summary));
       const shown = reasons.filter(r => !hidden.has(r));
@@ -140,7 +145,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       ...(evidence.length ? { meta: evidence.some(e => e.locationId) ? '위치 요약 첨부 · 이의 내용에서 확인' : `근거: ${evidence.map((e) => e.summary).join(' · ')}` } : {}),
     });
     // 지출을 낸 사람이 이의를 중재 비서에게 맡겨 두었으면 바로 중재한다. 아니면 낸 사람에게 묻는다(pendingActions)
-    if ((await settingsOf(exp.payer)).rules.onDispute === 'mediator') {
+    if ((await settingsIn(exp.payer, roomId)).rules.onDispute === 'mediator') {
       await say(roomId, { from: exp.payer, to: exp.payer, kind: 'rule_applied', text: '이의가 와서 중재 비서에게 맡겼어요', meta: `정해 둔 규칙: ${ON_DISPUTE.mediator}` });
       return mediate(roomId, dispute.id, exp.payer);
     }
@@ -188,7 +193,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       meta: `중재한 방법: ${out.source === 'rules' ? '정해 둔 규칙' : out.source} · ${((Date.now() - started) / 1000).toFixed(1)}초 걸렸어요`,
     });
     // 이의를 낸 비서는 '근거가 있으면 이의'를 맡았으므로, 제안이 그 근거와 맞으면 스스로 동의한다
-    if ((await settingsOf(dispute.by)).rules.onDispute === 'evidence' && matchesEvidence(exp, dispute, out.alloc)) {
+    if ((await settingsIn(dispute.by, roomId)).rules.onDispute === 'evidence' && matchesEvidence(exp, dispute, out.alloc)) {
       return agree(roomId, disputeId, dispute.by, { auto: true });
     }
     return proposed;
@@ -274,7 +279,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     const now = clock();
     const out = [];
     for (const [i, edge] of settle(ledger(room, expenses, room.policy)).entries()) {
-      const sender = await settingsOf(edge.from);
+      const sender = await settingsIn(edge.from, roomId);
       const receiver = await settingsOf(edge.to);
       const transfer = {
         id: `${roomId}:v${room.version}:t${i + 1}`, roomId, version: room.version, from: edge.from, to: edge.to, amount: edge.amount,
