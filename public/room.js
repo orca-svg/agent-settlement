@@ -658,7 +658,7 @@ async function act(name, d) {
     state.editing = null;
     state.lastImage = null;
     state.draft = newDraft();
-    state.addMode = d.mode === 'photo' ? 'photo' : 'manual';
+    state.addMode = 'manual';
     state.readNotes = [];
     state.formError = '';
     state.sheet = 'add';
@@ -752,7 +752,8 @@ function nextCard() {
   const mine = state.data.actions ?? [];
   if (state.data.room.status === 'done') return doneCardHtml(); // 끝난 방은 지출을 더 받지 않고, 남은 일은 나가기뿐이다(#55)
   if (!mine.length) {
-    const add = `<button class="btn" data-action="add-expense">지출 남기기</button>${state.aiReady ? '<button class="btn secondary" data-action="add-expense" data-mode="photo">영수증 사진으로</button>' : ''}`;
+    // 영수증 사진은 지출 남기기 시트 맨 위에서 '직접 입력'과 나란히 고른다. 카드에는 입구 하나만 둔다
+    const add = '<button class="btn" data-action="add-expense">지출 남기기</button>';
     // 아직 메뉴별로 나누지 않은 영수증이 있으면 그걸 먼저 권한다. 합계만 알아 1/N로 나누기로 한 지출(split: 'equal')은 빼고
     const unsplit = state.data.expenses.find((e) => e.split === 'items' && e.items?.length && !e.alloc);
     if (unsplit) {
@@ -760,7 +761,7 @@ function nextCard() {
         <p>각자의 비서가 공유한 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄만 사람에게 물어봐요.</p>
         <div class="actions"><button class="btn" data-action="open-exp" data-id="${esc(unsplit.id)}">나누러 가기</button>${add.replace('class="btn"', 'class="btn plain"')}</div></section>`;
     }
-    const settling = settlingCard(add.replace(/class="btn( secondary)?"/g, 'class="btn plain"'));
+    const settling = settlingCard(add.replace('class="btn"', 'class="btn plain"'));
     if (settling) return settling;
     return `<section class="next"><p class="eyebrow">${esc(state.data.me.name)}의 할 일</p><h2>지금은 할 일이 없어요</h2>
       <p>함께 쓴 돈이 있으면 남겨 주세요. 확인이 필요한 일이 생기면 비서가 여기에 올려요.</p>
@@ -1761,7 +1762,6 @@ async function loadConfig() {
   try {
     const config = await (await fetch(`${API_BASE}/api/config`, { signal: AbortSignal.timeout(8000) })).json();
     state.aiReady = config.mode === 'gemini';
-    if (state.data) render(); // AI가 연결돼 있으면 '영수증 사진으로'를 보여 준다
     // 체험 데모는 브라우저 안에서 돌고, 사진은 샘플 영수증으로 읽는다(public/demo/server.js)
     mode.textContent = config.demo ? '체험 데모' : config.mode === 'gemini' ? 'Gemini 연결됨' : '규칙 모드';
     mode.classList.toggle('live', config.mode === 'gemini' && !config.demo);
