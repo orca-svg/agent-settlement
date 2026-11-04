@@ -841,7 +841,7 @@ function linesEditHtml(d) {
   const rows = d.items.map((it, i) => `<div class="row field" style="gap:8px">
       <input data-item="${i}" data-key="name" value="${esc(it.name)}" aria-label="메뉴 이름" style="text-align:left;flex:3">
       <input data-item="${i}" data-key="qty" value="${it.qty}" inputmode="numeric" aria-label="수량" style="flex:1">
-      <input data-item="${i}" data-key="unit" value="${it.unit}" inputmode="numeric" aria-label="단가" style="flex:2">
+      <input data-item="${i}" data-key="unit" value="${it.unit}" inputmode="${decimalsOf(d.currency) ? 'decimal' : 'numeric'}" aria-label="단가" style="flex:2">
       <button type="button" class="text-btn" data-action="draft-del-item" data-i="${i}" aria-label="${esc(it.name)} 줄 지우기">×</button></div>`).join('');
   return `<section class="group"><h3 class="group-label"><span>영수증 ${d.items.length}줄 · 이름 · 수량 · 단가</span>
       <span id="line-sum">줄 합 ${money(lineSum(d.items), d.currency)}${d.total ? ` · 영수증 합계 ${money(d.total, d.currency)}` : ''}</span></h3>
