@@ -40,7 +40,7 @@ API 서버 (server.mjs → src/app.mjs)
 | #3 Firestore | `src/store/`의 Store | `STORE=firestore`면 `FirestoreStore`(`src/store/firestore.mjs`), 아니면 `MemoryStore`. 연결은 [Firestore 안내](docs/firestore-setup.md) | 팀 프로젝트 연결 |
 | #3 Firestore | `public/room-api.js`의 `subscribeRoom()` | 서버가 Firestore이고 로그인했으면 `rooms/{roomId}/events`를 `onSnapshot`, 아니면 2초 폴링. 호출 방식은 같아요 | — |
 | #4 방 | `rooms` 문서와 방 API | 개발용 시드 `POST /api/dev/seed` | 방 만들기·참가하기(환율 표 입력 포함) |
-| #5 비서 설정 | `src/agents/settings.mjs`, `public/agent-panel.js`, `public/agent-rules.js` | 기억·규칙·규칙 변경 기록·처음 설정·방마다 정산에 쓸 기억 고르기. 입구는 방 머리의 내 칩과 우측 상단 내 프로필 메뉴. 알림 수준은 지금 종 배지에만 적용 | 푸시 알림이 생기면 `rules.notify`를 따른다. 요금제가 생기면 `MEMORY_LIMITS`에 더한다 |
+| #5 비서 설정 | `src/agents/settings.mjs`, `public/agent-panel.js`, `public/agent-rules.js` | 기억·규칙·규칙 변경 기록·처음 설정·방별 공유 선택. 입구는 방 머리의 내 칩과 우측 상단 내 프로필 메뉴. 알림 수준은 지금 종 배지에만 적용 | 푸시 알림이 생기면 `rules.notify`를 따른다. 요금제가 생기면 `MEMORY_LIMITS`에 더한다 |
 | #7 위치 | `src/agents/evidence.mjs`의 provider | `createEvidenceProvider()`가 동일한 `(uid, expense, room)` 계약으로 위치 요약 반환. 고정 근거는 개발용 시드에서만 사용 | 타임라인 파일 파서는 장치별 형식 확인 후 별도 연동 |
 | #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs`, `public/banks.js` | 받는 계좌 설정 화면(은행 선택 목록), `supertoss://send?…` 링크(실기기 검증 완료, 은행은 실기기로 확인한 표기로 바꿔 넣음), 데스크톱 QR 핸드오프(`src/payments/qr.mjs`), 계좌 칸 암호화 저장(`src/store/encrypted.mjs`), 송금 확인(받는 사람의 "아직 안 들어왔어요", 다시 알림 1일·3일) | iPhone 은행 표기 확인 |
 | #10 보안 | `src/http.mjs`, `src/store/encrypted.mjs`, Firestore 보안 규칙 | 신원당 호출 제한, 계좌·위치 요약 칸 암호화 저장(`PAYOUT_ENC_KEY`) | 토큰 필수, 보안 규칙 테스트 |
@@ -130,7 +130,7 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 - **`Room`:** 멤버, 환율 표 `fx`(원/100 단위, 결제일별 매매기준율·카드 수수료·사람별 현찰 환율), 합의한 환율 정책, `version`을 가져요. `version`은 지출이 바뀔 때마다 올라가고, 청구서·송금은 이 version에 묶여요.
 - **`Expense`:** `split`이 `'items'`면 영수증 줄(`items`)마다 `alloc`의 `consumers`가 나눠 내요. `allocMemory`는 배분할 때 쓴 비서 기억의 지문이고, 방 응답의 `allocFresh`는 그 지문이 지금 기억과 같은지예요(같으면 화면이 '다시 나누기'를 막아요).
 - **`AgentSettings`:**
-  - `memory`: 내 기억이에요. 무료 요금제는 5개까지예요. `memoryShared[roomId]`는 그 방 정산에 쓰기로 고른 기억이고, 기본은 어느 방에도 쓰지 않아요. 모델에 가는 기억은 `sharedMemory()`를 거쳐요.
+  - `memory`: 정산에 쓰는 기억이에요. 무료 요금제는 5개까지예요. `memoryHidden[roomId]`는 그 방에서 공유를 끈 기억이고, 기본은 모두 공유예요. 모델에 가는 기억은 `sharedMemory()`를 거쳐요.
   - 공개 범위: 정산에 쓰는 것과 남에게 보이는 것은 달라요. 기억 내용과 자동 수락 한도 금액은 본인만 봐요. 배분 이유는 모델·규칙이 쓴 글 대신 누구 몫인지만으로 코드가 다시 쓰고(`publicReason`), 청구서 이유와 비서 기록에는 한도 금액을 싣지 않아요. 기억은 이의 중재에서만 근거로 인용될 수 있어요.
   - `rules`: 자동 수락 한도, 보낼 시기(`'now'`, `{ payday: 25 }`, `'manual'`), 이의 처리, 알림 수준(`'actions'`, `'all'`)이에요. `'manual'` 송금은 `manual: true`이고, 3일 뒤 09:00 KST까지 받는 사람이 받았다고 하지 않았을 때만 보내는 사람에게 한 번 알려요. 값이 망가졌으면 기본값으로 읽어서 한도는 0이 돼요. 즉 모든 청구서를 물어요.
   - `ruleHistory`: 규칙 변경 기록(최근 50개)이에요. `onboardedAt`: 처음 설정을 마친 시각이에요.
@@ -160,7 +160,7 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | GET | `/api/rooms/:id/expenses/:eid/receipt` | 저장된 영수증 사진 `{ mimeType, data }`(방 멤버만) |
 | POST | `/api/rooms/:id/expenses/:eid` | 지출 고치기. 같은 검증을 거쳐 덮어써요. 영수증 줄이나 함께한 사람이 바뀌면 메뉴 배분을 지워 다시 나누게 해요 |
 | POST | `/api/rooms/:id/receipts/extract` | 영수증 사진(긴 변 1600px JPEG, base64) → 초안. **저장하지 않아요** |
-| POST | `/api/rooms/:id/expenses/:eid/allocate` | 비서들이 이 방에 쓰기로 고른 기억으로 영수증 줄 배분. 줄 이유에는 기억 내용이 없어요. 근거 없는 줄은 지출을 남긴 사람에게 물어요. 응답 `{ expense, source, how, latencyMs }`. 이미 나눴고 비서 기억이 그대로면 409이고 아무것도 바꾸지 않아요(버전·확인한 줄 유지) |
+| POST | `/api/rooms/:id/expenses/:eid/allocate` | 비서들이 공유한 기억으로 영수증 줄 배분. 줄 이유에는 기억 내용이 없어요. 근거 없는 줄은 지출을 남긴 사람에게 물어요. 응답 `{ expense, source, how, latencyMs }`. 이미 나눴고 비서 기억이 그대로면 409이고 아무것도 바꾸지 않아요(버전·확인한 줄 유지) |
 | POST | `/api/rooms/:id/expenses/:eid/lines/:itemId` | 줄 하나를 사람이 확정(`{ consumers }`) |
 
 | POST | `/api/rooms/:id/invoices/send` | 지금 방 `version`으로 청구서 보내기. 같은 version이면 다시 만들지 않아요(멱등). 각자의 비서가 규칙대로 수락·질문·이의를 정해요 |
@@ -174,7 +174,7 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | POST | `/api/me/agent/rules` | 규칙 일부 `{ autoAccept?, sendWhen?, onDispute?, notify? }`. 바뀐 칸만 `ruleHistory`에 남아요. 다음 청구서부터 적용되고, 이미 만들어진 청구서·송금은 그대로예요 |
 | POST | `/api/me/agent/onboarding` | 처음 설정 마치기 `{ rules? }` |
 | POST | `/api/me/agent/memory` · `memory/edit` · `memory/delete` | 기억 더하기 `{ text }`, 고치기 `{ from, to }`, 지우기 `{ text }`. 한도를 넘으면 409 |
-| POST | `/api/rooms/:id/agent/shared` | 이 방 정산에 기억 하나 쓰기·안 쓰기 `{ text, shared }`(방 멤버만). 써도 방 사람에게 기억 내용이 보이지는 않아요. 사람마다 하나인 비서 문서를 고치므로 모든 방의 줄에 서요 |
+| POST | `/api/rooms/:id/agent/shared` | 이 방에 기억 하나 공유·끄기 `{ text, shared }`(방 멤버만). 공유해도 방 사람에게 기억 내용이 보이지는 않아요. 사람마다 하나인 비서 문서를 고치므로 모든 방의 줄에 서요 |
 | POST | `/api/rooms/:id/transfers/:tid/approve` · `sent` · `confirm` · `not-received` | 송금 화면 열기·보냈어요(보내는 사람), 받았어요·아직 안 들어왔어요(받는 사람). `not-received`는 `sent`일 때만 되고, 상태는 `sent` 그대로 두고 `notReceivedAt`만 붙여 보내는 사람에게 다시 물어요. 보냈다고 한 돈이라 지출이 바뀌어도 대체되지 않고, 받는 사람이 계좌를 바꿔도 링크가 바뀌지 않아요. 보내는 사람이 송금 내역을 보고 `sent`를 다시 부르면 표시를 내리고 `recheckedAt`을 남겨요(지출이 바뀐 뒤여도 돼요). 그 사이 돈이 들어왔으면 `confirm`도 돼요 |
 | POST | `/api/rooms/:id/transfers/:tid/qr` | 컴퓨터 송금 화면에 띄울 QR 토큰 받기(보내는 사람만). 응답 `{ qrToken, expiresAt }`, 15분 뒤 만료. 받을 계좌가 없거나 이미 보낸 송금이면 409(받는 사람이 안 들어왔다고 한 송금은 다시 보낼 수 있게 만들어 줘요) |
 | GET | `/api/qr/:token` | 휴대폰으로 QR을 찍으면 열리는 주소. 토큰을 토스 링크로 바꿔 302로 넘겨요. **신원 헤더 없이** 열려요(토큰이 곧 열쇠). 만료되었거나 잘못된 토큰은 404. 토큰은 서버 메모리에만 있어서 서버가 한 대일 때만 맞아요 |

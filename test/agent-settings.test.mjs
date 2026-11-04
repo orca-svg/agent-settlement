@@ -277,7 +277,7 @@ function spyGemini() {
   };
 }
 
-test('방별 사용: 끈 기억은 그 방의 배분·중재 프롬프트에 가지 않고, 고른 다른 방에는 간다', async () => {
+test('방별 공유: 끈 기억은 그 방의 배분·중재 프롬프트에 가지 않고, 다른 방에는 그대로 간다', async () => {
   const store = new MemoryStore();
   const gemini = spyGemini();
   const server = createApp({ store, gemini, env: { DEV_SEED: '1' } });
@@ -313,22 +313,22 @@ test('방별 사용: 끈 기억은 그 방의 배분·중재 프롬프트에 가
     assert.equal((await seen()).expenses.find((e) => e.id === 'room-a-izakaya').allocFresh, true);
     await call('/api/rooms/room-a/agent/shared', 'yh', { text: secret, shared: true });
     assert.equal((await seen()).expenses.find((e) => e.id === 'room-a-izakaya').allocFresh, false);
-    assert.ok((await store.get('agents', 'yh')).memoryShared['room-a'].includes(secret));
+    assert.deepEqual((await store.get('agents', 'yh')).memoryHidden, {});
   } finally {
     server.close();
   }
 });
 
-test('방별 사용: 기억을 고쳐도 고른 방은 그대로고, 지우면 흔적이 남지 않는다', async () => {
+test('방별 공유: 기억을 고쳐도 끈 상태가 유지되고, 지우면 흔적이 남지 않는다', async () => {
   const { settings, store } = await setup();
   await settings.addMemory('yh', '비밀 기억');
-  await settings.shareMemory('yh', 'r2', '비밀 기억', true);
+  await settings.shareMemory('yh', 'r1', '비밀 기억', false);
   await settings.editMemory('yh', '비밀 기억', '고친 기억');
   const room = (id) => ({ id, members: [{ uid: 'yh', name: '영희' }] });
   assert.ok(!(await roomMemory(store, room('r1'))).yh.includes('고친 기억'));
   assert.ok((await roomMemory(store, room('r2'))).yh.includes('고친 기억'));
   await settings.deleteMemory('yh', '고친 기억');
-  assert.deepEqual((await store.get('agents', 'yh')).memoryShared.r2, []);
+  assert.deepEqual((await store.get('agents', 'yh')).memoryHidden, { r1: [] });
   await assert.rejects(settings.shareMemory('yh', 'r1', '없는 기억', false), (e) => e.status === 404);
   assert.deepEqual(sharedMemory(null, 'r1'), []);
 });
@@ -528,21 +528,21 @@ test('설정 화면: 초안과 규칙이 서로 바뀌어도 값이 같다', () 
   assert.equal(rulesFromDraft({ ...draftFromRules(DEFAULT_RULES), autoAccept: '5,000원' }).autoAccept, 5000);
 });
 
-test('설정 화면: 기억과 규칙 기록의 글자를 이스케이프하고, 이 방에 쓰는지 보여 준다', () => {
+test('설정 화면: 기억과 규칙 기록의 글자를 이스케이프하고, 방별 공유 상태를 보여 준다', () => {
   const evil = '<img src=x onerror=alert(1)>';
-  const html = memoryRowsHtml({ memory: [evil, '평범'], memoryShared: { r1: ['평범'] } }, 'r1');
+  const html = memoryRowsHtml({ memory: [evil, '평범'], memoryHidden: { r1: ['평범'] } }, 'r1');
   assert.ok(!html.includes('<img') && html.includes('&lt;img'));
-  assert.match(html, /aria-pressed="true"[^>]*>이 방에 씀/);
-  assert.match(html, /aria-pressed="false"[^>]*>안 씀/);
-  assert.match(memoryRowsHtml({ memory: ['평범'], memoryShared: { r1: ['평범'] } }, 'r2'), /안 씀/, '다른 방에서는 쓰지 않는다');
+  assert.match(html, /aria-pressed="true"[^>]*>공유 중/);
+  assert.match(html, /aria-pressed="false"[^>]*>공유 안 함/);
+  assert.match(memoryRowsHtml({ memory: ['평범'], memoryHidden: { r1: ['평범'] } }, 'r2'), /공유 중/, '다른 방에서는 공유');
   const log = historyHtml({ ruleHistory: [{ at: '2026-11-10T03:00:00Z', text: evil }] });
   assert.ok(!log.includes('<img'));
   assert.ok(!limitInputHtml({ autoAccept: '"><script>' }).includes('<script>'));
   assert.equal(historyHtml({ ruleHistory: [] }), '', '기록이 없으면 칸도 없다');
 });
 
-test('설정 화면: 기억 한 줄에는 글과 이 방에 쓰는지만 있고, 고치기·지우기는 글을 눌렀을 때만 나온다', () => {
-  const view = { memory: ['기억'], memoryShared: {} };
+test('설정 화면: 기억 한 줄에는 글과 공유만 있고, 고치기·지우기는 글을 눌렀을 때만 나온다', () => {
+  const view = { memory: ['기억'], memoryHidden: {} };
   const rest = memoryRowsHtml(view, 'r1');
   assert.match(rest, /data-action="mem-edit"/);
   assert.ok(!rest.includes('mem-edit-save') && !rest.includes('mem-del'));
@@ -612,7 +612,7 @@ test('로그인: 내 설정은 토큰의 본인 것만 다루고, x-demo-user는
 test('탈퇴: 비서 설정(기억·규칙·기록·공유 선택·계좌)이 함께 지워진다', async () => {
   const { settings, store, orch } = await setup();
   await settings.addMemory('yh', '지워질 기억');
-  await settings.shareMemory('yh', ROOM, '지워질 기억', true);
+  await settings.shareMemory('yh', ROOM, '지워질 기억', false);
   await settings.updateRules('yh', { autoAccept: 1234 });
   await orch.setPayout(ROOM, 'yh', NEW_ACCOUNT);
   await store.eraseUser('yh');
