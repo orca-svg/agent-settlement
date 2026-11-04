@@ -46,7 +46,7 @@ npm start
 
 - `http://localhost:4500/` — 기존 데모.
 - `/account.html` — 프로젝트 미설정 안내. 로그인 성공을 가짜로 표시하지 않음.
-- 개발용 방이 필요하면 `.env`에 `DEV_SEED=1` 후 재시작하여 `/room.html` 사용. 개발용 신원은 로컬 프로토타입 전용. Firebase 설정 또는 운영 모드에서는 비활성화.
+- 개발용 방이 필요하면 `.env`에 `DEV_SEED=1` 후 재시작하여 `/room.html` 사용. 개발용 신원은 로컬 개발 서버 전용. Firebase 설정 또는 운영 모드에서는 비활성화.
 - 로그인·권한 테스트는 Firebase 검증기를 주입하고 HTTP API를 실제 호출함. 실제 Google OAuth 테스트를 대체하지 않음.
 
 ## Firebase를 처음 만들 때

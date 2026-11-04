@@ -30,9 +30,7 @@ export function demoPage(name, html) {
   out = swap(out, `<script type="module" src="${entry}"></script>`,
     `<script type="importmap">${IMPORT_MAP}</script>\n  <script type="module" src="boot.js"></script>\n  <script type="module" src="../${entry}"></script>`);
   // 처음 화면(데모 소개)으로 가는 링크
-  out = out.replace('<a class="nav-btn" href="./">데모 보기</a>', '<a class="nav-btn" href="../">처음 화면</a>');
   out = out.replace('<a class="nav-brand" href="./">', '<a class="nav-brand" href="../">');
-  out = out.replace('<p>개발 중인 실제 방 화면이에요.</p>', '<p>체험 데모예요. 금액·환율·계좌·위치는 모두 가짜이고, 돈은 움직이지 않아요.</p>');
   return out;
 }
 
