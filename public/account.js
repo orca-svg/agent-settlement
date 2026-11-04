@@ -163,7 +163,7 @@ function roomsView(profile, rooms, config) {
     ? roomRowsHtml(view.rooms, { editing: roomsEditing })
     : `<div class="room-empty"><p class="title">${view.empty.title}</p><p class="meta">${view.empty.meta}</p></div>`;
   const edit = view.rooms.length ? `<button type="button" class="text-btn" id="rooms-edit" aria-pressed="${roomsEditing}">${roomsEditing ? '완료' : '편집'}</button>` : '';
-  panel.innerHTML = `<header class="hero page-head"><div><h1>내 방</h1><p class="sub">${esc(profile.name)}님으로 로그인했어요.</p></div>
+  panel.innerHTML = `<header class="hero page-head"><div><h1>내 방</h1><p class="sub">${config.demo ? '체험 데모예요. 로그인 없이 ‘나’로 둘러봐요.' : `${esc(profile.name)}님으로 로그인했어요.`}</p></div>
       <div class="page-actions">
         <button type="button" class="btn sm plain" id="join-toggle" aria-expanded="false" aria-controls="join-link">${ICON_LINK}<span>초대 링크로 참가</span></button>
         <a class="btn sm" href="room.html"><span aria-hidden="true">+</span><span>새 방 만들기</span></a>
@@ -171,7 +171,7 @@ function roomsView(profile, rooms, config) {
     ${MESSAGE}
     <div class="join-panel">${joinFormHtml()}</div>
     <section class="group" id="rooms" aria-labelledby="rooms-title"><div class="group-head"><h2 class="group-label" id="rooms-title"><span>참여한 방${rooms.length ? ` ${rooms.length}개` : ''}</span></h2>${edit}</div>${view.html}${list}</section>
-    ${demoRows('둘러보기', config.dev)}`;
+    ${config.demo ? '' : demoRows('둘러보기', config.dev)}`;
   say(notice);
   notice = '';
   nav.querySelector('#open-profile').onclick = openProfile;

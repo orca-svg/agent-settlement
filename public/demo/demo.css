@@ -1,0 +1,200 @@
+/* 체험 데모에만 붙는 것: 위쪽 띠, task 체크리스트(guide.js), 토스 대신 띄우는 안내(boot.js), '보여 주기' 테두리.
+   색·글꼴·반경은 style.css의 토큰을 그대로 쓴다. 체크리스트는 흐름을 막지 않는 곁 패널이라 어둡게 가리지 않고 반투명 재질로 띄운다 */
+
+/* ---------- 위쪽 띠 ---------- */
+.demo-band {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: calc(8px + env(safe-area-inset-top)) 20px 8px;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  letter-spacing: 0;
+  color: var(--label-2);
+}
+.demo-band b { color: var(--label); font-weight: 600; margin-right: 6px; }
+.demo-band a { color: var(--tint); text-decoration: none; margin-left: 6px; white-space: nowrap; }
+@media (max-width: 920px) { .demo-band { padding-left: 16px; padding-right: 16px; } }
+/* 접힌 체크리스트가 마지막 내용을 가리지 않게 아래를 비워 둔다 */
+body.demo { padding-bottom: 96px; }
+
+/* ---------- task 체크리스트 ---------- */
+.demo-guide {
+  position: fixed;
+  left: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 25;
+  width: 352px;
+  max-height: min(72vh, 640px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  background: var(--material);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 0 0 0.5px var(--sep), 0 12px 32px rgba(0, 0, 0, 0.14);
+  overflow: hidden;
+}
+@media (max-width: 600px) {
+  .demo-guide { left: 12px; right: 12px; width: auto; bottom: calc(12px + env(safe-area-inset-bottom)); max-height: 64vh; }
+}
+/* 내 계정의 저장 막대(화면 아래에 붙는다)가 뜨면 그 위로 비켜 선다 */
+body:has(.save-bar:not([hidden])) .demo-guide { bottom: calc(88px + env(safe-area-inset-bottom)); }
+.dg-head { flex: none; }
+.dg-toggle {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 12px;
+  padding: 12px 16px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.dg-toggle:active { opacity: 0.7; }
+.dg-eyebrow { grid-column: 1; font-size: 0.75rem; color: var(--label-2); letter-spacing: 0; }
+.dg-title { grid-column: 1; font-size: 0.9375rem; font-weight: 600; line-height: 1.35; letter-spacing: -0.01em; }
+.dg-chev { grid-column: 2; grid-row: 1 / span 2; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--fill); color: var(--label-2); transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.demo-guide.open .dg-chev { transform: rotate(180deg); }
+.dg-head-action { padding: 0 16px 10px; margin-top: -4px; }
+.dg-head-action:empty { display: none; }
+.dg-bar { height: 3px; margin: 0 16px 10px; border-radius: 2px; background: var(--fill); overflow: hidden; }
+.dg-bar i { display: block; height: 100%; background: var(--tint); border-radius: 2px; transition: width 400ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.dg-body { overflow: hidden; flex: 1 1 auto; min-height: 0; }
+.dg-body[hidden] { display: none; }
+.dg-inner { max-height: calc(min(72vh, 640px) - 70px); overflow: auto; overscroll-behavior: contain; padding: 0 16px 12px; }
+@media (max-width: 600px) { .dg-inner { max-height: calc(64vh - 70px); } }
+.dg-fake { margin: 0 0 10px; font-size: 0.8125rem; color: var(--label-2); letter-spacing: 0; }
+.dg-done-note { margin: 0 0 10px; font-size: 0.875rem; }
+.dg-tasks, .dg-steps { list-style: none; margin: 0; padding: 0; }
+.dg-task + .dg-task { border-top: 0.5px solid var(--sep); }
+.dg-task-head {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  text-align: left;
+  cursor: pointer;
+}
+button.dg-task-head:active { opacity: 0.7; }
+.dg-task.locked .dg-task-head { cursor: default; color: var(--label-3); }
+.dg-num {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: var(--fill);
+  color: var(--label-2);
+}
+.dg-num svg { width: 14px; height: 14px; }
+.dg-task.current .dg-num { background: var(--tint); color: #fff; }
+.dg-num.done { background: var(--green-soft); color: var(--green); }
+.dg-task-title { display: flex; flex-direction: column; font-size: 0.9375rem; font-weight: 600; line-height: 1.3; }
+.dg-task.done .dg-task-title { font-weight: 500; }
+.dg-task-n { font-size: 0.75rem; font-weight: 500; color: var(--label-2); letter-spacing: 0; }
+.dg-task.locked .dg-task-n { color: var(--label-3); }
+.dg-steps { padding: 0 0 12px 34px; display: grid; gap: 10px; }
+.dg-step { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start; }
+.dg-check {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--label-3);
+  display: grid;
+  place-items: center;
+  font-size: 0.75rem;
+  color: var(--label-2);
+}
+.dg-step.done .dg-check { box-shadow: none; background: var(--green); color: #fff; }
+.dg-step.skipped .dg-check { box-shadow: none; background: var(--fill); }
+.dg-check svg { width: 12px; height: 12px; stroke-width: 3; }
+.dg-step-body { display: grid; gap: 4px; justify-items: start; }
+.dg-step-text { font-size: 0.875rem; line-height: 1.45; letter-spacing: -0.005em; }
+.dg-step.done .dg-step-text, .dg-step.skipped .dg-step-text { color: var(--label-2); }
+.dg-step-note { font-size: 0.8125rem; line-height: 1.45; color: var(--label-2); letter-spacing: 0; }
+.dg-optional { font-size: 0.75rem; color: var(--label-2); background: var(--fill); border-radius: 6px; padding: 1px 6px; margin-left: 2px; white-space: nowrap; }
+.dg-show {
+  appearance: none;
+  border: 0;
+  margin-top: 2px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: var(--tint-soft);
+  color: var(--tint);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.dg-show:active { transform: scale(0.97); opacity: 0.8; }
+.dg-foot { padding-top: 8px; border-top: 0.5px solid var(--sep); }
+.dg-reset { appearance: none; border: 0; background: none; padding: 6px 0; font: inherit; font-size: 0.8125rem; color: var(--label-2); cursor: pointer; }
+.dg-reset.armed { color: var(--danger); font-weight: 600; }
+.demo-guide button:focus-visible, .demo-guide a:focus-visible { outline: 2px solid var(--tint); outline-offset: 2px; border-radius: 8px; }
+
+/* '보여 주기': 그 버튼 둘레에 두꺼운 테두리를 두 번 퍼뜨린다(색만이 아니라 두께로 가리킨다) */
+.dg-spot { outline: 3px solid var(--tint) !important; outline-offset: 3px; animation: dg-pulse 1.1s ease-out 2; }
+@keyframes dg-pulse {
+  from { box-shadow: 0 0 0 0 var(--tint-soft); }
+  to { box-shadow: 0 0 0 14px transparent; }
+}
+
+/* ---------- 토스 대신 데모 안내 ---------- */
+.demo-toss-root { position: fixed; inset: 0; z-index: 80; display: grid; place-items: end center; padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+.demo-toss-root[hidden] { display: none; }
+@media (min-width: 601px) { .demo-toss-root { place-items: center; } }
+.demo-toss-scrim { position: absolute; inset: 0; background: var(--scrim); }
+.demo-toss {
+  position: relative;
+  width: min(420px, 100%);
+  padding: 24px 22px 20px;
+  border-radius: 22px;
+  background: var(--card);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.24);
+  animation: demo-toss-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.demo-toss:focus { outline: none; }
+.demo-toss .eyebrow { margin: 0; font-size: 0.75rem; color: var(--label-2); letter-spacing: 0; }
+.demo-toss h2 { margin: 4px 0 14px; font-size: 1.375rem; line-height: 1.25; letter-spacing: -0.02em; }
+.demo-toss-amt { margin: 0; font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.demo-toss-to { margin: 2px 0 14px; color: var(--label-2); font-size: 0.9375rem; letter-spacing: 0; }
+.demo-toss-note { margin: 0 0 18px; padding: 12px 14px; border-radius: 12px; background: var(--fill); font-size: 0.875rem; line-height: 1.5; letter-spacing: 0; }
+@keyframes demo-toss-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .dg-chev, .dg-bar i { transition: none; }
+  .dg-spot { animation: none; }
+  .demo-toss { animation: demo-toss-fade 200ms ease; }
+  @keyframes demo-toss-fade { from { opacity: 0; } to { opacity: 1; } }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .demo-guide { background: var(--card); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  .demo-guide { box-shadow: none; outline: 1px solid var(--label); }
+  .dg-check { box-shadow: inset 0 0 0 1.5px var(--label-2); }
+}
+
+/* ---------- 처음 화면(index.html) ---------- */
+.intro h1 { font-size: 2.5rem; letter-spacing: -0.03em; }
+.intro-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.intro-note { margin-top: 12px; padding: 0; }
+.intro-tasks { list-style: none; margin: 0; padding: 0; }
+.intro-tasks .row { gap: 12px; --inset: 52px; }

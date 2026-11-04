@@ -8,13 +8,14 @@
 
 ```
 브라우저
-  ├─ public/index.html + app.js   데모 화면(로그인 없이 보는 오사카 시나리오). 동작을 바꾸지 않아요
+  ├─ public/index.html + demo/    첫 화면과 체험 데모(로그인 없이). demo/room.html·account.html은 실제 화면에 데모 층(boot.js)만 얹어
+  │                               src/api.mjs 라우트를 브라우저 메모리 저장소로 돌린다(scripts/demo-pages.mjs가 만든다)
   ├─ public/room.html + room.js   실제 방 화면
   │     │  room-api.js: api(), subscribeRoom(), currentUid()
   └─ public/log-pop.js            좁은 화면(920px 이하)에서 비서끼리 기록을 상단바 종으로 여는 패널. 두 화면이 함께 씀
         │
         ▼
-API 서버 (server.mjs → src/app.mjs)
+API 서버 (server.mjs → src/app.mjs → src/api.mjs 라우트)
   ├─ src/identity.mjs     Firebase 신원 검증 (#2)
   ├─ src/store/           Store 인터페이스. MemoryStore(기본) 또는 FirestoreStore(STORE=firestore, #3). encryptedStore가 계좌·위치 요약 칸을 잠가 저장
   ├─ src/gemini.mjs       Gemini 호출 (키는 Secret Manager·로컬 .env에만)

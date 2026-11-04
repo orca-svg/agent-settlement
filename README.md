@@ -68,12 +68,12 @@ LLM은 "줄마다 누구 몫인가"만 추정합니다. 반면 환율 적용, �
 | --- | --- |
 | `public/data.js` | 데모 시나리오: 사람, 지출 7건, 환율, 비서의 기억과 규칙, 이의 제기 |
 | `public/core.js` | 환율 정책, 사람별 몫, 차액, 송금 경로, Gemini가 없을 때의 규칙 배분 |
-| `public/app.js` | 데모 화면(`index.html`) 상태: 수집 → 배분 → 확인 → 청구 → 이의 → 중재 → 승인 |
+| `public/index.html` · `public/demo/` | 첫 화면과 로그인 없이 하는 체험 데모. 실제 방·내 계정 화면을 그대로 띄우고, 서버 라우트(`src/api.mjs`)를 브라우저 메모리 저장소로 돌린다. 친구 셋은 진행자(`demo/director.js`)가 움직이고, task 체크리스트(`demo/guide.js`)가 다섯 task를 안내 |
 | `public/room.js` · `public/agent-panel.js` | 실제 방 화면(`room.html`): 지출 남기기부터 받았어요까지, 그리고 내 비서 설정 |
 | `public/motion.js` | 스프링(damping ratio + response), 속도 추적, 관성 투사, 러버밴드 |
 | `public/api.js` | API 주소. github.io에서는 Cloud Run, 로컬에서는 같은 서버 |
 | `server.mjs` | 진입점. 환경변수로 저장소·로그인·Gemini를 고르고, 30초마다 송금 알림 확인 |
-| `src/app.mjs` | API 라우트(데모용 `/api/allocate`·`/api/mediate`, 방·계정 API), CORS, IP당 호출 제한, 요청 줄 |
+| `src/api.mjs` · `src/app.mjs` | API 라우트(방·계정 API, 예전 데모용 `/api/allocate`·`/api/mediate`), IP당 호출 제한, 요청 줄은 `api.mjs`(node 없이 돌아 체험 데모도 씀). CORS·정적 파일은 `app.mjs` |
 | `src/agents/` | 비서의 일: 배분·중재(Gemini), 규칙 판단, 청구서·이의·송금 흐름, 비서 설정 |
 | `src/store/` | 메모리·Firestore 저장소와 계좌·위치 요약 잠금 |
 | `test/` | `npm test`. 예를 들어 `core.test.mjs`는 몫의 합 = 결제액, 송금 뒤 잔액 0, 규칙 배분이 시나리오대로인지 확인 |
