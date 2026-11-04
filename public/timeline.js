@@ -83,6 +83,38 @@ export function keepForSettlement(visits, expenses) {
   return visits.filter((v) => v.end > lo && v.start < hi).map(({ start, end, probability, home }) => ({ start, end, probability, home }));
 }
 
+/**
+ * 이의를 낼 때 타임라인으로 맞지 않는 지출을 찾는다. 결제 전에 자리를 떠난 지출만 고르고, 끝까지 있었거나 그 시간대 기록이 없는
+ * 지출은 고르지 않는다(사람이 직접 고른다). 각 지출에 상대에게 갈 요약과 '맞지 않는 점'에 채울 글을 붙여 돌려준다
+ */
+export function findMismatches(visits, expenses) {
+  return expenses.flatMap((exp) => {
+    const result = departure(visits, exp);
+    return result?.leftAt ? [{ expenseId: exp.id, result, summary: timelineSummary(result, exp), claim: timelineClaim(result, exp) }] : [];
+  });
+}
+
+/**
+ * '맞지 않는 점'에 미리 채울 내 말. 떠난 뒤에 시킨 줄이 있으면 그 이름을(셋까지) 적는다. 사람이 고칠 수 있다.
+ * 이의 내용은 방 사람 모두가 보고 위치 요약처럼 암호화·7일 삭제를 하지 않으므로, 떠난 시각·도착한 곳은 넣지 않는다
+ * (그건 당사자만 보는 위치 요약에 있다. PRIVACY.md)
+ */
+export function timelineClaim(result, expense) {
+  const { from, until } = expenseWindow(expense);
+  // 자정을 넘긴 지출이면 떠난 시각·주문 시각이 결제일의 전날일 수 있다(expenseWindow와 같은 규칙)
+  const left = [0, -DAY].map((d) => atKst(expense.date, result.leftAt) + d).find((ms) => ms > from && ms < until) ?? until;
+  const after = (expense.items ?? []).filter((it) => it.time).filter((it) => {
+    const at = atKst(expense.date, it.time);
+    return (at > until ? at - DAY : at) > left;
+  });
+  const names = [...new Set(after.map((it) => it.name))];
+  const list = names.length > 3 ? `${names.slice(0, 3).join('·')} 외 ${names.length - 3}개` : names.join('·');
+  const text = names.length
+    ? `제가 자리를 뜬 뒤에 시킨 것(${list})은 제 몫이 아니에요.`
+    : '결제 전에 자리를 떴어요. 끝까지 함께 있지 않았는데 똑같이 나누는 건 맞지 않아요.';
+  return text.slice(0, 200);
+}
+
 /** 이의 상대와 중재 비서에게 보내는 한 줄. 화면 미리보기와 서버 저장이 같은 글을 쓴다 */
 export function timelineSummary(result, expense) {
   const { from, until } = expenseWindow(expense);

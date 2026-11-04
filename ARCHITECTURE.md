@@ -180,8 +180,8 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | POST | `/api/rooms/:id/expenses/:eid/lines/:itemId` | 줄 하나를 사람이 확정(`{ consumers }`) |
 
 | POST | `/api/rooms/:id/invoices/send` | 지금 방 `version`으로 청구서 보내기. **외화 방은 전원이 환율 정책에 동의해야 열려요**(아니면 409, #4). '정산일 기준율' 방은 처음 보낼 때 그날 환율을 받아 두고, 못 받으면 503이에요. 처음 보내면 방이 `status: 'settling'`이 되어 초대·참가·정책 변경을 막아요. 같은 version이면 다시 만들지 않아요(멱등). 각자의 비서가 규칙대로 수락·질문·이의를 정해요 |
-| POST | `/api/rooms/:id/invoices/:iid/answer` | 주인에게 물은 청구서에 답하기 `{ decision: 'accept'|'dispute', expenseId?, claim? }` |
-| POST | `/api/rooms/:id/disputes` | 이의 제기 `{ expenseId, claim }` |
+| POST | `/api/rooms/:id/invoices/:iid/answer` | 주인에게 물은 청구서에 답하기 `{ decision: 'accept'|'dispute', disputes?: [{ expenseId, claim? }] }`. 이의는 여러 지출에 한 번에 내고, 하나라도 이 방에 없는 지출이면 아무 이의도 만들지 않아요(400). 예전 형식 `expenseId`·`claim` 하나도 받아요. 맞지 않는 점(`claim`)을 비우면 지출 이름을 넣은 기본 문구로 채워요 |
+| POST | `/api/rooms/:id/disputes` | 이의 제기 `{ expenseId, claim? }` |
 | POST | `/api/rooms/:id/disputes/:did/mediate` | 중재 비서에게 맡기기(당사자만) |
 | POST | `/api/rooms/:id/disputes/:did/agree` | 중재안에 동의. 양쪽이 동의하면 지출을 다시 나누고 version을 올려 청구서를 다시 보내요 |
 | POST | `/api/rooms/:id/disputes/:did/reject` | 중재안 거부 `{ reason? }`(한 줄, 100자까지). 이의가 끝나고(이의를 낸 사람이 거부하면 `withdrawn`, 지출을 낸 사람이 거부하면 `dismissed`) 지출은 지금 배분 그대로 둔 채 정산이 이어져요. 당사자만(아니면 403), 중재안이 있을 때만(아니면 409). 같은 사람이 다시 보내면 처음 결과를 돌려줘요 |
