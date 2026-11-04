@@ -1,6 +1,6 @@
 # 아키텍처: 정산은 비서끼리
 
-> #2/#7 확장: 실제 API는 Firebase Bearer ID 토큰과 폐기 여부를 검증해요. `x-demo-user`는 Firebase가 설정되지 않은 비운영 `DEV_SEED=1`에서만 사용해요. 설정은 [연결 안내](docs/auth-location-setup.md), 계약 변경은 아래 표를 참고해 주세요.
+> #2/#7 확장: 실제 API는 Firebase Bearer ID 토큰을 검증하고, 폐기 여부는 같은 사람에게 5분에 한 번 Auth 서버에 물어요. `x-demo-user`는 Firebase가 설정되지 않은 비운영 `DEV_SEED=1`에서만 사용해요. 설정은 [연결 안내](docs/auth-location-setup.md), 계약 변경은 아래 표를 참고해 주세요.
 
 팀원이 각자 이슈를 맡아 개발할 때 맞춰야 하는 **계약**을 정리한 문서예요. 코드의 기준은 `src/domain/types.mjs`이고, 이 문서와 그 파일은 함께 고쳐요.
 
@@ -35,7 +35,7 @@ API 서버 (server.mjs → src/app.mjs)
 
 | 이슈 | 바꿀 곳 | 지금 구현 | 바꿀 구현 |
 | --- | --- | --- | --- |
-| #2 로그인 | `src/identity.mjs`의 `identify(req, store, roomId)` | Firebase ID 토큰·폐기 확인, 서버가 넣은 `req.identityContext` 사용. 방 조회는 멤버일 때만 통과 | 프로젝트 자격 증명 연결 |
+| #2 로그인 | `src/identity.mjs`의 `identify(req, store, roomId)` | Firebase ID 토큰 확인(폐기 확인은 사람마다 5분에 한 번, 탈퇴하면 `forgetVerified`로 바로 다시 확인), 서버가 넣은 `req.identityContext` 사용. 방 조회는 멤버일 때만 통과 | 프로젝트 자격 증명 연결 |
 | #2 로그인 | `public/room-api.js`의 `currentUid()`·`api()` | Firebase 사용자·Bearer ID 토큰. 신원 헤더는 이 모듈 한 곳에서만 설정 | `initAuth()` 완료 후 사용 |
 | #3 Firestore | `src/store/`의 Store | `STORE=firestore`면 `FirestoreStore`(`src/store/firestore.mjs`), 아니면 `MemoryStore`. 연결은 [Firestore 안내](docs/firestore-setup.md) | 팀 프로젝트 연결 |
 | #3 Firestore | `public/room-api.js`의 `subscribeRoom()` | 서버가 Firestore이고 로그인했으면 `rooms/{roomId}/events`를 `onSnapshot`, 아니면 2초 폴링. 호출 방식은 같아요 | — |
