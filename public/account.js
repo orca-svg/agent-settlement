@@ -39,7 +39,7 @@ const setView = (view) => { document.body.dataset.view = view; };
 const linkRow = (href, title, meta) => `<a class="row" href="${href}"><span class="grow"><span class="title">${title}</span>
   <span class="meta" style="display:block">${meta}</span></span>${CHEVRON}</a>`;
 const demoRows = (label, dev) => `<section class="group"><h2 class="group-label"><span>${label}</span></h2><div class="list">
-    ${linkRow('./', '데모 체험하기', '오사카 2박 3일 시나리오로 비서끼리 정산을 바로 해 봐요')}
+    ${linkRow('./', '데모 체험하기', '로그인 없이 ‘나’가 되어 오사카 여행 정산을 다섯 task로 따라가요')}
     ${dev ? linkRow('room.html', '개발용 방 열기', '시드 신원으로 실제 방 화면을 시험해요') : ''}
   </div></section>`;
 

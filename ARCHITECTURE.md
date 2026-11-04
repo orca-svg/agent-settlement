@@ -147,7 +147,7 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 
 ## API
 
-실제 데이터 API는 `Authorization: Bearer <Firebase ID token>`이 필요해요. 없거나 유효하지 않으면 401, 인증은 됐지만 방 멤버가 아니면 403이에요. 비로그인 데모 API는 그대로 열려 있어요.
+실제 데이터 API는 `Authorization: Bearer <Firebase ID token>`이 필요해요. 없거나 유효하지 않으면 401, 인증은 됐지만 방 멤버가 아니면 403이에요. 로그인 없이 열린 데이터 API는 없어요. 체험 데모는 서버를 부르지 않고 같은 라우트(`src/api.mjs`)를 브라우저 안에서 돌려요.
 
 | 메서드 | 경로 | 하는 일 |
 | --- | --- | --- |
@@ -208,7 +208,7 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 ## 로컬에서 실행
 
 ```bash
-npm start                      # 데모 화면: http://localhost:4500
+npm start                      # 첫 화면과 체험 데모: http://localhost:4500
 DEV_SEED=1 npm start           # 실제 방 화면을 시드 데이터로 열어 볼 때
 npm test                       # 계약·계산 테스트(에뮬레이터가 필요한 테스트는 건너뜀)
 npm run test:emulators         # Firebase 에뮬레이터(Firestore·Storage·Auth)를 띄워 전체 테스트. Java 21과 firebase-tools 필요
