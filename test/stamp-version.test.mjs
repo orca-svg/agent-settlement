@@ -59,3 +59,13 @@ test('stampDir: 폴더 안의 .js·.html을 모두 같은 버전으로 바꾸고
   assert.equal(fs.readFileSync(path.join(dir, 'room.html'), 'utf8'), '<script type="module" src="room.js?v=abc1234"></script>\n');
   assert.equal(fs.readFileSync(path.join(dir, 'style.css'), 'utf8'), 'body { color: red; }\n');
 });
+
+test('stampDir: 하위 폴더(demo/, src/)의 .js·.mjs·.html도 같은 버전으로 바꾼다', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stamp-'));
+  fs.mkdirSync(path.join(dir, 'demo'));
+  fs.mkdirSync(path.join(dir, 'src', 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'demo', 'room.html'), '<script type="module" src="../room.js"></script>\n');
+  fs.writeFileSync(path.join(dir, 'src', 'agents', 'x.mjs'), "import { won } from '../../public/core.js';\n");
+  assert.deepEqual(stampDir(dir, 'abc1234').sort(), ['demo/room.html', 'src/agents/x.mjs']);
+  assert.equal(fs.readFileSync(path.join(dir, 'src', 'agents', 'x.mjs'), 'utf8'), "import { won } from '../../public/core.js?v=abc1234';\n");
+});

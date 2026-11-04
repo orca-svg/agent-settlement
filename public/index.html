@@ -11,51 +11,58 @@
   <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="demo/demo.css">
 </head>
-<body>
-  <header class="nav" id="nav">
+<body class="solo-page" data-view="rooms">
+  <header class="nav">
     <div class="nav-inner">
-      <span class="nav-title" aria-hidden="true">오사카 2박 3일</span>
-      <div class="nav-actions">
-        <a class="nav-btn" href="account.html">로그인·내 방</a>
-        <button class="nav-btn bell" id="nav-bell" type="button" data-action="toggle-log" aria-haspopup="dialog" aria-expanded="false" aria-controls="log-pop" aria-label="비서끼리 기록" hidden><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.6 2H4.4L6 16zM10 20.5a2.2 2.2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="badge" id="bell-badge" hidden></span></button>
-        <a class="nav-btn" id="to-room" href="room.html" hidden>실제 방 열기</a>
-        <span class="mode" id="mode">연결 확인 중</span>
-      </div>
+      <div><span class="nav-brand">정산은 비서끼리</span></div>
+      <div></div>
+      <div class="nav-end"><a class="nav-text" href="account.html">로그인·내 방</a></div>
     </div>
   </header>
+  <main class="solo">
+    <section class="hero intro">
+      <h1>돈 얘기는 비서끼리</h1>
+      <p class="sub">친구들과 함께 쓴 돈을 각자의 AI 비서가 정산해요. 사람은 확인과 승인만 해요.</p>
+      <div class="actions intro-actions">
+        <a class="btn" id="start" href="demo/account.html">체험 시작</a>
+        <button type="button" class="btn plain" id="restart" hidden>처음부터 다시</button>
+      </div>
+      <p class="group-note intro-note">로그인 없이 ‘나’가 되어 철수·영희·민수와 다녀온 오사카 여행을 정산해요. 금액·환율·계좌·위치는 모두 가짜이고, 돈은 움직이지 않아요.</p>
+    </section>
 
-  <div class="layout">
-    <main id="main" class="main"></main>
-    <aside id="channel" class="channel" aria-label="비서끼리 나눈 기록" aria-live="polite"></aside>
-  </div>
-
-  <!-- 좁은 화면: 비서끼리 기록을 이 방의 알림처럼 상단바 종에서 연다 -->
-  <div class="log-pop-root" id="log-pop-root" hidden>
-    <div class="log-scrim" data-action="close-log"></div>
-    <section class="log-pop" id="log-pop" role="dialog" aria-label="비서끼리 기록" tabindex="-1"></section>
-  </div>
+    <section class="group" aria-labelledby="tasks-title">
+      <h2 class="group-label" id="tasks-title"><span>체험 데모의 다섯 task</span><span>체크리스트가 차례로 안내해요</span></h2>
+      <ol class="list intro-tasks">
+        <li class="row"><span class="dg-num" aria-hidden="true">1</span><span class="grow"><span class="title">여행 방 만들고 친구 초대하기</span><span class="meta" style="display:block">기간 빠른 선택, 엔화 방의 환율 정책, 참여자 줄 끝 ＋ 버튼의 초대 링크</span></span></li>
+        <li class="row"><span class="dg-num" aria-hidden="true">2</span><span class="grow"><span class="title">지출 남기기</span><span class="meta" style="display:block">영수증 사진 읽기나 직접 입력, 결제한 날의 환율, 함께한 사람</span></span></li>
+        <li class="row"><span class="dg-num" aria-hidden="true">3</span><span class="grow"><span class="title">비서에게 맡길 범위 정하기</span><span class="meta" style="display:block">받을 계좌, 자동 수락 한도, 보낼 시기, 이의 처리, 이 방에서만 다르게</span></span></li>
+        <li class="row"><span class="dg-num" aria-hidden="true">4</span><span class="grow"><span class="title">맞지 않는 몫 바로잡기</span><span class="meta" style="display:block">타임라인이 찾아 준 지출에 이의를 보내고 중재안에 동의</span></span></li>
+        <li class="row"><span class="dg-num" aria-hidden="true">5</span><span class="grow"><span class="title">보내고 마무리하기</span><span class="meta" style="display:block">송금 앱 직전까지, 보냈어요·받았어요, 정산 완료와 나가기</span></span></li>
+      </ol>
+    </section>
+  </main>
 
   <footer class="foot">
-    <p>모든 금액·환율·기록은 가상의 샘플이에요. 실제 송금은 일어나지 않아요.</p>
     <p><span>GDGoC DevFest 2026 「Tell the Vision」 ·</span> <span>Team 06 Money is Our Life</span></p>
     <p><a href="https://github.com/orca-svg/agent-settlement/blob/main/PRIVACY.md" target="_blank" rel="noopener">개인정보 처리방침</a></p>
   </footer>
 
-  <div class="sheet-root" id="sheet-root" hidden>
-    <div class="scrim" data-action="close-sheet"></div>
-    <section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1">
-      <div class="sheet-head" id="sheet-handle">
-        <div class="grabber" aria-hidden="true"></div>
-        <div class="sheet-bar">
-          <h2 id="sheet-title"></h2>
-          <button class="text-btn" type="button" data-action="close-sheet">닫기</button>
-        </div>
-      </div>
-      <div class="sheet-body" id="sheet-body"></div>
-    </section>
-  </div>
-
-  <script type="module" src="app.js"></script>
+  <script type="module">
+    // 이 탭에서 하던 체험이 있으면 이어서 하거나 처음부터 다시 할 수 있다(체험은 탭을 닫으면 사라진다, demo/server.js)
+    const KEYS = ['agent-settlement.demo.v1', 'agent-settlement.demo.room', 'agent-settlement.demo.guide'];
+    let saved = null;
+    try { saved = sessionStorage.getItem(KEYS[0]); } catch {}
+    if (saved) {
+      document.querySelector('#start').textContent = '이어서 하기';
+      const restart = document.querySelector('#restart');
+      restart.hidden = false;
+      restart.onclick = () => {
+        try { KEYS.forEach((k) => sessionStorage.removeItem(k)); } catch {}
+        location.href = 'demo/account.html';
+      };
+    }
+  </script>
 </body>
 </html>

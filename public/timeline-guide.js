@@ -27,8 +27,9 @@ const STEPS = {
   ],
 };
 
-// os: 보여 줄 단계('ios'|'android'), phone: 이 기기에 Google 지도 앱이 있을 수 있는지(컴퓨터면 false라 지도 링크를 두지 않는다)
-export function guideHtml({ os = 'ios', phone = true } = {}) {
+// os: 보여 줄 단계('ios'|'android'), phone: 이 기기에 Google 지도 앱이 있을 수 있는지(컴퓨터면 false라 지도 링크를 두지 않는다),
+// sample: 체험 데모처럼 내 기록 대신 샘플 타임라인을 쓰게 할지(그때는 샘플이 주 버튼이다)
+export function guideHtml({ os = 'ios', phone = true, sample = false } = {}) {
   const tab = os === 'android' ? 'android' : 'ios';
   const seg = `<div class="seg" role="radiogroup" aria-label="내 휴대폰" data-seg="tl-os"><span class="seg-thumb"></span>
     ${[['ios', 'iPhone'], ['android', 'Android']].map(([id, label]) => `<button type="button" role="radio" aria-checked="${id === tab}" data-action="tl-os" data-id="${id}">${label}</button>`).join('')}</div>`;
@@ -37,5 +38,6 @@ export function guideHtml({ os = 'ios', phone = true } = {}) {
     ${seg}
     <ol class="steps">${STEPS[tab].map((s) => `<li><span>${s}</span></li>`).join('')}</ol>
     ${phone ? '' : '<p class="guide-note">타임라인은 휴대폰에만 있어요. 휴대폰에서 내보낸 파일을 이 컴퓨터로 옮긴 뒤 골라요.</p>'}
-    <div class="guide-actions"><button type="button" class="btn" data-action="timeline-file">내보낸 파일 고르기</button>${open}</div>`;
+    ${sample ? '<div class="guide-actions"><button type="button" class="btn" data-action="timeline-sample">샘플 타임라인으로 해 보기</button></div><p class="guide-note">체험 데모라 내 기록 대신, 2차 바에서 먼저 떠난 샘플 기록을 이 기기에서 읽어요.</p>' : ''}
+    <div class="guide-actions"><button type="button" class="btn${sample ? ' secondary' : ''}" data-action="timeline-file">내보낸 파일 고르기</button>${open}</div>`;
 }
