@@ -1,6 +1,8 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
-import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
+import { won, money, dayLabel, amountOf, toKrw, shares, settle, active } from './core.js';
+import { unitOf, decimalsOf } from './currencies.js';
+import { leaveBlock } from './leave.js';
 import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, CROSS, ICON_DONE, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, flaggedLines, blockedNotice, askedBy, nudge, COMPUTER_QUERY, disputeWaiting, disputeChoices, disputeNote, disputeRejected, disputeLive, disputeStatus } from './ui.js';
 import { reduceMotion } from './motion.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
@@ -11,7 +13,7 @@ import { createAgentPanel, personChipHtml } from './agent-panel.js';
 import { notifies } from './agent-rules.js';
 import { readVisits, expenseWindow, keepForSettlement, findMismatches } from './timeline.js';
 import { guessOs, guideHtml } from './timeline-guide.js';
-import { createRoomHtml, joinHtml, setupHtml, notAgreed, inviteUrl, datesLabel, inviteSheetHtml, inviteButtonHtml } from './room-setup.js';
+import { createRoomHtml, joinHtml, setupHtml, notAgreed, hasStarted, inviteUrl, datesLabel, inviteSheetHtml, inviteButtonHtml, leaveSheetHtml } from './room-setup.js';
 import { pickDay, presetRange, nextFocus, shiftMonth, todayIso } from './date-range.js';
 import { payoutFieldsHtml, payoutDraftFrom } from './payout-form.js';
 
@@ -19,7 +21,8 @@ const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
 const inviteToken = roomId ? null : new URLSearchParams(location.search).get('invite');
 // #4 방 만들기·참가하기·정책 동의·초대 링크 화면 상태. 방에 보일 이름·색은 입력받지 않고 내 프로필(profile)을 쓴다
-const setup = { create: { name: '', start: '', end: '', policy: 'actual' }, picker: { open: false, month: '', focus: '', entering: false }, join: {}, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, copied: false, busy: false, error: '' };
+// foreign: 외화도 쓰는 방인지(#55). 그때만 fxCurrency·policy를 보낸다. armed·removeError: 초대 시트의 내보내기, leaving·leaveError: 나가기 시트
+const setup = { create: { name: '', start: '', end: '', foreign: false, fxCurrency: 'JPY', policy: 'actual' }, picker: { open: false, month: '', focus: '', entering: false }, join: {}, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, copied: false, busy: false, error: '', armed: null, removeError: null, leaving: false, leaveError: '' };
 // 로그인이 없는 개발용 서버에서만: 처음 방을 만들거나 참가할 때 이 브라우저용 uid를 하나 만든다. 배포에서는 Google 로그인 신원을 쓴다
 const ensureUid = () => currentUid() || (authOptions().dev ? (setCurrentUid(`u-${crypto.randomUUID().slice(0, 8)}`), currentUid()) : null);
 const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null, disputeDone: null, rejectDraft: null, sendBlocked: false, announceBlocked: false, focusLine: null };
@@ -95,6 +98,7 @@ const meMenu = {
     const me = state.data?.me;
     $('#nav-me-avatar').innerHTML = me ? avatar(me.uid) : '';
     $('#me-menu-agent').hidden = !state.data?.myAgent;
+    $('#me-menu-leave').hidden = !state.data; // 방 안에서만
   },
 };
 
@@ -104,7 +108,7 @@ async function load() {
     state.data = await api(`/api/rooms/${encodeURIComponent(roomId)}`);
     state.error = null;
     // 살아 있는 초대 링크는 처음 한 번만 물어본다(정산 중인 방은 초대를 막는다)
-    if (setup.invite === undefined && state.data.room.status !== 'settling') {
+    if (setup.invite === undefined && !hasStarted(state.data.room)) {
       setup.invite = null;
       api(`/api/rooms/${encodeURIComponent(roomId)}/invite`).then(({ invite }) => { setup.invite = invite; render(); }, () => {});
     }
@@ -166,18 +170,15 @@ function forgetVisits() {
     localStorage.removeItem(timelineKey());
   } catch {}
 }
-// 외화는 환율이 있는 날짜만 고를 수 있다
-const fxDates = () => Object.keys(state.data.room.fx?.base ?? {}).sort();
-function fitDate(d) {
-  if (d.currency !== 'KRW' && !fxDates().includes(d.date)) d.date = fxDates()[0];
-  return d;
-}
+// 외화 지출의 환율은 저장할 때 서버가 그 결제일 것으로 받아 온다(#55). 그래서 날짜는 원화처럼 아무 날이나 고른다.
+// 금액에 쓸 수 있는 소수 자리(원·엔은 정수, 달러·유로 등은 0.01까지)
+const amountOfInput = (value, currency) => Number(String(value).replace(decimalsOf(currency) ? /[^\d.]/g : /[^\d]/g, ''));
 function newDraft() {
   const { room, me } = state.data;
-  const uids = room.members.filter(m => !m.deleted).map((m) => m.uid);
+  const uids = room.members.filter(active).map((m) => m.uid);
   const last = lastUsed();
   const currencies = ['KRW', room.fx?.currency].filter(Boolean);
-  return fitDate({
+  return {
     title: '',
     amount: '',
     currency: currencies.includes(last.currency) ? last.currency : 'KRW',
@@ -186,7 +187,7 @@ function newDraft() {
     present: Array.isArray(last.present) && last.present.every((u) => uids.includes(u)) && last.present.length ? last.present : uids,
     date: kstNow().slice(0, 10),
     time: kstNow().slice(11, 16),
-  });
+  };
 }
 
 async function saveExpense() {
@@ -204,7 +205,7 @@ async function saveExpense() {
         ...(!state.editing && state.addMode === 'photo' && d.items && state.lastImage ? { receipt: state.lastImage } : {}),
         expense: state.addMode === 'photo' && d.items
           ? { ...d, amount: undefined, source: 'receipt' }
-          : { ...d, items: undefined, amount: Number(String(d.amount).replace(/[^\d]/g, '')) },
+          : { ...d, items: undefined, amount: amountOfInput(d.amount, d.currency) },
       },
     });
     remember(d);
@@ -268,11 +269,7 @@ function applyReceipt(r) {
   if (currencies.includes(r.currency)) d.currency = r.currency;
   if (r.time) d.time = r.time;
   const notes = [...(r.warnings || [])];
-  if (r.date) {
-    d.date = r.date;
-    if (d.currency !== 'KRW' && !fxDates().includes(r.date)) notes.push(`영수증 날짜(${dayLabel(r.date)})의 환율이 없어 날짜를 다시 골라야 해요`);
-  }
-  fitDate(d);
+  if (r.date) d.date = r.date;
   if (!r.ok) {
     state.addMode = 'manual';
     d.amount = '';
@@ -316,6 +313,24 @@ async function confirmLine(eid, itemId) {
   await load();
 }
 
+// 비서가 짐작한 대로 한꺼번에 확정한다. eid가 있으면 그 지출만(고쳐 둔 줄은 고친 대로), 없으면 방의 모든 지출
+async function confirmGuesses(eid) {
+  if (state.busy === 'confirm-guesses') return;
+  state.busy = 'confirm-guesses';
+  try {
+    const path = eid ? `/expenses/${encodeURIComponent(eid)}/confirm-guesses` : '/confirm-guesses';
+    await api(`/api/rooms/${encodeURIComponent(roomId)}${path}`, { method: 'POST', body: eid ? { edits: state.edits[eid] ?? {} } : {} });
+    if (eid) delete state.edits[eid];
+    else state.edits = {};
+    state.formError = '';
+  } catch (e) {
+    state.formError = e.message;
+  } finally {
+    state.busy = null;
+  }
+  await load();
+}
+
 function expenseChip(e) {
   if (!e.items?.length) return chip('1/N');
   if (!e.alloc) return chip('메뉴별로 나누기 전');
@@ -346,6 +361,14 @@ function linesHtml(exp) {
   }).join('');
 }
 
+// 확인할 줄이 여럿이면 줄마다 누르지 않고 한 번에 확정한다. 고쳐 둔 줄은 고친 대로, 나머지는 비서가 짐작한 대로(서버 confirm-guesses)
+function bulkConfirmHtml(exp, busy) {
+  const n = exp.items.filter((it) => isFlagged(exp.alloc?.[it.id])).length;
+  if (n < 2 || busy) return '';
+  return `<div class="line-foot" style="margin-bottom:10px"><span class="grow meta">확인할 줄 ${n}개</span>
+    <button class="btn sm secondary" data-action="confirm-guesses" data-id="${esc(exp.id)}">${n}줄 모두 짐작한 대로 확인</button></div>`;
+}
+
 function expSheetHtml(exp) {
   const { room } = state.data;
   const { krw, how } = toKrw(exp, room, room.policy);
@@ -355,7 +378,7 @@ function expSheetHtml(exp) {
   const lines = exp.items?.length
     ? `<section class="group"><h3 class="group-label"><span>영수증 ${exp.items.length}줄 · 어떻게 나눌까요</span><span>${esc(state.allocSource[exp.id] ?? (exp.alloc ? '' : '나누기 전'))}</span></h3>
         ${busy ? '<div class="next" aria-busy="true" style="margin:0 0 12px"><h2 style="font-size:1.0625rem">비서들이 기억으로 나누는 중이에요</h2><div class="progress"><i></i></div></div>' : ''}
-        <div class="list">${linesHtml(exp)}</div>
+        ${bulkConfirmHtml(exp, busy)}<div class="list">${linesHtml(exp)}</div>
         <p class="group-note">${exp.alloc ? '이름을 눌러 고친 뒤 확인하면 그 줄은 더 묻지 않아요.' : '각자의 비서가 공유한 기억으로 줄마다 누구 몫인지 정해요. 근거가 없는 줄은 짐작하지 않고 물어봐요.'}</p>
         <button class="btn ${exp.alloc ? 'secondary' : ''}" style="width:100%;margin-top:10px" data-action="allocate-exp" data-id="${esc(exp.id)}" ${busy || ab.disabled ? 'disabled' : ''}>${ab.label}</button>
         ${ab.hint ? `<p class="group-note" style="margin-top:8px">${esc(ab.hint)}</p>` : ''}</section>`
@@ -370,10 +393,10 @@ function expSheetHtml(exp) {
       <div class="list">${room.members.filter((m) => s.krwShare[m.uid] !== undefined).map((m) => `<div class="row" style="--inset:52px">${avatar(m.uid)}
         <span class="grow">${esc(m.name)}${m.uid === exp.payer ? ' <span class="meta">· 낸 사람</span>' : ''}</span>
         <span class="amount num">${won(s.krwShare[m.uid])}</span></div>`).join('')}</div>${restNote(s.rest)}</section>
-    <div style="display:grid;gap:8px">
+    ${room.status === 'done' ? '<p class="group-note">정산이 끝난 방이라 지출을 고치거나 지울 수 없어요.</p>' : `<div style="display:grid;gap:8px">
       <button class="btn plain" data-action="edit-exp" data-id="${esc(exp.id)}">지출 고치기</button>
       <button class="btn danger ${state.armedDelete === exp.id ? 'armed' : ''}" data-action="delete-exp" data-id="${esc(exp.id)}">${state.armedDelete === exp.id ? '한 번 더 누르면 지워요' : '지출 지우기'}</button>
-    </div>`;
+    </div>`}`;
 }
 
 // ---------------------------------------------------------------- 영수증 사진 모달
@@ -400,7 +423,7 @@ function closePhoto() {
 const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit) || 0), 0);
 
 // #4 방 만들기·참가하기·정책·초대. 복사·공유는 클릭 처리기 안에서 바로 불러야 브라우저가 허락한다
-const SETUP_ACTIONS = new Set(['open-invite', 'range-toggle', 'range-day', 'range-month', 'range-preset', 'range-clear', 'cf-policy','sign-in', 'create-room', 'join-room', 'agree-policy', 'edit-policy', 'set-policy', 'make-invite', 'copy-invite', 'share-invite']);
+const SETUP_ACTIONS = new Set(['open-invite', 'range-toggle', 'range-day', 'range-month', 'range-preset', 'range-clear', 'cf-policy', 'cf-foreign', 'sign-in', 'create-room', 'join-room', 'agree-policy', 'edit-policy', 'set-policy', 'make-invite', 'copy-invite', 'share-invite', 'open-leave', 'leave-room', 'remove-member']);
 // 기간 고르기(방 만들기 폼). 화면을 통째로 다시 그리므로, 방금 누른 자리로 초점을 돌려놓아 키보드로 이어 고를 수 있게 한다
 function rangeAct(name, d) {
   const p = setup.picker;
@@ -448,6 +471,50 @@ async function setupAct(name, d) {
   if (name === 'cf-policy') {
     setup.create.policy = d.id;
     return render();
+  }
+  if (name === 'cf-foreign') {
+    setup.create.foreign = d.id === 'yes';
+    render();
+    return void document.querySelector(`[data-action="cf-foreign"][data-id="${d.id}"]`)?.focus({ preventScroll: true }); // 다시 그려도 초점은 누른 자리에
+  }
+  // 나가기(#55): '내 계정' 메뉴에서 시트를 연다. 돈이 남아 있으면 시트가 까닭을 보이고 버튼을 두지 않는다
+  if (name === 'open-leave') {
+    setup.leaveError = '';
+    return openAgentSheet('leave');
+  }
+  if (name === 'leave-room') {
+    if (setup.leaving) return undefined;
+    setup.leaving = true;
+    setup.leaveError = '';
+    renderSheet();
+    try {
+      await api(`${base}/leave`, { method: 'POST', body: {} });
+      return void location.assign('account.html');
+    } catch (e) {
+      setup.leaveError = e.message; // 그 사이 상황이 바뀌어 서버가 막았으면 버튼 바로 위에 까닭을 보인다
+    } finally {
+      setup.leaving = false;
+    }
+    await load();
+    return renderSheet();
+  }
+  // 내보내기(#55, 방을 만든 사람): 지출 지우기처럼 3초 안에 한 번 더 눌러야 한다
+  if (name === 'remove-member') {
+    setup.removeError = null;
+    if (setup.armed !== d.id) {
+      setup.armed = d.id;
+      renderSheet();
+      setTimeout(() => { if (setup.armed === d.id) { setup.armed = null; renderSheet(); } }, 3000);
+      return undefined;
+    }
+    setup.armed = null;
+    try {
+      await api(`${base}/members/${encodeURIComponent(d.id)}/remove`, { method: 'POST', body: {} });
+    } catch (e) {
+      setup.removeError = { uid: d.id, message: e.message };
+    }
+    await load();
+    return renderSheet();
   }
   if (name === 'edit-policy') {
     setup.policyEdit = !setup.policyEdit;
@@ -499,7 +566,8 @@ async function setupAct(name, d) {
       need(c.name.trim(), '방 이름을 적어 주세요');
       need(!c.start || !c.end || c.end >= c.start, '끝나는 날이 시작하는 날보다 빨라요');
       ensureUid();
-      const { room } = await api('/api/rooms', { method: 'POST', body: { name: c.name, dates: datesLabel(c.start, c.end), policy: c.policy } });
+      // 환율 정책은 외화 방에만 보낸다(#55). 원화 방은 정책을 묻지 않는다
+      const { room } = await api('/api/rooms', { method: 'POST', body: { name: c.name, dates: datesLabel(c.start, c.end), ...(c.foreign ? { currency: c.fxCurrency, policy: c.policy } : {}) } });
       location.search = `?room=${encodeURIComponent(room.id)}`;
       return;
     }
@@ -595,7 +663,6 @@ async function act(name, d) {
     sheet.close();
   } else if (name === 'draft-set') {
     state.draft[d.field] = d.id;
-    fitDate(state.draft);
     renderSheet();
   } else if (name === 'draft-present') {
     const set = new Set(state.draft.present);
@@ -618,6 +685,8 @@ async function act(name, d) {
     if (set.has(d.p)) set.delete(d.p); else set.add(d.p);
     if (set.size) edits[d.line] = exp.present.filter((u) => set.has(u));
     renderSheet();
+  } else if (name === 'confirm-guesses' || name === 'confirm-all-guesses') {
+    confirmGuesses(name === 'confirm-guesses' ? d.id : null);
   } else if (name === 'confirm-line') {
     if (state.focusLine?.exp === d.exp && state.focusLine.line === d.line) state.focusLine = null; // 확인했으니 강조는 거둔다
     confirmLine(d.exp, d.line);
@@ -660,7 +729,7 @@ function whoPicker() {
   const me = currentUid();
   return `<section class="group"><h2 class="group-label"><span>누구로 볼까요?</span><span>개발용 시드 신원</span></h2>
     <div class="seg" role="radiogroup" aria-label="보는 사람" data-seg="who"><span class="seg-thumb"></span>
-      ${members().filter(m => !m.deleted).map((m) => `<button type="button" role="radio" aria-checked="${m.uid === me}" data-action="who" data-id="${esc(m.uid)}">${esc(m.name)}</button>`).join('')}
+      ${members().filter(active).map((m) => `<button type="button" role="radio" aria-checked="${m.uid === me}" data-action="who" data-id="${esc(m.uid)}">${esc(m.name)}</button>`).join('')}
     </div></section>`;
 }
 
@@ -669,13 +738,15 @@ function hero() {
   // 내 칩은 '내 비서' 입구를 겸한다(#5). 다른 사람 칩은 이름표이고, 비서 설정을 마쳤는지만 로봇 표시로 보인다
   const ready = new Set(state.data.agentReady ?? []);
   const person = (m) => (m.uid === me.uid ? agentPanel.chipHtml(m, avatar(m.uid)) : personChipHtml({ name: m.name, avatar: avatar(m.uid), ready: ready.has(m.uid) }));
+  const here = room.members.filter(active); // 탈퇴하거나 나간 사람은 지출·송금 기록에만 남는다(#55)
   return `<section class="hero"><h1>${esc(room.name)}</h1>
-    <p class="sub">${esc(room.dates || '')}${room.dates ? ' · ' : ''}${room.members.length}명 · 돈 얘기는 각자의 비서끼리 해요</p>
-    <div class="people">${room.members.map(person).join('')}${room.status === 'settling' ? '' : inviteButtonHtml()}</div></section>`;
+    <p class="sub">${esc(room.dates || '')}${room.dates ? ' · ' : ''}${here.length}명 · ${room.status === 'done' ? '정산이 끝난 방이에요' : '돈 얘기는 각자의 비서끼리 해요'}</p>
+    <div class="people">${here.map(person).join('')}${hasStarted(room) ? '' : inviteButtonHtml()}</div></section>`;
 }
 
 function nextCard() {
   const mine = state.data.actions ?? [];
+  if (state.data.room.status === 'done') return settlingCard(''); // 끝난 방은 지출을 더 받지 않는다(#55)
   if (!mine.length) {
     const add = `<button class="btn" data-action="add-expense">지출 남기기</button>${state.aiReady ? '<button class="btn secondary" data-action="add-expense" data-mode="photo">영수증 사진으로</button>' : ''}`;
     // 아직 메뉴별로 나누지 않은 영수증이 있으면 그걸 먼저 권한다. 합계만 알아 1/N로 나누기로 한 지출(split: 'equal')은 빼고
@@ -726,7 +797,7 @@ function expensesSection() {
       <span class="end"><span class="amount">${won(toKrw(e, room, room.policy).krw)}</span></span>
       ${CHEVRON}
     </button>`).join('');
-  return `<section class="group"><h2 class="group-label"><span>지출 ${expenses.length}건</span><button class="text-btn" data-action="add-expense">지출 추가</button></h2>
+  return `<section class="group"><h2 class="group-label"><span>지출 ${expenses.length}건</span>${room.status === 'done' ? '' : '<button class="text-btn" data-action="add-expense">지출 추가</button>'}</h2>
     <div class="list">${rows || '<p class="empty">아직 지출이 없어요.</p>'}</div></section>`;
 }
 
@@ -754,23 +825,21 @@ const seg = (key, field, options, value) => `<div class="seg" role="radiogroup" 
 
 function addSheetHtml() {
   const d = state.draft;
-  const room = { ...state.data.room, members: state.data.room.members.filter(m => !m.deleted) };
+  const room = { ...state.data.room, members: state.data.room.members.filter(active) };
   const currencies = ['KRW', room.fx?.currency].filter(Boolean);
-  const dateField = d.currency === 'KRW'
-    ? `<input type="date" data-field="date" value="${esc(d.date)}" aria-label="날짜">`
-    : `<select data-field="date" aria-label="날짜">${fxDates().map((x) => `<option value="${x}" ${x === d.date ? 'selected' : ''}>${dayLabel(x)}</option>`).join('')}</select>`;
+  const dateField = `<input type="date" data-field="date" value="${esc(d.date)}" aria-label="날짜">`;
   const picks = room.members.map((m) => `<button type="button" class="pick" aria-pressed="${d.present.includes(m.uid)}" data-action="draft-present" data-id="${esc(m.uid)}">${avatar(m.uid)}${esc(m.name)}</button>`).join('');
   const tabs = state.editing ? '' : `<div style="margin-bottom:16px">${seg('add-mode', 'mode', [['manual', '직접 입력'], ['photo', '영수증 사진']], state.addMode).replaceAll('data-action="draft-set"', 'data-action="add-mode"')}</div>`;
   if (state.addMode === 'photo' && !d.items) return tabs + photoPickHtml();
   const amountRow = state.addMode === 'photo' && d.items
     ? linesEditHtml(d)
-    : `<label class="row field"><span class="grow">금액</span><input data-field="amount" value="${esc(d.amount)}" inputmode="numeric" placeholder="0" aria-label="금액"></label>`;
+    : `<label class="row field"><span class="grow">금액</span><input data-field="amount" value="${esc(d.amount)}" inputmode="${decimalsOf(d.currency) ? 'decimal' : 'numeric'}" placeholder="0" aria-label="금액"></label>`;
   return `${tabs}${state.readNotes.length ? state.readNotes.map((n) => `<p class="preview-note" style="margin-bottom:10px">${esc(n)}</p>`).join('') : ''}
     <section class="group"><div class="list">
       <label class="row field"><span class="grow">제목</span><input data-field="title" value="${esc(d.title)}" placeholder="예: 편의점 간식" maxlength="40"></label>
     </div></section>
     ${amountRow}
-    ${currencies.length > 1 ? `<section class="group"><h3 class="group-label"><span>통화</span>${d.currency !== 'KRW' ? '<span>환율이 있는 날짜만 고를 수 있어요</span>' : ''}</h3>${seg('cur', 'currency', currencies.map((c) => [c, c === 'KRW' ? '원' : c === 'JPY' ? '엔' : c]), d.currency)}</section>` : ''}
+    ${currencies.length > 1 ? `<section class="group"><h3 class="group-label"><span>통화</span>${d.currency !== 'KRW' ? '<span>저장할 때 그날 환율을 받아 와요</span>' : ''}</h3>${seg('cur', 'currency', currencies.map((c) => [c, unitOf(c)]), d.currency)}</section>` : ''}
     <section class="group"><h3 class="group-label"><span>낸 사람</span></h3>${seg('payer', 'payer', room.members.map((m) => [m.uid, m.name]), d.payer)}</section>
     <section class="group"><h3 class="group-label"><span>결제 수단</span></h3>${seg('method', 'method', [['card', '카드'], ['cash', '현금']], d.method)}</section>
     <section class="group"><h3 class="group-label"><span>함께한 사람</span><span>${d.present.length}명이 나눠요</span></h3><div class="picks">${picks}</div></section>
@@ -801,7 +870,7 @@ function linesEditHtml(d) {
   const rows = d.items.map((it, i) => `<div class="row field" style="gap:8px">
       <input data-item="${i}" data-key="name" value="${esc(it.name)}" aria-label="메뉴 이름" style="text-align:left;flex:3">
       <input data-item="${i}" data-key="qty" value="${it.qty}" inputmode="numeric" aria-label="수량" style="flex:1">
-      <input data-item="${i}" data-key="unit" value="${it.unit}" inputmode="numeric" aria-label="단가" style="flex:2">
+      <input data-item="${i}" data-key="unit" value="${it.unit}" inputmode="${decimalsOf(d.currency) ? 'decimal' : 'numeric'}" aria-label="단가" style="flex:2">
       <button type="button" class="text-btn" data-action="draft-del-item" data-i="${i}" aria-label="${esc(it.name)} 줄 지우기">×</button></div>`).join('');
   return `<section class="group"><h3 class="group-label"><span>영수증 ${d.items.length}줄 · 이름 · 수량 · 단가</span>
       <span id="line-sum">줄 합 ${money(lineSum(d.items), d.currency)}${d.total ? ` · 영수증 합계 ${money(d.total, d.currency)}` : ''}</span></h3>
@@ -879,8 +948,10 @@ function actionButtons(a, size = '') {
   const cls = `btn ${size}`.trim();
   const id = esc(a.ref);
   switch (a.type) {
-    case 'confirm_line':
-      return `<button class="${cls}" data-action="open-exp" data-id="${esc(a.expenseId)}" data-line="${esc(a.itemId)}">확인하기</button>`;
+    case 'confirm_line': {
+      const total = flaggedLines(state.data.expenses, isFlagged).reduce((n, g) => n + g.lines.length, 0);
+      return `<button class="${cls}" data-action="open-exp" data-id="${esc(a.expenseId)}" data-line="${esc(a.itemId)}">확인하기</button>${total > 1 ? `<button class="${cls} secondary" data-action="confirm-all-guesses">${total}줄 모두 짐작한 대로 확인</button>` : ''}`;
+    }
     case 'answer_invoice':
       return `<button class="${cls}" data-action="open-invoice" data-id="${id}">청구서 보기</button>`;
     case 'agree_dispute':
@@ -953,10 +1024,10 @@ function settlingCard(addButtons) {
     return `<section class="next"><p class="eyebrow">편할 때 보내기</p><h2>${esc(nameOf(manual.to))}에게 ${won(manual.amount)}을 보내면 돼요</h2>
       <p>편할 때 보내기로 정해서 비서가 바로 알리지 않아요. 준비되면 보내 주세요.${manual.remindAt ? ` ${esc(whenText(manual.remindAt))}까지 받았다는 확인이 없으면 한 번 알려 드려요.` : ''}</p><div class="actions"><button class="btn" data-action="open-transfer" data-id="${esc(manual.id)}">보내러 가기</button>${addButtons}</div></section>`;
   }
-  const done = live.length ? live.every((t) => t.status === 'confirmed') : current.every((i) => i.status === 'accepted');
-  if (done) {
+  // 서버가 모든 송금이 '받았어요'로 끝나면 방을 완료로 바꾼다(#55). 끝난 방은 기록으로만 남아 지출을 더 받지 않는다
+  if (room.status === 'done') {
     return `<section class="next done"><p class="eyebrow">정산 완료</p><h2>정산이 끝났어요</h2>
-      <p>아무도 단톡방에서 돈 얘기를 꺼내지 않았어요. 남은 건 비서끼리 주고받은 기록뿐이에요.</p><div class="actions">${addButtons}</div></section>`;
+      <p>아무도 단톡방에서 돈 얘기를 꺼내지 않았어요. 이 방은 기록으로 남고, 지출을 더 남기거나 고칠 수 없어요.</p></section>`;
   }
   return `<section class="next"><p class="eyebrow">기다리는 중</p><h2>다른 사람의 확인을 기다리고 있어요</h2>
     <p>누가 무엇을 하고 있는지는 아래 '누가 누구에게'와 비서끼리 기록에서 볼 수 있어요. 내 차례가 되면 여기에 올려요.</p><div class="actions">${addButtons}</div></section>`;
@@ -969,7 +1040,8 @@ function blockedHtml(n, announce) {
     <p class="blocked-title">${ALERT}${esc(n.title)}</p>
     <p class="blocked-lead">${esc(n.lead)}</p>
     <ul>${n.rows.map((r) => `<li><span class="blocked-what">${esc(r.what)}<small>${esc(r.who)}</small></span>
-      <button class="btn sm secondary" data-action="open-exp" data-id="${esc(r.expId)}" data-line="${esc(r.lineId)}" aria-label="${esc(`${r.what} ${r.label}`)}">${esc(r.label)}</button></li>`).join('')}</ul></div>`;
+      <button class="btn sm secondary" data-action="open-exp" data-id="${esc(r.expId)}" data-line="${esc(r.lineId)}" aria-label="${esc(`${r.what} ${r.label}`)}">${esc(r.label)}</button></li>`).join('')}</ul>
+    <div class="actions" style="margin-top:10px"><button class="btn sm" data-action="confirm-all-guesses">남은 ${n.total}줄 모두 짐작한 대로 확인</button></div></div>`;
 }
 
 // 눌러서 막힌 버튼 자리에서 알린다. 그리는 사이 잃은 초점을 돌려주고, 안내가 화면 밖이면 보이게 한 뒤, 버튼을 흔든다
@@ -1323,9 +1395,14 @@ const agentPanel = createAgentPanel({
 // 친구 초대(#4): 참여자 줄 끝 + 버튼으로 연다. 누가 참가하면 방이 다시 그려지면서 이 시트의 참여자 목록도 바로 바뀐다
 const inviteSheet = () => ({
   title: '친구 초대',
-  html: inviteSheetHtml({ room: state.data.room, me: state.data.me, avatar, invite: setup.invite, copied: setup.copied, copyError: setup.copyError, canShare: !!navigator.share }),
+  html: inviteSheetHtml({ room: state.data.room, me: state.data.me, avatar, invite: setup.invite, copied: setup.copied, copyError: setup.copyError, canShare: !!navigator.share, expenses: state.data.expenses, armed: setup.armed, removeError: setup.removeError }),
 });
-const AGENT_SHEETS = { invoice: invoiceSheet, dispute: disputeSheet, transfer: transferSheet, payout: payoutSheet, invite: inviteSheet, ...agentPanel.sheets };
+// 이 방에서 나가기(#55). 남은 돈이 있는지는 방 화면이 가진 지출·청구서·이의·송금으로 서버와 같은 규칙(public/leave.js)으로 본다
+const leaveSheet = () => ({
+  title: '이 방에서 나가기',
+  html: leaveSheetHtml({ room: state.data.room, why: leaveBlock(state.data, state.data.me.uid), busy: setup.leaving, error: setup.leaveError }),
+});
+const AGENT_SHEETS = { invoice: invoiceSheet, dispute: disputeSheet, transfer: transferSheet, payout: payoutSheet, invite: inviteSheet, leave: leaveSheet, ...agentPanel.sheets };
 
 // 방의 할 일에서 열면 비어 있고, 내 비서 설정에서 열면 저장된 은행·예금주를 채운다. 계좌번호는 끝 4자리만 알아서 새로 입력한다
 function openPayoutSheet(saved = null) {
@@ -1548,6 +1625,7 @@ function render() {
   }
   if (!roomId || state.error?.status === 'seed') {
     main.innerHTML = noRoom();
+    mountSegs(main); // 쓴 돈의 통화(원화만·외화도) 분할 버튼
     return;
   }
   if (state.error?.status === 404) {
@@ -1577,7 +1655,7 @@ function render() {
     return;
   }
   $('#nav-title').textContent = state.data.room.name;
-  $('#nav-add').hidden = false;
+  $('#nav-add').hidden = state.data.room.status === 'done';
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
   meMenu.update();
@@ -1585,7 +1663,7 @@ function render() {
   main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), nextCard(), roomSetup, disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
   mountSegs(main);
   // 이의·청구서 시트는 글을 쓰는 중이면 다시 그리지 않는다(타이핑 중 초점을 잃지 않게)
-  if (['exp', 'transfer', 'invite'].includes(state.sheet) || (state.sheet === 'dispute' && !state.rejectDraft) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
+  if (['exp', 'transfer', 'invite', 'leave'].includes(state.sheet) || (state.sheet === 'dispute' && !state.rejectDraft) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
 }
 
 // ---------------------------------------------------------------- 이벤트
@@ -1626,7 +1704,7 @@ document.addEventListener('input', (e) => {
   const i = e.target.dataset?.item;
   if (i !== undefined && state.draft?.items) {
     const key = e.target.dataset.key;
-    state.draft.items[i][key] = key === 'name' ? e.target.value : Number(String(e.target.value).replace(/[^\d-]/g, ''));
+    state.draft.items[i][key] = key === 'name' ? e.target.value : Number(String(e.target.value).replace(key === 'unit' && decimalsOf(state.draft.currency) ? /[^\d.-]/g : /[^\d-]/g, ''));
     const sum = $('#line-sum');
     if (sum) sum.textContent = `줄 합 ${money(lineSum(state.draft.items), state.draft.currency)}${state.draft.total ? ` · 영수증 합계 ${money(state.draft.total, state.draft.currency)}` : ''}`;
   }

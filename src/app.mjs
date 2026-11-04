@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { DEMO_ROOM, DEMO_EXPENSES, DEMO_DISPUTE, MEMORY_LIMIT } from '../public/data.js';
-import { ledger } from '../public/core.js';
+import { ledger, active } from '../public/core.js';
 import { router, readJson, readBody, send, allowCors, createRateLimiter, clientIp, HttpError, MAX_RECEIPT } from './http.mjs';
 import { createStateLocks } from './state-locks.mjs';
 import { createIdentity } from './identity.mjs';
@@ -15,6 +15,7 @@ import { createLocationService } from './location.mjs';
 import { seedDemoRoom } from './dev/seed.mjs';
 import { registerExpenseRoutes } from './expenses/routes.mjs';
 import { registerRoomRoutes } from './rooms/routes.mjs';
+import { createFxRates } from './rooms/fx.mjs';
 import { pendingActions } from './actions.mjs';
 import { createOrchestrator } from './agents/orchestrator.mjs';
 import { createAgentSettings, registerAgentSettingsRoutes } from './agents/settings.mjs';
@@ -71,7 +72,7 @@ function serveStatic(pathname, res) {
   fs.createReadStream(file).pipe(res);
 }
 
-export function createApp({ store, gemini = null, clock = () => new Date(), evidenceFor, auth = null, env = {} }) {
+export function createApp({ store, gemini = null, clock = () => new Date(), evidenceFor, auth = null, env = {}, fxRates = createFxRates({ clock, eximKey: env.KOREAEXIM_API_KEY }) }) {
   // 방·계정 API는 저장소를 읽고 고쳐 쓰므로 줄을 세운다. 방의 일은 그 방의 줄에, 탈퇴처럼 여러 방에 걸친 일은
   // 모든 방의 줄에 서서, 탈퇴·철회가 진행 중인 AI 결과와 엉켜 데이터가 되살아나지 않게 한다(src/state-locks.mjs).
   // #3 저장소는 여러 인스턴스에서 같은 보장을 트랜잭션으로 해야 한다.
@@ -83,7 +84,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   const origins = (env.ALLOWED_ORIGINS || 'https://orca-svg.github.io').split(',');
   const overLimit = createRateLimiter({ max: 30, windowMs: 600_000 });
   const allocCache = createCache(); // 같은 입력의 메뉴 배분은 Gemini에게 다시 묻지 않는다
-  const ctx = { store, gemini, clock, evidenceFor, env, overLimit, allocCache };
+  const ctx = { store, gemini, clock, evidenceFor, env, overLimit, allocCache, fx: fxRates }; // fx: 외화 방의 환율(#55, src/rooms/fx.mjs)
   const routes = router();
 
   const limitGemini = (key) => {
@@ -143,7 +144,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
     const room = await store.get('rooms', roomId);
     if (!room) throw new HttpError(404, '방을 찾을 수 없어요');
     const me = room.members.find((m) => m.uid === who.uid);
-    if (!me || me.deleted) throw new HttpError(403, '이 방의 멤버가 아니에요');
+    if (!me || !active(me)) throw new HttpError(403, '이 방의 멤버가 아니에요'); // 탈퇴했거나 방에서 나간 사람(#55)은 읽지 못한다
     return { room, me: { uid: me.uid, name: me.name } };
   }
 
@@ -172,7 +173,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       transfers: transfers.map((t) => redactTransfer(t, me.uid)),
       myAgent: await agentSettings.summary(me.uid, room.id),
       // 방 사람에게는 누가 비서 설정을 마쳤는지만 보인다(이름 옆 로봇 표시). 규칙·기억은 본인의 myAgent에만 있다(#5)
-      agentReady: room.members.filter((m) => !m.deleted && agents[m.uid]?.onboardedAt).map((m) => m.uid),
+      agentReady: room.members.filter((m) => active(m) && agents[m.uid]?.onboardedAt).map((m) => m.uid),
       ledger: ledger(room, expenses, room.policy),
       actions: pendingActions({ room, expenses, invoices, disputes, transfers }).filter((x) => x.for === me.uid),
     };
@@ -187,7 +188,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   registerRoomRoutes(routes, { ...ctx, member, authenticate });
   registerExpenseRoutes(routes, { ...ctx, member });
   const orchestrator = createOrchestrator({ store, gemini, clock, evidenceFor, counterFor: dev ? counterFor : async () => [] });
-  registerAgentRoutes(routes, { orchestrator, member, store, overLimit, authenticate });
+  registerAgentRoutes(routes, { orchestrator, member, store, overLimit, authenticate, fx: fxRates, clock });
   const agentSettings = createAgentSettings({ store, clock });
   registerAgentSettingsRoutes(routes, { settings: agentSettings, authenticate, member });
 

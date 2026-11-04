@@ -195,6 +195,7 @@ test('blockedNotice: 몇 줄이 남았고 어느 지출의 줄이며 누구의 �
   assert.deepEqual(blockedNotice(groups, { me: 'ms', nameOf }), {
     title: '청구서를 아직 보낼 수 없어요',
     lead: '비서가 짐작하지 않고 물어본 줄이 1줄 남았어요.',
+    total: 1, // '남은 N줄 모두 짐작한 대로 확인' 버튼이 쓴다
     rows: [{ expId: 'e2', lineId: 'i1', what: '이자카야 저녁의 ‘오차즈케’', who: '철수의 비서가 물어봤어요', label: '확인하러 가기' }],
   });
   assert.equal(blockedNotice([], { me: 'ms', nameOf }), null); // 막는 줄이 없으면 안내도 없다

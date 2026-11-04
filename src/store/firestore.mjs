@@ -3,11 +3,13 @@
 //       비서 기록은 `rooms/{roomId}/events/{seq}`, 방마다 seq를 매기는 카운터는 `rooms/{roomId}/meta/events`.
 //       영수증 사진(receipts)은 문서 1MiB 한도를 넘을 수 있어 Cloud Storage `receipts/{지출 id}`에 둔다.
 // 문서에 몰래 붙이는 칸(읽을 때 뺀다): _order(처음 넣은 순서, 목록 순서를 MemoryStore와 맞춤),
-//       rooms의 _memberUids(탈퇴하지 않은 멤버 uid, firestore.rules가 멤버 확인에 씀).
+//       rooms의 _memberUids(탈퇴하지도 나가지도 않은 멤버 uid, firestore.rules가 멤버 확인에 씀)와
+//       _leftUids(방에서 나간 사람 uid, #55. 그 사람이 탈퇴하면 이 방 기록도 익명으로 바꾸려고 eraseUser가 찾는다).
 import { eraseUserSnapshot } from './erase-user.mjs';
 
 const ORDER = '_order';
 const MEMBERS = '_memberUids';
+const LEFT = '_leftUids';
 const ROOM_COLS = ['expenses', 'invoices', 'disputes', 'transfers', 'invites']; // invites(#4): 탈퇴하면 링크를 만든 사람만 끊는다
 
 // Firestore 문서 id 규칙. '/'가 들어가면 다른 경로에 조용히 써지므로 넣기는 막는다.
@@ -35,7 +37,10 @@ export class FirestoreStore {
 
   #stored(col, doc, order) {
     const out = { ...doc, [ORDER]: order ?? this.#nextOrder() };
-    if (col === 'rooms') out[MEMBERS] = (doc.members ?? []).filter((m) => !m.deleted).map((m) => m.uid);
+    if (col === 'rooms') {
+      out[MEMBERS] = (doc.members ?? []).filter((m) => !m.deleted && !m.left).map((m) => m.uid);
+      out[LEFT] = (doc.members ?? []).filter((m) => !m.deleted && m.left).map((m) => m.uid);
+    }
     return out;
   }
 
@@ -43,7 +48,10 @@ export class FirestoreStore {
     if (!snap.exists) return null;
     const doc = snap.data();
     delete doc[ORDER];
-    if (col === 'rooms') delete doc[MEMBERS];
+    if (col === 'rooms') {
+      delete doc[MEMBERS];
+      delete doc[LEFT];
+    }
     return doc;
   }
 
@@ -122,7 +130,7 @@ export class FirestoreStore {
     return this.#sorted(await q.get()).map((s) => this.#read(col, s));
   }
 
-  // uid가 탈퇴하지 않은 멤버인 방. 모든 방을 읽지 않고 _memberUids 색인(array-contains)으로 그 방만 읽는다
+  // uid가 탈퇴하지도 나가지도 않은 멤버인 방. 모든 방을 읽지 않고 _memberUids 색인(array-contains)으로 그 방만 읽는다
   async roomsOf(uid) {
     return this.#sorted(await this.db.collection('rooms').where(MEMBERS, 'array-contains', uid).get()).map((s) => this.#read('rooms', s));
   }
@@ -149,9 +157,15 @@ export class FirestoreStore {
   // #2 탈퇴. MemoryStore와 같은 변환(eraseUserSnapshot)을 이 사람이 낀 방의 문서에만 돌리고, 한 트랜잭션으로 쓴다.
   // 트랜잭션 쓰기 수 제한(예전 500개)은 2023-03에 없어졌고 요청 10MiB·270초 제한만 남았다.
   // 영수증 사진은 트랜잭션 밖(Cloud Storage)이라 먼저 지운다. 트랜잭션이 실패해 다시 시도해도 지울 사진을 다시 찾을 수 있게.
+  // 지금 멤버인 방과 나간 방(#55)을 함께 찾는다. 나간 방에도 그 사람의 이름·지출이 남아 있다
   async eraseUser(uid) {
-    const roomsQuery = this.db.collection('rooms').where(MEMBERS, 'array-contains', uid);
-    for (const room of (await roomsQuery.get()).docs) {
+    const roomQueries = [MEMBERS, LEFT].map((field) => this.db.collection('rooms').where(field, 'array-contains', uid));
+    const roomsOf = async (get) => {
+      const seen = new Map();
+      for (const q of roomQueries) for (const s of (await get(q)).docs) seen.set(s.id, s);
+      return [...seen.values()];
+    };
+    for (const room of await roomsOf((q) => q.get())) {
       const mine = await this.db.collection('expenses').where('roomId', '==', room.id).get();
       for (const e of mine.docs) if (e.get('createdBy') === uid || e.get('payer') === uid) await this.delete('receipts', e.id);
     }
@@ -169,7 +183,7 @@ export class FirestoreStore {
         }
       };
       // 트랜잭션은 읽기를 모두 끝낸 뒤에 쓴다
-      const rooms = (await tx.get(roomsQuery)).docs;
+      const rooms = await roomsOf((q) => tx.get(q));
       keep('rooms', rooms);
       for (const col of ROOM_COLS) cols.set(col, new Map());
       for (const room of rooms) {

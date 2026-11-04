@@ -1,7 +1,9 @@
 // #4 방 만들기·참가 화면(public/room-setup.js)과 로그인 뒤 돌아갈 곳. 로그인(#2)한 계정의 프로필로 들어가고, 이름은 따로 받지 않는다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRoomHtml, joinHtml, setupHtml, datesLabel, inviteSheetHtml, inviteButtonHtml } from '../public/room-setup.js';
+import { createRoomHtml, joinHtml, setupHtml, datesLabel, inviteSheetHtml, inviteButtonHtml, leaveSheetHtml } from '../public/room-setup.js';
+import { roomTabs, roomRowsHtml } from '../public/room-list.js';
+import { toastMs } from '../public/toast.js';
 import { nextAfterLogin } from '../public/ui.js';
 
 const profile = { name: '<재윤>', color: '#34c759' };
@@ -23,7 +25,7 @@ test('방 만들기: 로그인하면 프로필 이름·색으로 들어가고, �
   assert.ok(!html.includes('account.html#profile'), '프로필로 가는 버튼은 없다(가면 적던 내용을 잃는다)');
   assert.match(html, /data-action="range-toggle"/, '기간은 한 줄을 눌러 펼친 달력에서 고른다');
   assert.ok(!html.includes('type="date"'), '브라우저 기본 날짜 칸(연도. 월. 일.)은 쓰지 않는다');
-  assert.match(html, /원화/, '지금은 원화 지출만 남길 수 있다고 알린다');
+  assert.match(html, /data-action="cf-foreign" data-id="no">원화만/, '쓴 돈의 통화는 원화만이 기본이다');
   assert.ok(!html.includes('data-action="seed"'), '배포에는 개발용 데모 방이 없다');
 });
 
@@ -61,13 +63,14 @@ test('기간 글자: 달력에서 고른 두 날짜를 짧게 쓴다', () => {
 test('방 화면: 모두 동의한 정책은 한 줄과 바꾸기만, 안내는 경고색이 아니다', () => {
   const me = { uid: 'me', name: '재윤' };
   const avatar = () => '';
-  const alone = setupHtml({ room: { members: [me], policy: 'actual', policyAgreedBy: ['me'], status: 'ready' }, me, avatar });
+  const fx = { currency: 'JPY' }; // 환율 정책은 외화 방에만 있다(#55)
+  const alone = setupHtml({ room: { members: [me], fx, policy: 'actual', policyAgreedBy: ['me'], status: 'ready' }, me, avatar });
   assert.ok(!alone.includes('preview-note'), '주황 안내 상자를 쓰지 않는다');
   assert.ok(!alone.includes('동의함'), '모두 동의했으면 멤버별 동의 목록을 펼치지 않는다');
   assert.match(alone, /data-action="edit-policy"/);
   assert.match(alone, /실제 낸 원화/);
 
-  const waiting = setupHtml({ room: { members: [me, { uid: 'cs', name: '철수' }], policy: 'actual', policyAgreedBy: ['me'], status: 'ready' }, me, avatar });
+  const waiting = setupHtml({ room: { members: [me, { uid: 'cs', name: '철수' }], fx, policy: 'actual', policyAgreedBy: ['me'], status: 'ready' }, me, avatar });
   assert.match(waiting, /동의 전/, '아직 동의하지 않은 사람이 있으면 누가 남았는지 보여 준다');
   assert.ok(!waiting.includes('preview-note'));
 });
@@ -83,7 +86,7 @@ test('친구 초대는 방 본문(환율·지출 사이)에 두지 않고, 참�
 test('초대 시트: 링크 줄(복사·공유 아이콘), 친구에게 보일 초대 화면, 참가하면 바로 보일 참여자 목록', () => {
   globalThis.location ??= { origin: 'http://localhost:4562', pathname: '/room.html' };
   const me = { uid: 'me', name: '재윤' };
-  const room = { name: '오사카 2박 3일', dates: '11월 7일 – 9일', members: [me], policy: 'actual', policyAgreedBy: ['me'], status: 'ready' };
+  const room = { name: '오사카 2박 3일', dates: '11월 7일 – 9일', members: [me], fx: { currency: 'JPY' }, policy: 'actual', policyAgreedBy: ['me'], status: 'ready' };
   const invite = { token: 'AbCdEfGhIjKlMnOpQrStUv_-', expiresAt: '2026-11-11T03:00:00Z' };
   const sheet = inviteSheetHtml({ room, me, avatar: () => '<i></i>', invite, canShare: true });
   assert.match(sheet, /친구에게 이렇게 보여요/);
@@ -110,4 +113,114 @@ test('로그인 뒤 돌아갈 곳은 이 서비스의 방·초대 주소만 받�
   for (const bad of ['?next=https%3A%2F%2Fevil.example', '?next=%2F%2Fevil.example', '?next=room.html%3Froom%3D%22%3E', '?next=account.html', '']) {
     assert.equal(nextAfterLogin(bad), null, bad);
   }
+});
+
+// ---------------------------------------------------------------- #55 환율 정책은 외화 방에만
+test('방 만들기: 원화만 쓰는 방(기본)에는 환율 정책을 묻지도 보이지도 않는다', () => {
+  const html = createRoomHtml(empty, { profile, dev: false });
+  assert.ok(!html.includes('data-action="cf-policy"'), '정책 고르기가 없다');
+  assert.ok(!html.includes('환율'), html.match(/.{20}환율.{20}/)?.[0]);
+  assert.ok(!html.includes('data-cf="fxCurrency"'), '외화 고르기도 접혀 있다');
+});
+
+test('방 만들기: 외화도 있어요를 고르면 어느 외화인지와 환율 정책을 펼친다', () => {
+  const html = createRoomHtml({ ...empty, foreign: true, fxCurrency: 'USD', policy: 'payday' }, { profile, dev: false });
+  assert.match(html, /data-action="cf-foreign" data-id="yes">외화도 있어요/);
+  assert.match(html, /aria-checked="true" data-action="cf-foreign" data-id="yes"/);
+  assert.match(html, /<select data-cf="fxCurrency">[\s\S]*<option value="USD" selected>미국 달러 \(USD\)/);
+  assert.match(html, /role="radio" aria-checked="true" data-action="cf-policy" data-id="payday"/);
+  assert.match(html, /유럽중앙은행\(ECB\) 기준 환율/, '환율을 어디서 언제 받는지 알린다');
+});
+
+test('참가 화면·초대 미리보기: 원화 방은 환율 정책 칸이 없고, 외화 방만 보인다', () => {
+  globalThis.location ??= { origin: 'http://localhost:4562', pathname: '/room.html' };
+  const krw = { room: { id: 'r-1', name: '회식', dates: '', members: [{ name: '재윤' }] }, alreadyMember: false, settling: false };
+  assert.ok(!joinHtml(krw, {}, { profile }).includes('환율'));
+  const jpy = { ...invite, room: { ...invite.room, currency: 'JPY', policy: 'actual' } };
+  assert.match(joinHtml(jpy, {}, { profile }), /이 방의 환율 정책[\s\S]*엔로 쓴 돈[\s\S]*실제 낸 원화/);
+  assert.ok(!joinHtml(invite, {}, { profile }).includes('환율 정책'), '정책 값이 와도 통화가 없으면(원화 방) 보이지 않는다');
+  assert.match(joinHtml({ ...krw, settling: true, done: true }, {}, { profile }), /이미 정산이 끝난 방이라 들어갈 수 없어요/);
+
+  const me = { uid: 'me', name: '재윤' };
+  const sheet = inviteSheetHtml({ room: { name: '회식', members: [me], policy: 'actual', policyAgreedBy: ['me'], fx: null }, me, avatar: () => '', invite: null });
+  assert.ok(!sheet.includes('환율'), '예전 원화 방에 남은 정책 값도 보이지 않는다');
+});
+
+test('방 화면: 원화 방에는 환율 정책 칸·동의 버튼이 없다(예전 방에 남은 값도 무시)', () => {
+  const me = { uid: 'me', name: '재윤' };
+  const legacy = { members: [me, { uid: 'cs', name: '철수' }], fx: null, policy: 'actual', policyAgreedBy: ['me'], status: 'ready' };
+  assert.equal(setupHtml({ room: legacy, me: { uid: 'cs', name: '철수' }, avatar: () => '' }), '');
+  assert.match(setupHtml({ room: legacy, me, avatar: () => '', error: '링크를 만들지 못했어요' }), /링크를 만들지 못했어요/, '다른 설정 오류는 그대로 보인다');
+});
+
+// ---------------------------------------------------------------- #55 나가기·내보내기
+test('초대 시트: 방을 만든 사람만 낀 돈이 없는 사람을 내보낼 수 있고, 한 번 더 눌러야 내보낸다', () => {
+  globalThis.location ??= { origin: 'http://localhost:4562', pathname: '/room.html' };
+  const me = { uid: 'me', name: '재윤' };
+  const room = { name: '회식', members: [me, { uid: 'cs', name: '철수' }, { uid: 'yh', name: '영희' }, { uid: 'ms', name: '민수', left: true }], createdBy: 'me', status: 'ready', fx: null };
+  const expenses = [{ id: 'e1', title: '저녁', payer: 'me', present: ['me', 'cs'] }];
+  const sheet = inviteSheetHtml({ room, me, avatar: () => '', invite: null, expenses });
+  assert.match(sheet, /지금 3명/, '나간 사람은 세지 않는다');
+  assert.ok(!sheet.includes('민수'));
+  assert.match(sheet, /data-action="remove-member" data-id="yh">내보내기/);
+  assert.ok(!sheet.includes('data-id="cs">내보내기'), '낀 지출이 있는 사람은 버튼 대신 까닭');
+  assert.match(sheet, /철수<span class="meta"[^>]*>지출에 몫이 있어 내보낼 수 없어요/);
+  assert.ok(!sheet.includes('data-id="me"'), '나는 내보내기가 아니라 나가기로');
+  assert.match(inviteSheetHtml({ room, me, avatar: () => '', invite: null, expenses, armed: 'yh' }), /class="btn sm danger armed"[^>]*data-id="yh">한 번 더 누르면 내보내요/);
+  assert.match(inviteSheetHtml({ room, me, avatar: () => '', invite: null, expenses, removeError: { uid: 'yh', message: '바뀌었어요' } }), /영희[\s\S]*role="alert"[^>]*>바뀌었어요/, '막힌 까닭은 누른 줄 바로 아래에');
+  const asFriend = inviteSheetHtml({ room, me: { uid: 'cs', name: '철수' }, avatar: () => '', invite: null, expenses });
+  assert.ok(!asFriend.includes('remove-member') && !asFriend.includes('내보낼 수 없어요'), '방을 만든 사람이 아니면 내보내기가 없다');
+});
+
+test('나가기 시트: 돈이 남아 있으면 까닭만 보이고 나가기 버튼이 없다', () => {
+  const blocked = leaveSheetHtml({ room: { status: 'settling' }, why: '정산이 끝나지 않아 나갈 수 없어요. 남은 일: 재윤에게 보낼 ₩15,000' });
+  assert.match(blocked, /재윤에게 보낼 ₩15,000/);
+  assert.ok(!blocked.includes('data-action="leave-room"'));
+  const ready = leaveSheetHtml({ room: { status: 'ready' }, why: null });
+  assert.match(ready, /class="btn danger" data-action="leave-room"[^>]*>이 방에서 나가기/);
+  assert.match(ready, /내 방 목록에서도 빠져요[\s\S]*초대 링크를 다시/, '무엇을 잃는지 버튼 위에 적는다');
+  const done = leaveSheetHtml({ room: { status: 'done' }, why: null, error: '이미 나갔어요' });
+  assert.match(done, /정산이 끝난 방이라 나갈 수 있어요/);
+  assert.ok(!done.includes('초대 링크를 다시'), '끝난 방은 다시 들어올 수 없다');
+  assert.match(done, /role="alert">이미 나갔어요/);
+  assert.match(leaveSheetHtml({ room: {}, why: null, busy: true }), /disabled>나가는 중…/);
+});
+
+// ---------------------------------------------------------------- #55 내 방 목록
+test('내 방 목록: 끝난 방이 있을 때만 진행 중 | 끝남 탭으로 나눈다', () => {
+  const live = [{ id: 'a', status: 'ready' }, { id: 'b', status: 'settling' }];
+  const none = roomTabs(live);
+  assert.equal(none.html, '', '끝난 방이 없으면 탭이 없다');
+  assert.deepEqual(none.rooms.map((r) => r.id), ['a', 'b']);
+
+  const rooms = [...live, { id: 'c', status: 'done' }];
+  const first = roomTabs(rooms);
+  assert.equal(first.tab, 'live');
+  assert.deepEqual(first.rooms.map((r) => r.id), ['a', 'b']);
+  assert.match(first.html, /aria-checked="true" data-id="live">진행 중 2/);
+  assert.match(first.html, /aria-checked="false" data-id="done">끝남 1/);
+  assert.deepEqual(roomTabs(rooms, 'done').rooms.map((r) => r.id), ['c']);
+  assert.equal(roomTabs(live, 'done').tab, 'live', '끝난 방이 없어지면 진행 중으로 돌아온다');
+  assert.match(roomTabs([{ id: 'c', status: 'done' }]).empty.meta, /‘끝남’에서 볼 수 있어요/);
+  assert.equal(roomTabs([]).empty.title, '아직 참여한 방이 없어요');
+});
+
+test('내 방 목록: 평소 줄은 방으로 가는 링크, 편집 중에는 들어가지 않고 줄마다 나가기', () => {
+  const rooms = [{ id: 'r-1', name: '도쿄 <5일>', dates: '8/1–8/5' }, { id: 'r-2', name: '회식' }];
+  const plain = roomRowsHtml(rooms);
+  assert.match(plain, /<a href="room\.html\?room=r-1">/);
+  assert.match(plain, /도쿄 &lt;5일&gt;/, '방 이름은 이스케이프한다');
+  assert.doesNotMatch(plain, /data-leave/);
+
+  const editing = roomRowsHtml(rooms, { editing: true });
+  assert.doesNotMatch(editing, /<a /, '편집 중에는 줄을 눌러도 방에 들어가지 않는다');
+  assert.equal(editing.match(/data-leave="/g).length, 2);
+  assert.match(editing, /id="room-name-0">도쿄 &lt;5일&gt;<\/span>[^]*data-leave="r-1" aria-describedby="room-name-0">나가기/, '나가기는 어느 방인지 이름으로 읽힌다');
+});
+
+test('위쪽 알림은 글이 길수록 오래 두되 2.5~8초 사이', () => {
+  assert.equal(toastMs(''), 2500);
+  const why = '정산이 끝나지 않아 나갈 수 없어요. 남은 일: 재윤에게 보낼 ₩20,387';
+  assert.equal(toastMs(why), 2500 + [...why].length * 60);
+  assert.equal(toastMs('가'.repeat(500)), 8000);
 });

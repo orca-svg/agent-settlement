@@ -3,7 +3,11 @@
 // 화면 아래에 저장 막대가 뜬다. 저장하지 않고 떠나려 하면(왼쪽 위 '내 방', 브라우저 뒤로, 탭 닫기) 버릴지 묻는다
 import { initAuth, currentUser, login, logout } from './auth.js';
 import { api } from './room-api.js';
-import { esc, avatarHtml, CHEVRON, GOOGLE_G, ICON_LINK, nextAfterLogin, mountSegs } from './ui.js';
+import { esc, avatarHtml, CHEVRON, GOOGLE_G, ICON_LINK, nextAfterLogin, mountSegs, segArrowKeys } from './ui.js';
+import { roomTabs, roomRowsHtml } from './room-list.js';
+import { leaveBlock } from './leave.js';
+import { toast } from './toast.js';
+import { reduceMotion } from './motion.js';
 import { profileFormHtml, mountProfileForm, initial } from './profile-form.js';
 import { inviteTokenFrom, joinFormHtml } from './join-link.js';
 import { defaultsHtml, defaultsBody, defaultsChanges } from './agent-defaults.js';
@@ -144,15 +148,21 @@ async function render() {
 }
 
 // 첫 화면: 내가 참여한 방. 새 방 만들기·초대 링크로 참가는 머리말 오른쪽에, 방은 이름 | 기간 목록으로.
-// 방 줄은 링크라 새 탭으로도 열린다. 오른쪽 위 내 아바타가 내 계정으로 들어가는 문이다
+// 방 줄은 링크라 새 탭으로도 열린다. 오른쪽 위 내 아바타가 내 계정으로 들어가는 문이다.
+// 정산이 끝난 방이 있으면 '진행 중 | 끝남' 탭으로 나눈다(#55, room-list.js). 고른 탭은 이 화면에 있는 동안 기억한다.
+// 목록 오른쪽 위 '편집'을 누르면 줄마다 '나가기'가 온다(#55). '완료'나 Esc로 끝낸다
+let roomsTab = 'live';
+let roomsEditing = false;
 function roomsView(profile, rooms, config) {
   settings = null;
   setView('rooms');
   setNav(BRAND, '', `<button type="button" class="nav-avatar" id="open-profile" aria-label="내 계정 · ${esc(profile.name)}">${avatarHtml(initial(profile.name), profile.color, 'lg')}</button>`);
-  const list = rooms.length
-    ? `<ul class="room-table">${rooms.map((r) => `<li><a href="room.html?room=${encodeURIComponent(r.id)}"><span class="room-name">${esc(r.name)}</span>
-        <span class="room-dates">${esc(r.dates || '')}</span>${CHEVRON}</a></li>`).join('')}</ul>`
-    : '<div class="room-empty"><p class="title">아직 참여한 방이 없어요</p><p class="meta">새 방을 만들거나 친구에게 받은 초대 링크로 참가하면 여기에 보여요.</p></div>';
+  const view = roomTabs(rooms, roomsTab);
+  roomsEditing &&= view.rooms.length > 0; // 나갈 방이 없으면 편집도 끝난다
+  const list = view.rooms.length
+    ? roomRowsHtml(view.rooms, { editing: roomsEditing })
+    : `<div class="room-empty"><p class="title">${view.empty.title}</p><p class="meta">${view.empty.meta}</p></div>`;
+  const edit = view.rooms.length ? `<button type="button" class="text-btn" id="rooms-edit" aria-pressed="${roomsEditing}">${roomsEditing ? '완료' : '편집'}</button>` : '';
   panel.innerHTML = `<header class="hero page-head"><div><h1>내 방</h1><p class="sub">${esc(profile.name)}님으로 로그인했어요.</p></div>
       <div class="page-actions">
         <button type="button" class="btn sm plain" id="join-toggle" aria-expanded="false" aria-controls="join-link">${ICON_LINK}<span>초대 링크로 참가</span></button>
@@ -160,12 +170,80 @@ function roomsView(profile, rooms, config) {
       </div></header>
     ${MESSAGE}
     <div class="join-panel">${joinFormHtml()}</div>
-    <section class="group" aria-labelledby="rooms-title"><h2 class="group-label" id="rooms-title"><span>참여한 방${rooms.length ? ` ${rooms.length}개` : ''}</span></h2>${list}</section>
+    <section class="group" id="rooms" aria-labelledby="rooms-title"><div class="group-head"><h2 class="group-label" id="rooms-title"><span>참여한 방${rooms.length ? ` ${rooms.length}개` : ''}</span></h2>${edit}</div>${view.html}${list}</section>
     ${demoRows('둘러보기', config.dev)}`;
   say(notice);
   notice = '';
   nav.querySelector('#open-profile').onclick = openProfile;
   mountJoinLink(panel);
+  mountSegs(panel);
+  const again = (focus) => { roomsView(profile, rooms, config); panel.querySelector(focus)?.focus(); }; // 다시 그려도 초점은 누른 자리에
+  const section = panel.querySelector('#rooms');
+  const toggleEdit = () => { roomsEditing = !roomsEditing; again('#rooms-edit'); };
+  section.querySelector('#rooms-edit')?.addEventListener('click', toggleEdit);
+  section.addEventListener('keydown', (e) => { if (e.key === 'Escape' && roomsEditing) toggleEdit(); });
+  section.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-leave]');
+    const room = btn && rooms.find((r) => r.id === btn.dataset.leave);
+    if (room) leaveFromList(btn, room, () => {
+      notice = `‘${room.name}’에서 나갔어요.`;
+      const rest = rooms.filter((r) => r.id !== room.id);
+      const next = view.rooms[view.rooms.indexOf(room) + 1] ?? view.rooms[view.rooms.indexOf(room) - 1];
+      roomsView(profile, rest, config);
+      (next && panel.querySelector(`[data-leave="${CSS.escape(next.id)}"]`) || panel.querySelector('#rooms-edit') || panel.querySelector('#join-toggle'))?.focus();
+    });
+  });
+  const tabs = panel.querySelector('[data-seg="rooms-tab"]');
+  if (!tabs) return;
+  tabs.onclick = (e) => {
+    const tab = e.target.closest('[data-id]')?.dataset.id;
+    if (!tab || tab === view.tab) return;
+    roomsTab = tab;
+    again(`[data-seg="rooms-tab"] [data-id="${tab}"]`);
+  };
+  tabs.onkeydown = (e) => segArrowKeys(e, (btn) => btn.click());
+}
+
+// 편집 중 '나가기'(#55). 누르면 먼저 그 방에서 나갈 수 있는지 서버와 같은 규칙(public/leave.js)으로 확인해,
+// 막히면 위쪽 노란 알림으로 까닭을 잠깐 보인다. 나갈 수 있으면 지우기처럼 한 번 더 눌러야 나간다.
+// 끝난 방은 늘 나갈 수 있어 확인하지 않는다. 그사이 방이 바뀌어 서버가 막으면 그 까닭도 같은 알림으로 보인다
+async function leaveFromList(btn, room, onLeft) {
+  if (btn.getAttribute('aria-busy') === 'true') return;
+  const show = (text, busy = false) => { btn.textContent = text; btn.setAttribute('aria-busy', String(busy)); };
+  if (btn.classList.contains('armed')) {
+    show('나가는 중…', true);
+    try {
+      await api(`/api/rooms/${encodeURIComponent(room.id)}/leave`, { method: 'POST' });
+    } catch (e) {
+      btn.classList.remove('armed');
+      show('나가기');
+      return toast(e.message);
+    }
+    await collapse(btn.closest('li'));
+    return onLeft();
+  }
+  for (const other of panel.querySelectorAll('[data-leave].armed')) { other.classList.remove('armed'); other.textContent = '나가기'; } // 한 번에 한 방만
+  if (room.status !== 'done') {
+    show('확인 중…', true);
+    let why;
+    try {
+      const data = await api(`/api/rooms/${encodeURIComponent(room.id)}`);
+      why = leaveBlock(data, data.me.uid);
+    } catch (e) {
+      why = e.message;
+    }
+    show('나가기');
+    if (why) return toast(why);
+  }
+  btn.classList.add('armed');
+  show('한 번 더 누르면 나가요');
+}
+
+// 나간 방의 줄을 접어 아래 줄이 자연스럽게 올라오게 한다. 움직임 줄이기면 바로 뺀다
+function collapse(li) {
+  if (!li || reduceMotion.matches || !li.animate) return Promise.resolve();
+  li.style.overflow = 'hidden';
+  return li.animate([{ height: `${li.offsetHeight}px`, opacity: 1 }, { height: '0px', opacity: 0 }], { duration: 260, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'forwards' }).finished;
 }
 
 // 초대 링크로 참가하기: 버튼을 누르면 머리말 바로 아래에 입력칸을 펼치고 바로 붙여 넣게 초점을 둔다.

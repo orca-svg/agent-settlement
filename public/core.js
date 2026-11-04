@@ -4,13 +4,20 @@
 
 export const won = (n) => `₩${Math.round(n).toLocaleString('ko-KR')}`;
 export const yen = (n) => `¥${Math.round(n).toLocaleString('ko-KR')}`;
-export const money = (n, currency) => (currency === 'KRW' ? won(n) : currency === 'JPY' ? yen(n) : `${Math.round(n).toLocaleString('ko-KR')} ${currency}`);
+// 원·엔이 아닌 외화는 센트 같은 소수 둘째 자리까지 보인다(#55 외화 방)
+export const money = (n, currency) => (currency === 'KRW' ? won(n) : currency === 'JPY' ? yen(n) : `${(Math.round(n * 100) / 100).toLocaleString('ko-KR', { maximumFractionDigits: 2 })} ${currency}`);
 // 'YYYY-MM-DD' → 'M/D'
 export const dayLabel = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
 
 export const amountOf = (exp) => (exp.items ? exp.items.reduce((s, it) => s + it.qty * it.unit, 0) : exp.amount);
 
 const nameOf = (members, uid) => members.find((m) => m.uid === uid)?.name ?? uid;
+
+// 방에서 지금 함께하는 멤버. 탈퇴한 사람(deleted)과 방에서 나간 사람(left, #55)은 지출·송금 기록에만 남는다
+export const active = (m) => !m.deleted && !m.left;
+// 외화 지출을 정산하는 방(#55). 환율 정책은 이 방에만 있고, 원화 방(fx 없음)은 정책을 묻지도 보이지도 않는다.
+// 예전 원화 방에 남은 policy·policyAgreedBy 값은 이 판단으로 읽을 때 무시한다
+export const isForeign = (room) => Boolean(room?.fx?.currency);
 
 // 환율 정책에 따라 이 지출을 원화로 바꾸고, 그 근거를 한 줄로 남긴다.
 export function toKrw(exp, room, policy) {
@@ -19,11 +26,13 @@ export function toKrw(exp, room, policy) {
   const fx = room.fx;
   const cur = money(amount, exp.currency);
   const day = fx.base[exp.date];
-  if (policy === 'settle') {
+  if (policy === 'settle' && fx.settle) {
     return { krw: Math.round((amount * fx.settle.rate) / 100), how: `${cur} × 정산일(${dayLabel(fx.settle.date)}) 기준율 ${fx.settle.rate.toFixed(2)}원/100` };
   }
-  if (policy === 'payday') {
-    return { krw: Math.round((amount * day) / 100), how: `${cur} × 결제일(${dayLabel(exp.date)}) 기준율 ${day.toFixed(2)}원/100` };
+  // 정산일 환율은 청구서를 처음 보낼 때 정해진다(#55). 그 전에는 결제일 기준율로 미리 보여 준다
+  if (policy === 'payday' || policy === 'settle') {
+    const later = policy === 'settle' ? ' · 정산일 환율은 청구서를 보낼 때 정해져요' : '';
+    return { krw: Math.round((amount * day) / 100), how: `${cur} × 결제일(${dayLabel(exp.date)}) 기준율 ${day.toFixed(2)}원/100${later}` };
   }
   if (exp.method === 'card') {
     return {
@@ -31,7 +40,9 @@ export function toKrw(exp, room, policy) {
       how: `카드 청구액: ${cur} × ${day.toFixed(2)}원/100 × 해외 이용 수수료 ${(fx.cardFee * 100).toFixed(1)}%`,
     };
   }
-  const rate = fx.cash[exp.payer];
+  const rate = fx.cash?.[exp.payer];
+  // 환전한 환율을 적지 않았으면(#55 실제 방) 결제일 기준율로 셈하고 그렇다고 밝힌다
+  if (!rate) return { krw: Math.round((amount * day) / 100), how: `현금: ${cur} × 결제일(${dayLabel(exp.date)}) 기준율 ${day.toFixed(2)}원/100 · ${nameOf(room.members, exp.payer)}의 환전 환율이 없어서` };
   return { krw: Math.round((amount * rate) / 100), how: `현금: ${cur} × ${nameOf(room.members, exp.payer)}가 환전한 평균 ${rate.toFixed(2)}원/100` };
 }
 

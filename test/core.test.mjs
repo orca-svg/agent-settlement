@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEMO_ROOM, DEMO_EXPENSES, DEMO_MEMORY, DEMO_DISPUTE } from '../public/data.js';
-import { toKrw, amountOf, shares, ledger, settle, ruleAllocate, presentAfter } from '../public/core.js';
+import { toKrw, amountOf, shares, ledger, settle, ruleAllocate, presentAfter, money } from '../public/core.js';
 
 const byId = (id) => DEMO_EXPENSES.find((e) => e.id === id);
 const izakaya = byId('izakaya');
@@ -76,4 +76,36 @@ test('shares: 나누고 남은 원은 rest로 알려 주고 낸 사람 몫에 �
   assert.equal(s.rest, 1);
   assert.deepEqual(s.krwShare, { a: 3334, b: 3333, c: 3333 });
   assert.equal(shares({ ...exp, amount: 9000 }, room, 'actual').rest, 0);
+});
+
+// #55: 환율 정책은 외화 방에만 있다. 원화 방의 금액은 정책이 없어도(null), 예전 값이 남아 있어도 똑같이 나온다
+test('원화 방: toKrw·shares·ledger는 환율 정책과 상관없이 같은 결과', () => {
+  const krwRoom = { id: 'r-krw', members: [{ uid: 'a', name: '가' }, { uid: 'b', name: '나' }, { uid: 'c', name: '다' }], currency: 'KRW', fx: null };
+  const exps = [
+    { id: 'e1', payer: 'a', method: 'card', currency: 'KRW', date: '2026-11-03', amount: 30001, split: 'equal', present: ['a', 'b', 'c'] },
+    { id: 'e2', payer: 'b', method: 'cash', currency: 'KRW', date: '2026-11-03', split: 'items', present: ['a', 'b'],
+      items: [{ id: 'l1', qty: 2, unit: 4500, tags: [] }, { id: 'l2', qty: 1, unit: 12000, tags: [] }], alloc: { l2: { consumers: ['b'] } } },
+  ];
+  const results = [null, undefined, 'actual', 'payday', 'settle'].map((policy) => ({
+    krw: exps.map((e) => toKrw(e, krwRoom, policy)),
+    shares: exps.map((e) => shares(e, krwRoom, policy)),
+    ledger: ledger(krwRoom, exps, policy),
+  }));
+  for (const r of results.slice(1)) assert.deepEqual(r, results[0]);
+  assert.deepEqual(results[0].ledger, { a: { paid: 30001, owed: 14501, net: 15500 }, b: { paid: 21000, owed: 26500, net: -5500 }, c: { paid: 0, owed: 10000, net: -10000 } });
+});
+
+test('외화 방: 정산일 환율이 정해지기 전에는 결제일 기준율로 미리 셈하고 그렇다고 밝힌다(#55)', () => {
+  const fxRoom = { members: [{ uid: 'a', name: '가' }], fx: { currency: 'JPY', base: { '2026-11-02': 905.5 }, settle: null, cardFee: 0.014, cash: {} } };
+  const exp = { payer: 'a', method: 'card', currency: 'JPY', date: '2026-11-02', amount: 1000 };
+  const before = toKrw(exp, fxRoom, 'settle');
+  assert.equal(before.krw, 9055);
+  assert.match(before.how, /정산일 환율은 청구서를 보낼 때/);
+  assert.equal(toKrw(exp, { ...fxRoom, fx: { ...fxRoom.fx, settle: { date: '2026-11-03', rate: 900 } } }, 'settle').krw, 9000);
+});
+
+test('money: 달러·유로는 소수 둘째 자리까지, 원·엔은 정수로 보인다', () => {
+  assert.equal(money(12.5, 'USD'), '12.5 USD');
+  assert.equal(money(0.1 + 0.2, 'EUR'), '0.3 EUR');
+  assert.equal(money(1234.4, 'JPY'), '¥1,234');
 });

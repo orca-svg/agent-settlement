@@ -71,6 +71,8 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     const all = await store.list('invoices', { roomId });
     const current = all.filter((i) => i.version === room.version);
     if (current.length) return { version: room.version, invoices: current };
+    // 처음 보낸 순간부터 정산 중. 이후 초대·참가·정책 변경을 막는다(#4)
+    if (room.status !== 'settling') await store.put('rooms', { ...room, status: 'settling' });
 
     const stale = all.filter((i) => i.version < room.version && ['pending', 'accepted', 'asked'].includes(i.status));
     for (const i of stale) await store.put('invoices', { ...i, status: 'superseded' });
@@ -80,7 +82,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     const ended = new Set((await store.list('disputes', { roomId })).filter((d) => !OPEN.includes(d.status)).map((d) => `${d.by}:${d.expenseId}`));
     await say(roomId, { from: actorUid, to: 'all', kind: 'invoices_sent', text: `지출 ${expenses.length}건으로 각자의 비서에게 청구서를 보냈어요`, meta: `지출이 바뀔 때마다 새로 보내는 청구서의 ${room.version}번째 묶음이에요` });
     const invoices = [];
-    for (const m of room.members) {
+    for (const m of room.members.filter((x) => !x.left)) { // 방에서 나간 사람(#55)은 낀 지출이 없을 때만 나갈 수 있어 0원이다
       const r = rows[m.uid];
       const base = { id: `${roomId}:v${room.version}:${m.uid}`, roomId, version: room.version, to: m.uid, owed: r.owed, paid: r.paid, net: r.net };
       const found = await firstEvidence(m.uid, room, expenses, ended);
@@ -257,7 +259,23 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     const invoices = (await store.list('invoices', { roomId })).filter((i) => i.version === room.version);
     const disputes = await store.list('disputes', { roomId });
     if (!invoices.length || invoices.some((i) => i.status === 'asked') || disputes.some((d) => OPEN.includes(d.status))) return [];
-    return createTransfers(roomId);
+    const out = await createTransfers(roomId);
+    await finishIfDone(roomId); // 보낼 돈이 없으면 여기서 바로 끝난다
+    return out;
+  }
+
+  // 지금 묶음의 송금이 모두 '받았어요'로 끝나면(보낼 돈이 없으면 바로) 방을 완료로 바꾼다(#55).
+  // 완료된 방은 내 방 목록의 '끝남'에 보이고, 지출·이의·초대를 더 받지 않는다(src/rooms/policy.mjs)
+  async function finishIfDone(roomId) {
+    const { room, expenses } = await load(roomId);
+    if (room.status !== 'settling' || !expenses.length) return; // 지출 없이 보낸 방은 닫지 않는다(닫히면 지출을 남길 수 없다)
+    const invoices = (await store.list('invoices', { roomId })).filter((i) => i.version === room.version);
+    const disputes = await store.list('disputes', { roomId });
+    if (!invoices.length || invoices.some((i) => i.status === 'asked') || disputes.some((d) => OPEN.includes(d.status))) return;
+    const live = (await store.list('transfers', { roomId })).filter((t) => t.version === room.version);
+    if (live.length ? !live.every((t) => t.status === 'confirmed') : settle(ledger(room, expenses, room.policy)).length) return;
+    await store.put('rooms', { ...room, status: 'done', doneAt: clock().toISOString() });
+    await say(roomId, { from: 'system', to: 'all', kind: 'room_done', text: live.length ? '모든 송금이 확인돼서 정산이 끝났어요' : '주고받을 돈이 없어서 정산이 끝났어요' });
   }
 
   // ---------------------------------------------------------------- 송금
@@ -396,6 +414,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     const saved = { ...t, status: 'confirmed', confirmedAt: clock().toISOString() };
     await store.put('transfers', saved);
     await say(roomId, { from: t.to, to: t.from, kind: 'transfer_confirmed', text: `${name(t.from)}에게서 ${won(t.amount)}을 받았어요` });
+    await finishIfDone(roomId);
     return saved;
   }
 

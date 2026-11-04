@@ -35,10 +35,10 @@ export class MemoryStore {
     this.#col(col).delete(id);
   }
 
-  // uid가 탈퇴하지 않은 멤버인 방(내 방 목록). FirestoreStore는 모든 방을 읽지 않고 색인으로 찾는다
+  // uid가 탈퇴하지도 나가지도(#55) 않은 멤버인 방(내 방 목록). FirestoreStore는 모든 방을 읽지 않고 색인으로 찾는다
   async roomsOf(uid) {
     return [...this.#col('rooms').values()]
-      .filter((room) => (room.members ?? []).some((m) => m.uid === uid && !m.deleted))
+      .filter((room) => (room.members ?? []).some((m) => m.uid === uid && !m.deleted && !m.left))
       .map((room) => structuredClone(room));
   }
 

@@ -104,3 +104,22 @@ test('extract 엔드포인트는 저장하지 않는다(list expenses 그대로)
   });
   assert.equal(bad.status, 400);
 });
+
+test('달러 방(#55): 센트까지 읽고, 엔·원은 정수로 맞춘다', async () => {
+  const usdRoom = { ...DEMO_ROOM, fx: { currency: 'USD', base: {}, settle: null, cardFee: 0.014, cash: {} } };
+  const usd = await extractReceipt(fake({ merchant: 'Diner', currency: 'USD', date: '2026-11-07', time: '12:10', total: 24.37,
+    items: [{ name: 'Burger', qty: 2, unit: 9.99, tags: ['1인 식사'] }, { name: 'Soda', qty: 1, unit: 2.5, tags: ['무알코올 음료'] }] }), { image, room: usdRoom });
+  assert.equal(usd.total, 24.37);
+  assert.deepEqual(usd.items.map((it) => it.unit), [9.99, 2.5, 1.89], '차액 조정도 센트 단위(부동소수 찌꺼기 없이)');
+  const jpy = await extractReceipt(fake({ ...ok, total: 7860.4, items: ok.items.map((it) => ({ ...it, unit: it.unit + 0.4 })) }), { image, room: DEMO_ROOM });
+  assert.equal(jpy.total, 7860);
+  assert.ok(jpy.items.every((it) => Number.isInteger(it.unit)));
+});
+
+test('손글씨 전표의 正자 획 수량(一·丅·下·正)을 숫자로 세라고 모델에 알린다', async () => {
+  let system = '';
+  await extractReceipt({ model: 'fake', generate: async (p) => { system = p.system; return ok; } }, { image, room: DEMO_ROOM });
+  assert.match(system, /正자 획으로 적혀 있으면 획 수를 qty로/);
+  assert.match(system, /一=1, 丅\(T 모양\)=2, 下=3/);
+  assert.match(system, /취소선으로 지운 줄도 넣지 않는다/);
+});

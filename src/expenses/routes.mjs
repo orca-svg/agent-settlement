@@ -10,13 +10,22 @@ import { isFlagged } from '../actions.mjs';
 import { supersedeDisputes } from '../agents/disputes.mjs';
 import { validateExpense } from './validate.mjs';
 import { extractReceipt } from './receipt.mjs';
+import { isDone } from '../rooms/policy.mjs';
+import { withDayRate } from '../rooms/fx.mjs';
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
-export function registerExpenseRoutes(routes, { store, gemini, member, overLimit, allocCache }) {
+// 정산이 끝난 방은 닫힌다(#55). 지출을 바꾸면 이미 '받았어요'로 끝난 돈을 다시 나눠 또 보내게 된다
+function open(room) {
+  if (isDone(room)) throw new HttpError(409, '정산이 끝난 방이라 지출을 더 남기거나 고칠 수 없어요');
+}
+
+export function registerExpenseRoutes(routes, { store, gemini, member, overLimit, allocCache, fx }) {
   routes.post('/api/rooms/:id/expenses', async ({ req, res, params }) => {
-    const { room, me } = await member(req, params.id);
+    const { room: found, me } = await member(req, params.id);
+    open(found);
     const body = await readJson(req, { limit: MAX_RECEIPT });
+    const room = await withDayRate(fx, found, body.expense); // 외화 지출이면 결제일 환율을 받아 방 표에 넣는다(#55)
     const checked = validateExpense(body.expense, room);
     if (!checked.ok) throw new HttpError(400, checked.errors.join(' '));
     const photo = checked.expense.source === 'receipt' && IMAGE_TYPES.includes(body.receipt?.mimeType) && typeof body.receipt?.data === 'string' && body.receipt.data ? body.receipt : null;
@@ -46,8 +55,9 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     return { draft };
   });
 
-  async function roomExpense(req, roomId, eid) {
+  async function roomExpense(req, roomId, eid, { read = false } = {}) {
     const { room, me } = await member(req, roomId);
+    if (!read) open(room);
     const exp = await store.get('expenses', eid);
     if (!exp || exp.roomId !== room.id) throw new HttpError(404, '지출을 찾을 수 없어요');
     return { room, me, exp };
@@ -55,8 +65,9 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
 
   // 지출 고치기. 같은 검증을 거쳐 덮어쓴다. 줄·함께한 사람이 바뀌면 메뉴 배분은 지우고 다시 나누게 한다.
   routes.post('/api/rooms/:id/expenses/:eid', async ({ req, params }) => {
-    const { room, me, exp } = await roomExpense(req, params.id, params.eid);
+    const { room: found, me, exp } = await roomExpense(req, params.id, params.eid);
     const input = (await readJson(req)).expense ?? {};
+    const room = await withDayRate(fx, found, input);
     const checked = validateExpense({ ...input, source: exp.source }, room);
     if (!checked.ok) throw new HttpError(400, checked.errors.join(' '));
     const next = checked.expense;
@@ -83,7 +94,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
 
   // 영수증 사진 보기(방 멤버만)
   routes.get('/api/rooms/:id/expenses/:eid/receipt', async ({ req, params }) => {
-    const { exp } = await roomExpense(req, params.id, params.eid);
+    const { exp } = await roomExpense(req, params.id, params.eid, { read: true });
     const photo = await store.get('receipts', exp.id);
     if (!photo) throw new HttpError(404, '저장된 영수증 사진이 없어요');
     return { mimeType: photo.mimeType, data: photo.data };
@@ -126,6 +137,47 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     await supersedeDisputes(store, room.id, exp, saved);
     console.log(`[allocate] ${out.how} ${out.source} ${latencyMs}ms`);
     return { expense: saved, source: out.source, how: out.how, latencyMs };
+  });
+
+  // 비서가 짐작한 배분을 그대로 확정한다(줄마다 누르는 번거로움을 덜려고). 근거가 약해 사람에게 물은 줄만 확정하고,
+  // 아직 나누지 않은 줄은 짐작이 없어 건드리지 않는다. edits: 화면에서 고쳐 둔 줄 { 줄 id: 먹은 사람 }은 짐작 대신 그 값으로
+  function confirmGuesses(exp, uid, edits = {}) {
+    const lines = (exp.items ?? []).filter((it) => isFlagged(exp.alloc?.[it.id]));
+    if (!lines.length) return null;
+    const alloc = { ...exp.alloc };
+    for (const it of lines) {
+      const picked = Array.isArray(edits[it.id]) && edits[it.id].length ? exp.present.filter((u) => edits[it.id].includes(u)) : null;
+      if (picked && !picked.length) throw new HttpError(400, '함께 있지 않았던 사람은 고를 수 없어요');
+      alloc[it.id] = { ...alloc[it.id], ...(picked ? { consumers: picked, reason: '직접 고쳤어요' } : {}), confirmed: true, confirmedBy: uid };
+    }
+    return { before: exp, saved: { ...exp, split: 'items', alloc }, count: lines.length };
+  }
+  // 확정한 지출을 저장하고 방 version은 한 번만 올린다(청구서는 한 번만 다시 보내면 된다)
+  async function saveGuesses(room, me, done) {
+    if (!done.length) return { expenses: [], confirmed: 0 };
+    for (const { saved } of done) await store.put('expenses', saved);
+    await store.put('rooms', { ...room, version: room.version + 1 });
+    const count = done.reduce((n, d) => n + d.count, 0);
+    const what = done.length === 1 ? `‘${done[0].saved.title}’의 ${count}줄을` : `지출 ${done.length}건의 ${count}줄을`;
+    await store.appendEvent(room.id, { from: me.uid, to: 'all', kind: 'lines_confirmed', text: `${what} 비서가 짐작한 대로 확인했어요` });
+    for (const { before, saved } of done) await supersedeDisputes(store, room.id, before, saved);
+    return { expenses: done.map((d) => d.saved), confirmed: count };
+  }
+
+  // 지출 하나의 확인할 줄을 모두 짐작대로(고쳐 둔 줄은 고친 대로) 확정한다. { edits? }
+  routes.post('/api/rooms/:id/expenses/:eid/confirm-guesses', async ({ req, params }) => {
+    const { room, me, exp } = await roomExpense(req, params.id, params.eid);
+    const { edits } = await readJson(req);
+    const done = confirmGuesses(exp, me.uid, edits && typeof edits === 'object' ? edits : {});
+    return saveGuesses(room, me, done ? [done] : []);
+  });
+
+  // 방의 모든 지출에서 확인할 줄을 짐작대로 확정한다(청구서 보내기가 막혔을 때 한 번에)
+  routes.post('/api/rooms/:id/confirm-guesses', async ({ req, params }) => {
+    const { room, me } = await member(req, params.id);
+    open(room);
+    const done = (await store.list('expenses', { roomId: room.id })).map((e) => confirmGuesses(e, me.uid)).filter(Boolean);
+    return saveGuesses(room, me, done);
   });
 
   // 줄 하나를 사람이 확정한다. 확정한 줄은 확신도와 관계없이 더 묻지 않는다.

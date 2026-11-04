@@ -11,7 +11,8 @@ export function sharedMemory(agent, roomId) {
 
 // 방 멤버의 비서 문서 { uid: AgentSettings | null }. 방 응답처럼 기억과 설정 여부를 함께 볼 때 한 번만 읽는다
 export const agentsOf = async (store, room) => Object.fromEntries(await Promise.all(room.members.map(async (m) => [m.uid, await store.get('agents', m.uid)])));
-export const memoryOf = (room, agents) => Object.fromEntries(room.members.map((m) => [m.uid, sharedMemory(agents[m.uid], room.id)]));
+// 방에서 나간 사람(#55)의 기억은 더 이상 이 방의 배분·중재에 쓰지 않는다
+export const memoryOf = (room, agents) => Object.fromEntries(room.members.map((m) => [m.uid, m.left ? [] : sharedMemory(agents[m.uid], room.id)]));
 
 // 방 멤버별 기억 { uid: string[] }
 export async function roomMemory(store, room) {
