@@ -2,7 +2,8 @@
 // 프로필 화면은 왼쪽 위 '내 방'(바꾼 것은 버림)과 오른쪽 위 '저장'(저장하고 내 방으로)으로 나간다. 브라우저 뒤로도 저장하지 않는다
 import { initAuth, currentUser, login, logout } from './auth.js';
 import { api } from './room-api.js';
-import { esc, avatarHtml, CHEVRON, GOOGLE_G, nextAfterLogin, mountSegs } from './ui.js';
+import { esc, avatarHtml, CHEVRON, GOOGLE_G, nextAfterLogin, mountSegs, segArrowKeys } from './ui.js';
+import { roomTabs } from './room-list.js';
 import { profileFormHtml, mountProfileForm, initial } from './profile-form.js';
 import { inviteTokenFrom, joinLinkHtml } from './join-link.js';
 import { defaultsHtml, defaultsBody } from './agent-defaults.js';
@@ -89,22 +90,37 @@ async function render() {
   else roomsView(profile, rooms, config);
 }
 
-// 첫 화면: 내가 참여한 방. 오른쪽 위 내 아바타가 프로필로 들어가는 문이다
+// 첫 화면: 내가 참여한 방. 오른쪽 위 내 아바타가 프로필로 들어가는 문이다.
+// 정산이 끝난 방이 있으면 '진행 중 | 끝남' 탭으로 나눈다(#55, room-list.js). 고른 탭은 이 화면에 있는 동안 기억한다
+let roomsTab = 'live';
 function roomsView(profile, rooms, config) {
+  const view = roomTabs(rooms, roomsTab);
   setNav(BRAND, '', `<button type="button" class="nav-avatar" id="open-profile" aria-label="내 계정 · ${esc(profile.name)}">${avatarHtml(initial(profile.name), profile.color, 'lg')}</button>`);
   panel.innerHTML = `<section class="hero"><h1>내 방</h1><p class="sub">${esc(profile.name)}님으로 로그인했어요.</p></section>${MESSAGE}
     <section class="group"><div class="list">
       <a class="row new-room" href="room.html"><span class="new-room-icon" aria-hidden="true">+</span><span class="grow"><span class="title">새 방 만들기</span>
         <span class="meta" style="display:block">모임을 만들고 초대 링크로 친구를 불러요</span></span>${CHEVRON}</a>
       ${joinLinkHtml()}
-      ${rooms.map((r) => linkRow(`room.html?room=${encodeURIComponent(r.id)}`, esc(r.name), esc(r.dates || ''))).join('')
-        || '<div class="row"><span class="grow meta">아직 참여한 방이 없어요. 새 방을 만들거나 친구에게 초대 링크를 받으면 여기에 보여요.</span></div>'}
     </div></section>
+    <section class="group"><h2 class="group-label"><span>참여한 방</span></h2>${view.html}
+      <div class="list"${view.html ? ' style="margin-top:10px"' : ''}>${view.rooms.map((r) => linkRow(`room.html?room=${encodeURIComponent(r.id)}`, esc(r.name), esc(r.dates || ''))).join('')
+        || `<div class="row"><span class="grow meta">${view.empty}</span></div>`}</div></section>
     ${demoRows('둘러보기', config.dev)}`;
   say(notice);
   notice = '';
   nav.querySelector('#open-profile').onclick = openProfile;
   mountJoinLink(panel);
+  mountSegs(panel);
+  const tabs = panel.querySelector('[data-seg="rooms-tab"]');
+  if (!tabs) return;
+  tabs.onclick = (e) => {
+    const tab = e.target.closest('[data-id]')?.dataset.id;
+    if (!tab || tab === view.tab) return;
+    roomsTab = tab;
+    roomsView(profile, rooms, config);
+    panel.querySelector(`[data-seg="rooms-tab"] [data-id="${tab}"]`)?.focus(); // 다시 그려도 초점은 누른 탭에
+  };
+  tabs.onkeydown = (e) => segArrowKeys(e, (btn) => btn.click());
 }
 
 // 초대 링크로 참가하기: 줄을 누르면 그 자리에 입력칸을 펼치고 바로 붙여 넣게 초점을 둔다.

@@ -28,8 +28,9 @@ export function registerAccountRoutes(routes, { store, authenticate, auth, clock
   });
   routes.get('/api/rooms', async ({ req }) => {
     const me = await authenticate(req);
-    // 서비스의 모든 방이 아니라 내가 멤버인 방만 읽는다(Firestore는 읽은 문서 수가 비용, #3)
-    return { rooms: (await store.roomsOf(me.uid)).map(({ id, name, dates }) => ({ id, name, dates })) };
+    // 서비스의 모든 방이 아니라 내가 멤버인 방만 읽는다(Firestore는 읽은 문서 수가 비용, #3).
+    // status로 화면이 진행 중인 방과 끝난 방('done', #55)을 나눈다. 없으면 준비 중이다
+    return { rooms: (await store.roomsOf(me.uid)).map(({ id, name, dates, status }) => ({ id, name, dates, status: status ?? 'ready' })) };
   });
   routes.post('/api/me/delete', async ({ req }) => {
     const me = await authenticate(req, { allowDeleting: true });

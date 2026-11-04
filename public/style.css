@@ -1034,6 +1034,10 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
 }
 .me-menu [role="menuitem"]:hover, .me-menu [role="menuitem"]:focus-visible { background: var(--tint-soft); }
 .me-menu [role="menuitem"][hidden] { display: none; }
+/* 되돌리기 번거로운 '이 방에서 나가기'(#55)는 빨간 글자로, 위 항목들과 선 하나로 떼어 둔다 */
+.me-menu [role="menuitem"].danger { color: var(--danger); }
+.me-menu [role="menuitem"].danger:not([hidden]) { margin-top: 5px; position: relative; }
+.me-menu [role="menuitem"].danger::before { content: ''; position: absolute; left: 12px; right: 12px; top: -3px; border-top: 0.5px solid var(--sep); }
 /* 좁은 화면에서도 얼굴만 남겨 둔다(주 버튼만 남기는 규칙의 예외) */
 @media (max-width: 520px) {
   .nav-actions .nav-btn.nav-me { display: inline-flex; padding: 0 4px; }

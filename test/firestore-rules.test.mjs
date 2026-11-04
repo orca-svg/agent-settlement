@@ -12,7 +12,7 @@ const from = (collectionId, extra = {}) => ({ from: [{ collectionId }], ...extra
 const eq = (field, value) => ({ fieldFilter: { field: { fieldPath: field }, op: 'EQUAL', value: { stringValue: value } } });
 const contains = (field, value) => ({ fieldFilter: { field: { fieldPath: field }, op: 'ARRAY_CONTAINS', value: { stringValue: value } } });
 
-// 방 A(ra): alice·bob, 방 B(rb): sam.
+// 방 A(ra): alice·bob(그리고 나간 lee), 방 B(rb): sam.
 // firestore.test.mjs의 규칙 테스트(rr, a, b, x …)와 같은 (default) 데이터베이스를 쓰므로 이름이 겹치지 않게 한다.
 // 서버 길(Admin SDK, 규칙을 거치지 않음)로 심어야 rooms의 _memberUids가 실제와 같이 채워진다.
 // 모두 덮어쓰기라 켜 둔 에뮬레이터에서 다시 돌려도 같은 상태가 된다.
@@ -23,7 +23,8 @@ function setup() {
     const store = emulatorStore({}, '(default)');
     const api = rulesClient();
     await api.loadRules();
-    await store.put('rooms', { id: 'ra', name: '방 A', members: [{ uid: 'alice', name: '앨리스' }, { uid: 'bob', name: '밥' }] });
+    // lee는 방 A에서 나간 사람(#55). 칸은 남아 있지만 멤버 색인(_memberUids)에서 빠진다
+    await store.put('rooms', { id: 'ra', name: '방 A', members: [{ uid: 'alice', name: '앨리스' }, { uid: 'bob', name: '밥' }, { uid: 'lee', name: '리', left: true }] });
     await store.put('rooms', { id: 'rb', name: '방 B', members: [{ uid: 'sam', name: '샘' }] });
     await store.put('expenses', { id: 'ra-e', roomId: 'ra', amount: 100 });
     await store.put('expenses', { id: 'rb-e', roomId: 'rb', amount: 200 });
@@ -90,6 +91,16 @@ test('규칙: 목록 조회로도 남의 방을 못 본다(화면의 기록 구�
   assert.equal(await api.query('', from('expenses'), 'alice'), 403, 'alice: 조건 없이 모든 방 지출');
   assert.equal(await api.query('', { from: [{ collectionId: 'events', allDescendants: true }] }, 'alice'), 403, 'alice: 모든 방 기록 한 번에(컬렉션 그룹)');
   assert.equal(await api.query('', from('rooms', { where: contains('_memberUids', 'sam') }), 'alice'), 403, 'alice: sam이 있는 방 목록');
+});
+
+test('규칙: 방에서 나간 사람(#55)은 그 방의 기록을 더 읽지 못한다', { skip }, async () => {
+  const { api } = await setup();
+  for (const path of ['rooms/ra', 'rooms/ra/events/1', 'expenses/ra-e', 'invoices/ra-i']) {
+    assert.equal(await api.get(path, 'alice'), 200, `대조군 alice: ${path}`);
+    assert.equal(await api.get(path, 'lee'), 403, `나간 lee: ${path}`);
+  }
+  const events = from('events', { orderBy: [{ field: { fieldPath: 'seq' }, direction: 'ASCENDING' }] });
+  assert.equal(await api.query('rooms/ra', events, 'lee'), 403, '나간 lee: 방 A 기록 구독');
 });
 
 test('규칙: 규칙에 적히지 않은 컬렉션은 그 데이터의 주인도 화면에서 못 읽는다', { skip }, async () => {

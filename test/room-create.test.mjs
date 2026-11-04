@@ -8,7 +8,7 @@ const store = new MemoryStore();
 let server;
 let base;
 before(async () => {
-  server = createApp({ store, gemini: null, env: { DEV_SEED: '1' } });
+  server = createApp({ store, gemini: null, env: { DEV_SEED: '1' }, fxRates: { rateOn: async () => 900 } });
   await new Promise((r) => server.listen(0, r));
   base = `http://localhost:${server.address().port}`;
 });
@@ -22,14 +22,16 @@ const create = (body, uid = 'me') =>
   });
 const get = (path, uid) => fetch(base + path, { headers: { 'x-demo-user': uid } });
 
-test('방을 만들면 만든 사람만 멤버이고, 고른 정책에 동의한 상태로 준비 중이다', async () => {
-  const res = await create({ name: '  오사카   여행 ', dates: '11월 7일 – 9일', policy: 'payday' });
+test('외화 방을 만들면 만든 사람만 멤버이고, 고른 정책에 동의한 상태로 준비 중이다', async () => {
+  const res = await create({ name: '  오사카   여행 ', dates: '11월 7일 – 9일', currency: 'JPY', policy: 'payday' });
   assert.equal(res.status, 201);
   const { room } = await res.json();
   assert.equal(room.name, '오사카 여행'); // 공백 정리
   assert.equal(room.dates, '11월 7일 – 9일');
   assert.deepEqual(room.members.map((m) => m.uid), ['me']);
   assert.match(room.members[0].color, /^#[0-9a-f]{6}$/i, '멤버에는 프로필 색이 들어간다');
+  assert.equal(room.currency, 'KRW', '정산(송금)은 원화로 한다');
+  assert.deepEqual(room.fx, { currency: 'JPY', base: {}, settle: null, cardFee: 0.014, cash: {} }, '환율은 지출을 남길 때 받는다');
   assert.equal(room.policy, 'payday');
   assert.deepEqual(room.policyAgreedBy, ['me']);
   assert.equal(room.status, 'ready');
@@ -37,9 +39,18 @@ test('방을 만들면 만든 사람만 멤버이고, 고른 정책에 동의한
   assert.deepEqual(await store.get('rooms', room.id), room); // 저장소에 그대로 들어갔다
 });
 
-test('정책을 안 고르면 실제 낸 원화(actual)', async () => {
-  const { room } = await (await create({ name: '회식' })).json();
+test('외화 방에서 정책을 안 고르면 실제 낸 원화(actual)', async () => {
+  const { room } = await (await create({ name: '도쿄', currency: 'JPY' })).json();
   assert.equal(room.policy, 'actual');
+});
+
+test('원화 방은 환율 정책이 없다: 정책을 보내도 쓰지 않고 동의도 받지 않는다(#55)', async () => {
+  for (const body of [{ name: '회식' }, { name: '회식', currency: 'KRW', policy: 'settle' }]) {
+    const { room } = await (await create(body)).json();
+    assert.equal(room.fx, null);
+    assert.equal(room.policy, null);
+    assert.deepEqual(room.policyAgreedBy, []);
+  }
 });
 
 test('만든 방은 만든 사람이 열 수 있고, 다른 사람은 403', async () => {
@@ -64,5 +75,7 @@ test('이름이 비었거나 40자를 넘거나, 없는 정책이면 400', async
   assert.equal((await create({ name: '   ' })).status, 400);
   assert.equal((await create({})).status, 400);
   assert.equal((await create({ name: '가'.repeat(41) })).status, 400);
-  assert.equal((await create({ name: '방', policy: 'cheapest' })).status, 400);
+  assert.equal((await create({ name: '방', currency: 'JPY', policy: 'cheapest' })).status, 400);
+  assert.equal((await create({ name: '방', currency: 'XYZ' })).status, 400, '고를 수 없는 외화');
+  assert.equal((await create({ name: '방', policy: 'cheapest' })).status, 201, '원화 방은 정책을 보지 않는다');
 });

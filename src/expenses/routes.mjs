@@ -10,13 +10,22 @@ import { isFlagged } from '../actions.mjs';
 import { supersedeDisputes } from '../agents/disputes.mjs';
 import { validateExpense } from './validate.mjs';
 import { extractReceipt } from './receipt.mjs';
+import { isDone } from '../rooms/policy.mjs';
+import { withDayRate } from '../rooms/fx.mjs';
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
-export function registerExpenseRoutes(routes, { store, gemini, member, overLimit, allocCache }) {
+// 정산이 끝난 방은 닫힌다(#55). 지출을 바꾸면 이미 '받았어요'로 끝난 돈을 다시 나눠 또 보내게 된다
+function open(room) {
+  if (isDone(room)) throw new HttpError(409, '정산이 끝난 방이라 지출을 더 남기거나 고칠 수 없어요');
+}
+
+export function registerExpenseRoutes(routes, { store, gemini, member, overLimit, allocCache, fx }) {
   routes.post('/api/rooms/:id/expenses', async ({ req, res, params }) => {
-    const { room, me } = await member(req, params.id);
+    const { room: found, me } = await member(req, params.id);
+    open(found);
     const body = await readJson(req, { limit: MAX_RECEIPT });
+    const room = await withDayRate(fx, found, body.expense); // 외화 지출이면 결제일 환율을 받아 방 표에 넣는다(#55)
     const checked = validateExpense(body.expense, room);
     if (!checked.ok) throw new HttpError(400, checked.errors.join(' '));
     const photo = checked.expense.source === 'receipt' && IMAGE_TYPES.includes(body.receipt?.mimeType) && typeof body.receipt?.data === 'string' && body.receipt.data ? body.receipt : null;
@@ -46,8 +55,9 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     return { draft };
   });
 
-  async function roomExpense(req, roomId, eid) {
+  async function roomExpense(req, roomId, eid, { read = false } = {}) {
     const { room, me } = await member(req, roomId);
+    if (!read) open(room);
     const exp = await store.get('expenses', eid);
     if (!exp || exp.roomId !== room.id) throw new HttpError(404, '지출을 찾을 수 없어요');
     return { room, me, exp };
@@ -55,8 +65,9 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
 
   // 지출 고치기. 같은 검증을 거쳐 덮어쓴다. 줄·함께한 사람이 바뀌면 메뉴 배분은 지우고 다시 나누게 한다.
   routes.post('/api/rooms/:id/expenses/:eid', async ({ req, params }) => {
-    const { room, me, exp } = await roomExpense(req, params.id, params.eid);
+    const { room: found, me, exp } = await roomExpense(req, params.id, params.eid);
     const input = (await readJson(req)).expense ?? {};
+    const room = await withDayRate(fx, found, input);
     const checked = validateExpense({ ...input, source: exp.source }, room);
     if (!checked.ok) throw new HttpError(400, checked.errors.join(' '));
     const next = checked.expense;
@@ -83,7 +94,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
 
   // 영수증 사진 보기(방 멤버만)
   routes.get('/api/rooms/:id/expenses/:eid/receipt', async ({ req, params }) => {
-    const { exp } = await roomExpense(req, params.id, params.eid);
+    const { exp } = await roomExpense(req, params.id, params.eid, { read: true });
     const photo = await store.get('receipts', exp.id);
     if (!photo) throw new HttpError(404, '저장된 영수증 사진이 없어요');
     return { mimeType: photo.mimeType, data: photo.data };

@@ -11,7 +11,7 @@ let now = new Date('2026-11-03T10:00:00Z');
 let server;
 let base;
 before(async () => {
-  server = createApp({ store, gemini: null, clock: () => now, env: { DEV_SEED: '1' } });
+  server = createApp({ store, gemini: null, clock: () => now, env: { DEV_SEED: '1' }, fxRates: { rateOn: async () => 900 } });
   await new Promise((r) => server.listen(0, r));
   base = `http://localhost:${server.address().port}`;
 });
@@ -31,11 +31,12 @@ const get = (path, uid) => call('GET', path, uid);
 // 방에 보이는 이름·색은 각자의 프로필(로그인 계정, #2)을 따른다
 const profile = (uid, name, color = '#3478f6') => post('/api/me', uid, { name, color });
 
-// 방장 me(프로필 '재윤')가 방을 만들고 초대 토큰을 받는다. 철수(cs)도 프로필이 있다
-async function roomWithInvite(policy = 'actual') {
+// 방장 me(프로필 '재윤')가 방을 만들고 초대 토큰을 받는다. 철수(cs)도 프로필이 있다.
+// 환율 정책은 외화 방에만 있어서(#55) 정책을 다루는 테스트는 currency: 'JPY'로 만든다
+async function roomWithInvite(policy = 'actual', currency = 'KRW') {
   await profile('me', '재윤');
   await profile('cs', '철수', '#ff9500');
-  const { json } = await post('/api/rooms', 'me', { name: '오사카', policy });
+  const { json } = await post('/api/rooms', 'me', { name: '오사카', policy, currency });
   const roomId = json.room.id;
   const { json: inv } = await post(`/api/rooms/${roomId}/invite`, 'me');
   return { roomId, token: inv.token };
@@ -129,7 +130,7 @@ test('잘못된 토큰·만료된 토큰·다시 만들기 전의 토큰은 404'
 });
 
 test('새 멤버는 정책에 아직 동의하지 않은 상태이고, 동의하면 들어간다(두 번 눌러도 한 번)', async () => {
-  const { roomId, token } = await roomWithInvite();
+  const { roomId, token } = await roomWithInvite('actual', 'JPY');
   await post(`/api/invites/${token}/join`, 'cs', { agree: true });
   assert.deepEqual((await store.get('rooms', roomId)).policyAgreedBy, ['me']);
   await post(`/api/rooms/${roomId}/policy/agree`, 'cs');
@@ -138,7 +139,7 @@ test('새 멤버는 정책에 아직 동의하지 않은 상태이고, 동의하
 });
 
 test('정책이 바뀌면 바꾼 사람만 동의한 상태로 돌아간다', async () => {
-  const { roomId, token } = await roomWithInvite();
+  const { roomId, token } = await roomWithInvite('actual', 'JPY');
   await post(`/api/invites/${token}/join`, 'cs', { agree: true });
   await post(`/api/rooms/${roomId}/policy/agree`, 'cs');
   const { json } = await post(`/api/rooms/${roomId}/policy`, 'cs', { policy: 'settle' });
@@ -147,8 +148,8 @@ test('정책이 바뀌면 바꾼 사람만 동의한 상태로 돌아간다', as
   assert.equal((await post(`/api/rooms/${roomId}/policy`, 'cs', { policy: 'cheapest' })).status, 400);
 });
 
-test('완료 기준 2: 전원이 정책에 동의해야 정산 시작(청구서 보내기)이 열린다', async () => {
-  const { roomId, token } = await roomWithInvite();
+test('완료 기준 2: 외화 방은 전원이 정책에 동의해야 정산 시작(청구서 보내기)이 열린다', async () => {
+  const { roomId, token } = await roomWithInvite('actual', 'JPY');
   await post(`/api/invites/${token}/join`, 'cs', { agree: true });
 
   const blocked = await post(`/api/rooms/${roomId}/invoices/send`, 'me');
@@ -161,7 +162,7 @@ test('완료 기준 2: 전원이 정책에 동의해야 정산 시작(청구서 
 });
 
 test('정산을 시작하면 초대·참가·정책 변경을 막는다', async () => {
-  const { roomId, token } = await roomWithInvite();
+  const { roomId, token } = await roomWithInvite('actual', 'JPY');
   await post(`/api/rooms/${roomId}/invoices/send`, 'me'); // 혼자인 방이라 바로 열린다
   assert.equal((await post(`/api/rooms/${roomId}/invite`, 'me')).status, 409);
   assert.equal((await post(`/api/invites/${token}/join`, 'cs', { agree: true })).status, 409);

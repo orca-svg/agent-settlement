@@ -39,7 +39,8 @@ API 서버 (server.mjs → src/app.mjs)
 | #2 로그인 | `public/room-api.js`의 `currentUid()`·`api()` | Firebase 사용자·Bearer ID 토큰. 신원 헤더는 이 모듈 한 곳에서만 설정 | `initAuth()` 완료 후 사용 |
 | #3 Firestore | `src/store/`의 Store | `STORE=firestore`면 `FirestoreStore`(`src/store/firestore.mjs`), 아니면 `MemoryStore`. 연결은 [Firestore 안내](docs/firestore-setup.md) | 팀 프로젝트 연결 |
 | #3 Firestore | `public/room-api.js`의 `subscribeRoom()` | 서버가 Firestore이고 로그인했으면 `rooms/{roomId}/events`를 `onSnapshot`, 아니면 2초 폴링. 호출 방식은 같아요 | — |
-| #4 방 | `src/rooms/`, `public/room-setup.js` | 방 만들기(입구는 계정 화면 '내 방'의 '새 방 만들기'), 초대 링크(7일), 참가하기(초대 화면에서 바로 Google 로그인, 이름·색은 프로필), 환율 정책 동의·변경, 전원 동의 전 청구서 잠금. 원화(KRW) 방만 | 환율 표 입력(외화 방), 초대 코드, 나가기·내보내기, 방에 공유할 기억 고르기(#5) |
+| #4 방 | `src/rooms/`, `public/room-setup.js` | 방 만들기(입구는 계정 화면 '내 방'의 '새 방 만들기'), 초대 링크(7일), 참가하기(초대 화면에서 바로 Google 로그인, 이름·색은 프로필), 환율 정책 동의·변경, 전원 동의 전 청구서 잠금 | 초대 코드, 방에 공유할 기억 고르기(#5) |
+| #55 방 마무리 | `src/rooms/`, `src/rooms/fx.mjs`, `public/leave.js`, `public/room-list.js`, `public/currencies.js` | 나가기('내 계정' 메뉴)·내보내기(방을 만든 사람, 초대 시트). 정산이 끝나지 않은 돈이 남으면 이유와 함께 막아요. 모든 송금이 '받았어요'면 방이 `done`이 되고 내 방 목록의 '끝남' 탭에 보여요. 외화 방(엔·달러 등 10개 통화): 환율은 Frankfurter(유럽중앙은행 기준 환율)에서 지출을 남길 때(결제일)와 청구서를 처음 보낼 때(정산일) 받아요. **환율 정책은 외화 방에만** 있고 원화 방은 묻지도 보이지도 않아요 | 사람별 환전 환율 입력(지금은 결제일 기준율로 대신 셈), 방마다 카드 수수료 바꾸기 |
 | #5 비서 설정 | `src/agents/settings.mjs`, `public/agent-panel.js`, `public/agent-rules.js` | 기억·규칙·규칙 변경 기록·처음 설정·방별 공유 선택. 입구는 방 머리의 내 칩과 우측 상단 내 프로필 메뉴. 알림 수준은 지금 종 배지에만 적용 | 푸시 알림이 생기면 `rules.notify`를 따른다. 요금제가 생기면 `MEMORY_LIMITS`에 더한다 |
 | #7 위치 | `src/agents/evidence.mjs`의 provider | `createEvidenceProvider()`가 동일한 `(uid, expense, room)` 계약으로 위치 요약 반환. 고정 근거는 개발용 시드에서만 사용 | 타임라인 파일 파서는 장치별 형식 확인 후 별도 연동 |
 | #8 송금 | `agents` 문서의 `payout`, `src/payments/toss.mjs`, `public/banks.js` | 받는 계좌 설정 화면(은행 선택 목록), `supertoss://send?…` 링크(실기기 검증 완료, 은행은 실기기로 확인한 표기로 바꿔 넣음), 데스크톱 QR 핸드오프(`src/payments/qr.mjs`), 계좌 칸 암호화 저장(`src/store/encrypted.mjs`), 송금 확인(받는 사람의 "아직 안 들어왔어요", 다시 알림 1일·3일) | iPhone 은행 표기 확인 |
@@ -112,7 +113,7 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | `locationEvidence` | `LocationEvidence` | `locationEvidence/{id}` | 안 됨 |
 | 비서 기록 | `AgentEvent` | `rooms/{roomId}/events/{seq}`, 카운터 `rooms/{roomId}/meta/events` | 방 멤버(기록만, 카운터는 안 됨) |
 
-방 멤버는 `rooms` 문서의 `_memberUids`로 확인해요. 탈퇴로 익명 처리된 멤버는 여기서 빠져요.
+방 멤버는 `rooms` 문서의 `_memberUids`로 확인해요. 탈퇴로 익명 처리된 멤버와 방에서 나간 멤버(#55, `Member.left`)는 여기서 빠져요. 나간 멤버는 `_leftUids`에 남아서, 그 사람이 탈퇴하면 나간 방의 기록도 익명으로 바꿔요.
 
 ### #7 위치 근거의 판단과 승인 (11/3 리뷰 반영)
 
@@ -129,8 +130,11 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 자세한 필드는 `src/domain/types.mjs`의 JSDoc을 보세요.
 
 - **uid:** ASCII 문자열이에요(#2 이후 Firebase uid). 화면에는 `Member.name`만 보여요.
-- **금액·날짜:** 금액은 정수예요(원·엔은 보조 단위가 없어요). 날짜는 `YYYY-MM-DD`, 시각은 `HH:MM`, 서버 일정은 `Asia/Seoul` 기준이에요.
+- **금액·날짜:** 금액은 정수예요(원·엔은 보조 단위가 없어요). 다만 외화 방의 달러·유로 같은 통화는 0.01 단위까지 받아요(`public/currencies.js`의 `decimals`). 날짜는 `YYYY-MM-DD`, 시각은 `HH:MM`, 서버 일정은 `Asia/Seoul` 기준이에요.
 - **`Room`:** 멤버, 환율 표 `fx`(원/100 단위, 결제일별 매매기준율·카드 수수료·사람별 현찰 환율), 합의한 환율 정책, `version`을 가져요. `version`은 지출이 바뀔 때마다 올라가고, 청구서·송금은 이 version에 묶여요.
+  - `fx`가 있으면 외화 방, 없으면 원화 방이에요(#55, `public/core.js`의 `isForeign`). 환율 정책(`policy`·`policyAgreedBy`)은 외화 방에만 의미가 있어요. 원화 방은 `null`·`[]`로 만들고, 예전 원화 방에 남은 값은 읽을 때 무시해요.
+  - `status`: `ready` → `settling`(청구서를 처음 보낸 뒤) → `done`(지금 version의 송금이 모두 `confirmed`, 보낼 돈이 없으면 바로). 끝난 방은 지출·이의·초대를 받지 않아요.
+  - `Member.left`: 방에서 나가거나 내보내진 사람이에요. 칸은 남아 지출·송금 기록이 가리키고, 방은 읽지 못해요. 같은 초대 링크로 다시 들어오면 그 칸이 되살아나요.
 - **`Expense`:** `split`이 `'items'`면 영수증 줄(`items`)마다 `alloc`의 `consumers`가 나눠 내요. `allocMemory`는 배분할 때 쓴 비서 기억의 지문이고, 방 응답의 `allocFresh`는 그 지문이 지금 기억과 같은지예요(같으면 화면이 '다시 나누기'를 막아요).
 - **`AgentSettings`:**
   - `memory`: 정산에 쓰는 기억이에요. 무료 요금제는 5개까지예요. `memoryHidden[roomId]`는 그 방에서 공유를 끈 기억이고, 기본은 모두 공유예요. 모델에 가는 기억은 `sharedMemory()`를 거쳐요.
@@ -148,7 +152,7 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | --- | --- | --- |
 | GET | `/api/config` | 기존 `mode`·`model` 유지, `auth: { firebase, dev, emulator }` 추가. Firebase 값은 공개 웹 앱 설정이며 비밀키를 포함하지 않음. `STORE=firestore`이고 로그인이 켜져 있으면 `realtime: { firestore: true, emulator }`(#3) |
 | GET / POST | `/api/me` | 내 프로필 읽기 / `{ name, color }` 저장 |
-| GET | `/api/rooms` | 내 방 목록 `{ rooms: [{ id, name, dates }] }` |
+| GET | `/api/rooms` | 내 방 목록 `{ rooms: [{ id, name, dates, status }] }`. 나간 방은 빠져요 |
 | GET | `/api/me/deletion` | 삭제 재시도 상태 `{ pending }` |
 | POST | `/api/me/delete` | 검증된 토큰 필요(다시 로그인 창 없음, 화면에서 한 번 확인). 개인정보 삭제·공동 기록 익명화·Firebase 계정 삭제 |
 | GET | `/api/rooms/:id/location` | 내 동의와 위치 요약 목록 |
@@ -156,16 +160,18 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | POST | `/api/rooms/:id/location/revoke` | 내 동의와 요약, 연결된 미확정 중재안 삭제 |
 | POST | `/api/allocate`, `/api/mediate` | 데모 화면용 메뉴 배분·중재 |
 | POST | `/api/dev/seed` | 개발용 데모 방 만들기(`DEV_SEED=1`일 때만) |
-| POST | `/api/rooms` | 방 만들기 `{ name, dates?, policy? }`(로그인 필요, 탈퇴 처리 중이면 401). 만든 사람이 첫 멤버이고(이름·색은 내 프로필 `users/{uid}`), 고른 정책에 동의한 상태, `status: 'ready'` |
+| POST | `/api/rooms` | 방 만들기 `{ name, dates?, currency?, policy? }`(로그인 필요, 탈퇴 처리 중이면 401). 만든 사람이 첫 멤버이고(이름·색은 내 프로필 `users/{uid}`), `status: 'ready'`. `currency`가 외화(`JPY` 등)면 외화 방이고 고른 정책에 동의한 상태, 없거나 `KRW`면 원화 방이라 `policy`를 보내도 쓰지 않아요 |
 | POST | `/api/rooms/:id/invite` | 초대 링크 토큰 만들기·다시 만들기(멤버). 방마다 하나라 다시 만들면 이전 링크는 무효. 7일 뒤 만료. 응답 `{ token, expiresAt }` |
 | GET | `/api/rooms/:id/invite` | 지금 살아 있는 초대 토큰(멤버). 없으면 `{ invite: null }` |
-| GET | `/api/invites/:token` | 참가 화면용 방 정보(이름·기간·정책·멤버 이름만). **신원 없이** 열려요(토큰이 곧 열쇠). 잘못됐거나 만료되면 404 |
-| POST | `/api/invites/:token/join` | 참가하기 `{ agree: true }`(로그인 필요, 탈퇴 처리 중이면 401). 이름·색은 내 프로필을 써요. 이미 멤버면 그대로 `{ roomId }`. 정산 중인 방이면 409 |
-| POST | `/api/rooms/:id/policy` | 환율 정책 바꾸기 `{ policy }`. 바꾸면 `policyAgreedBy`가 바꾼 사람만 남아요. 정산 중이면 409 |
-| POST | `/api/rooms/:id/policy/agree` | 지금 정책에 동의하기(두 번 눌러도 한 번) |
+| GET | `/api/invites/:token` | 참가 화면용 방 정보(이름·기간·멤버 이름, 외화 방이면 통화·정책). **신원 없이** 열려요(토큰이 곧 열쇠). 잘못됐거나 만료되면 404 |
+| POST | `/api/invites/:token/join` | 참가하기 `{ agree: true }`(로그인 필요, 탈퇴 처리 중이면 401). 이름·색은 내 프로필을 써요. 이미 멤버면 그대로 `{ roomId }`. 정산 중이거나 끝난 방이면 409 |
+| POST | `/api/rooms/:id/policy` | 환율 정책 바꾸기 `{ policy }`(외화 방만, 원화 방은 409). 바꾸면 `policyAgreedBy`가 바꾼 사람만 남아요. 정산 중이면 409 |
+| POST | `/api/rooms/:id/policy/agree` | 지금 정책에 동의하기(외화 방만, 원화 방은 409. 두 번 눌러도 한 번) |
+| POST | `/api/rooms/:id/leave` | 이 방에서 나가기(#55). 정산 전에는 내가 낀 지출이 없어야, 정산 중에는 방의 송금이 모두 끝나야 해요. 아니면 409와 남은 일(예: 보낼 돈) |
+| POST | `/api/rooms/:id/members/:uid/remove` | 내보내기(방을 만든 사람만, 아니면 403). 나가기와 같은 조건으로 막아요(409). 응답 `{ room }` |
 | GET | `/api/rooms/:id` | 방, 지출, 청구서, 이의, 송금, 사람별 차액, 그리고 **내가 처리할 일(`actions`)** |
 | GET | `/api/rooms/:id/events?after=n` | 비서 기록 |
-| POST | `/api/rooms/:id/expenses` | 지출 남기기(직접 입력, 또는 확인을 마친 영수증 줄). 영수증 지출은 `receipt: { mimeType, data }`로 줄인 사진을 함께 저장해요. 방 `version`이 올라가요 |
+| POST | `/api/rooms/:id/expenses` | 지출 남기기(직접 입력, 또는 확인을 마친 영수증 줄). 영수증 지출은 `receipt: { mimeType, data }`로 줄인 사진을 함께 저장해요. 방 `version`이 올라가요. 외화 지출이면 그 결제일 환율을 받아 방의 `fx.base`에 넣고, 못 받으면 503이에요. 끝난 방이면 409(고치기·지우기·배분도 같아요) |
 | POST | `/api/rooms/:id/expenses/:eid/delete` | 지출 지우기. 영수증 사진도 함께 지워요 |
 | GET | `/api/rooms/:id/expenses/:eid/receipt` | 저장된 영수증 사진 `{ mimeType, data }`(방 멤버만) |
 | POST | `/api/rooms/:id/expenses/:eid` | 지출 고치기. 같은 검증을 거쳐 덮어써요. 영수증 줄이나 함께한 사람이 바뀌면 메뉴 배분을 지워 다시 나누게 해요 |
@@ -173,7 +179,7 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | POST | `/api/rooms/:id/expenses/:eid/allocate` | 비서들이 공유한 기억으로 영수증 줄 배분. 줄 이유에는 기억 내용이 없어요. 근거 없는 줄은 지출을 남긴 사람에게 물어요. 응답 `{ expense, source, how, latencyMs }`. 이미 나눴고 비서 기억이 그대로면 409이고 아무것도 바꾸지 않아요(버전·확인한 줄 유지) |
 | POST | `/api/rooms/:id/expenses/:eid/lines/:itemId` | 줄 하나를 사람이 확정(`{ consumers }`) |
 
-| POST | `/api/rooms/:id/invoices/send` | 지금 방 `version`으로 청구서 보내기. **전원이 환율 정책에 동의해야 열려요**(아니면 409, #4). 처음 보내면 방이 `status: 'settling'`이 되어 초대·참가·정책 변경을 막아요. 같은 version이면 다시 만들지 않아요(멱등). 각자의 비서가 규칙대로 수락·질문·이의를 정해요 |
+| POST | `/api/rooms/:id/invoices/send` | 지금 방 `version`으로 청구서 보내기. **외화 방은 전원이 환율 정책에 동의해야 열려요**(아니면 409, #4). '정산일 기준율' 방은 처음 보낼 때 그날 환율을 받아 두고, 못 받으면 503이에요. 처음 보내면 방이 `status: 'settling'`이 되어 초대·참가·정책 변경을 막아요. 같은 version이면 다시 만들지 않아요(멱등). 각자의 비서가 규칙대로 수락·질문·이의를 정해요 |
 | POST | `/api/rooms/:id/invoices/:iid/answer` | 주인에게 물은 청구서에 답하기 `{ decision: 'accept'|'dispute', expenseId?, claim? }` |
 | POST | `/api/rooms/:id/disputes` | 이의 제기 `{ expenseId, claim }` |
 | POST | `/api/rooms/:id/disputes/:did/mediate` | 중재 비서에게 맡기기(당사자만) |

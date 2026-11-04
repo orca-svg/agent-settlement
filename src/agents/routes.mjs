@@ -1,24 +1,25 @@
 // 비서끼리 처리 API. 판단과 상태 변경은 orchestrator가 하고, 여기서는 누가 요청했는지만 확인한다.
 // 중재(Gemini)가 일어날 수 있는 요청은 사람마다 10분에 30회로 막는다.
 import { readJson, HttpError } from '../http.mjs';
-import { notAgreed } from '../rooms/policy.mjs';
+import { notAgreed, isDone } from '../rooms/policy.mjs';
+import { withSettleRate } from '../rooms/fx.mjs';
 
-export function registerAgentRoutes(routes, { orchestrator, member, store, overLimit = () => false, authenticate }) {
+export function registerAgentRoutes(routes, { orchestrator, member, store, overLimit = () => false, authenticate, fx, clock = () => new Date() }) {
   const limited = (uid) => {
     if (overLimit(`uid:${uid}`)) throw new HttpError(429, '요청이 너무 많아요. 10분 뒤에 다시 시도해 주세요.');
   };
 
   routes.post('/api/rooms/:id/invoices/send', async ({ req, params }) => {
     const { room, me } = await member(req, params.id);
-    // 정산 시작은 전원이 지금 환율 정책에 동의해야 열린다(#4)
+    // 외화 방의 정산 시작은 전원이 지금 환율 정책에 동의해야 열린다(#4). 원화 방은 정책이 없어 늘 비어 있다(#55)
     const waiting = notAgreed(room);
     if (waiting.length) throw new HttpError(409, `아직 환율 정책에 동의하지 않은 사람이 있어요: ${waiting.map((m) => m.name).join(', ')}`);
     limited(me.uid);
-    const out = await orchestrator.sendInvoices(params.id, me.uid);
-    // 처음 보낸 순간부터 정산 중. 이후 초대·참가·정책 변경을 막는다
-    const fresh = await store.get('rooms', params.id);
-    if (fresh && fresh.status !== 'settling') await store.put('rooms', { ...fresh, status: 'settling' });
-    return out;
+    // '정산일 기준율' 방은 처음 보낼 때 그날 환율을 정해 둔다. 받지 못하면 보내지 않는다(503)
+    const priced = await withSettleRate(fx, room, clock());
+    if (priced !== room) await store.put('rooms', priced);
+    // 처음 보낸 순간부터 정산 중(orchestrator가 표시한다). 이후 초대·참가·정책 변경을 막는다
+    return orchestrator.sendInvoices(params.id, me.uid);
   });
 
   routes.post('/api/rooms/:id/invoices/:iid/answer', async ({ req, params }) => {
@@ -27,7 +28,8 @@ export function registerAgentRoutes(routes, { orchestrator, member, store, overL
   });
 
   routes.post('/api/rooms/:id/disputes', async ({ req, params }) => {
-    const { me } = await member(req, params.id);
+    const { room, me } = await member(req, params.id);
+    if (isDone(room)) throw new HttpError(409, '정산이 끝난 방이라 이의를 낼 수 없어요');
     limited(me.uid);
     const { expenseId, claim } = await readJson(req);
     return orchestrator.raiseDispute(params.id, { by: me.uid, expenseId, claim, evidence: [] });

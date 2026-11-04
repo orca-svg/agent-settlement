@@ -43,7 +43,7 @@ export function createIdentity({ auth = null, dev = false, now = Date.now } = {}
     if (!who || !roomId) return who;
     const room = await store.get('rooms', roomId);
     const member = room?.members.find((m) => m.uid === who.uid);
-    return member && !member.deleted ? { ...who, name: member.name } : null;
+    return member && !member.deleted && !member.left ? { ...who, name: member.name } : null;
   };
 }
 // Keep the team's public identify(req, store, roomId) signature. Only the server

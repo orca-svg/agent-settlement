@@ -5,6 +5,7 @@ import { createApp } from '../src/app.mjs';
 import { MemoryStore } from '../src/store/memory.mjs';
 import { validateExpense } from '../src/expenses/validate.mjs';
 import { DEMO_ROOM } from '../public/data.js';
+import { toKrw } from '../public/core.js';
 
 const room = { ...DEMO_ROOM, members: [{ uid: 'me', name: '나' }, { uid: 'cs', name: '철수' }], fx: { ...DEMO_ROOM.fx, cash: { cs: 927.6 } } };
 const base = { title: '편의점', amount: 12000, currency: 'KRW', payer: 'me', method: 'card', present: ['me', 'cs'], date: '2026-11-01', time: '12:30' };
@@ -23,11 +24,25 @@ test('validateExpense: 정상 입력은 정리된 지출을 돌려준다', () =>
   assert.equal(r.expense.split, 'equal');
 });
 
-test('validateExpense: 외화 현금은 낸 사람의 환전 환율이 있어야 한다', () => {
+test('validateExpense: 외화 현금은 환전 환율이 없어도 받고, 그때는 결제일 기준율로 셈한다(#55)', () => {
   const r = validateExpense({ ...base, currency: 'JPY', amount: 1000, method: 'cash', date: '2026-11-07' }, room);
-  assert.equal(r.ok, false);
-  assert.ok(r.errors.some((e) => e.includes('환전 환율')));
-  assert.equal(validateExpense({ ...base, currency: 'JPY', amount: 1000, method: 'cash', payer: 'cs', date: '2026-11-07' }, room).ok, true);
+  assert.equal(r.ok, true);
+  const { krw, how } = toKrw(r.expense, room, 'actual');
+  assert.equal(krw, Math.round((1000 * room.fx.base['2026-11-07']) / 100));
+  assert.match(how, /결제일.*환전 환율이 없어서/);
+  const cs = validateExpense({ ...base, currency: 'JPY', amount: 1000, method: 'cash', payer: 'cs', date: '2026-11-07' }, room);
+  assert.equal(toKrw(cs.expense, room, 'actual').krw, Math.round((1000 * 927.6) / 100), '환전 환율이 있으면 그 환율');
+});
+
+test('validateExpense: 달러·유로 방은 0.01 단위까지, 엔·원은 정수만 받는다(#55)', () => {
+  const usd = { ...room, fx: { currency: 'USD', base: { '2026-11-07': 134459 }, settle: null, cardFee: 0.014, cash: {} } };
+  const at = { ...base, currency: 'USD', date: '2026-11-07' };
+  assert.equal(validateExpense({ ...at, amount: 12.5 }, usd).ok, true);
+  assert.equal(validateExpense({ ...at, amount: 0.01 }, usd).ok, true);
+  assert.equal(validateExpense({ ...at, amount: 12.345 }, usd).ok, false);
+  assert.equal(validateExpense({ ...at, amount: undefined, items: [{ id: 'a', name: '버거', qty: 2, unit: 7.99, tags: [] }] }, usd).ok, true);
+  assert.equal(validateExpense({ ...base, amount: 12.5 }, usd).ok, false, '같은 방의 원화 지출은 정수');
+  assert.equal(validateExpense({ ...base, currency: 'JPY', amount: 980.5, date: '2026-11-07' }, room).ok, false, '엔은 정수');
 });
 
 test('validateExpense: 줄이 있으면 split은 items, 줄 합이 1 이상이어야 한다', () => {
@@ -44,7 +59,9 @@ const store = new MemoryStore();
 let server;
 let url;
 before(async () => {
-  server = createApp({ store, gemini: null, env: { DEV_SEED: '1' } });
+  // 환율은 바깥(Frankfurter)에 묻지 않고 정해 둔 값으로 답한다. 12/31은 받지 못하는 날
+  const fxRates = { rateOn: async (currency, date) => { if (date === '2026-12-31') throw new Error('down'); return 850.25; } };
+  server = createApp({ store, gemini: null, env: { DEV_SEED: '1' }, fxRates });
   await new Promise((r) => server.listen(0, r));
   url = `http://localhost:${server.address().port}`;
 });
@@ -61,11 +78,22 @@ test('멤버 아닌 payer → 400', async () => {
   assert.match((await res.json()).error, /낸 사람/);
 });
 
-test('환율 없는 날짜의 외화 → 400 이 날짜의 환율이 없어요', async () => {
+test('환율 표에 없는 날짜의 외화는 그날 환율을 받아 방 표에 넣고 남긴다(#55)', async () => {
   const roomId = await seed();
   const res = await postExpense(roomId, { ...base, currency: 'JPY', amount: 1000, date: '2026-12-25', present: ['me', 'cs'] });
-  assert.equal(res.status, 400);
-  assert.match((await res.json()).error, /이 날짜의 환율이 없어요/);
+  assert.equal(res.status, 201);
+  const room = await store.get('rooms', roomId);
+  assert.equal(room.fx.base['2026-12-25'], 850.25);
+  assert.equal(room.fx.base['2026-11-07'], 912.4, '이미 있던 날짜는 그대로');
+});
+
+test('환율을 받지 못하면 503이고 지출도 방도 그대로다', async () => {
+  const roomId = await seed();
+  const before = await store.get('rooms', roomId);
+  const res = await postExpense(roomId, { ...base, currency: 'JPY', amount: 1000, date: '2026-12-31', present: ['me', 'cs'] });
+  assert.equal(res.status, 503);
+  assert.match((await res.json()).error, /환율/);
+  assert.deepEqual(await store.get('rooms', roomId), before);
 });
 
 test('정상 → 201이고 room.version 1 증가, 이벤트 1개', async () => {

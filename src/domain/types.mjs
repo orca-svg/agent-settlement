@@ -12,15 +12,19 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
 
 /**
  * uid는 ASCII 문자열이다(#2 이후에는 Firebase uid). 표시 이름은 Member.name으로만 보여 준다.
- * @typedef {{ uid: string, name: string, color?: string, deleted?: boolean }} Member
+ * deleted는 탈퇴한 사람(uid가 익명으로 바뀐다), left는 방에서 나가거나 내보내진 사람이다(#55). 둘 다 방을 읽지 못하고 기록에만 남는다.
+ * 지금 방에 있는 사람은 public/core.js의 active로 고른다.
+ * @typedef {{ uid: string, name: string, color?: string, deleted?: boolean, left?: boolean }} Member
  */
 
 /**
  * 환율 단위는 원/100(외화 100단위당 원). base는 결제일별 매매기준율, cash는 사람별 환전 평균 환율.
+ * 실제 외화 방(#55)은 base를 지출을 남길 때, settle을 청구서를 처음 보낼 때 유럽중앙은행 기준 환율로 채운다(src/rooms/fx.mjs).
+ * settle은 그 전까지 null이고, cash가 없는 사람의 현금 결제는 결제일 기준율로 셈한다.
  * @typedef {{
  *   currency: string,
  *   base: Record<string, number>,
- *   settle: { date: string, rate: number },
+ *   settle: { date: string, rate: number } | null,
  *   cardFee: number,
  *   cash: Record<string, number>,
  * }} Fx
@@ -30,11 +34,14 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
  * @typedef {{
  *   id: string, name: string, dates?: string, members: Member[],
  *   currency: 'KRW', fx: Fx | null,
- *   policy: 'actual'|'payday'|'settle', policyAgreedBy: string[],
- *   status?: 'ready'|'settling', version: number, createdBy: string,
+ *   policy: 'actual'|'payday'|'settle'|null, policyAgreedBy: string[],
+ *   status?: 'ready'|'settling'|'done', doneAt?: string, version: number, createdBy: string,
  * }} Room
- * policyAgreedBy: 지금 policy에 동의한 uid. 정책을 바꾸면 바꾼 사람만 남는다. 전원이 있어야 청구서를 보낼 수 있다(#4).
- * status: 청구서를 처음 보내면 'settling'. 그 뒤로는 초대·참가·정책 변경을 막는다. 없으면 'ready'로 본다.
+ * currency는 정산(송금) 통화라 늘 'KRW'다. fx가 있으면 외화 방(fx.currency로 쓴 돈을 원화로 바꾼다), 없으면 원화 방이다(#55).
+ * policy·policyAgreedBy: 외화 방에만 의미가 있다. 원화 방은 null·[]로 만들고, 예전 원화 방에 남은 값은 읽을 때 무시한다(public/core.js의 isForeign).
+ * policyAgreedBy: 지금 policy에 동의한 uid. 정책을 바꾸면 바꾼 사람만 남는다. 외화 방은 전원이 있어야 청구서를 보낼 수 있다(#4).
+ * status: 청구서를 처음 보내면 'settling', 지금 묶음의 송금이 모두 '받았어요'로 끝나면 'done'(#55). 정산을 시작하면 초대·참가·정책 변경을,
+ * 끝나면 지출·이의까지 막는다. 없으면 'ready'로 본다. createdBy(방을 만든 사람)만 다른 멤버를 내보낼 수 있다.
  */
 
 /**
