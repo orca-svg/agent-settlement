@@ -806,7 +806,7 @@ function transfersSection() {
   const live = transfers.filter((t) => t.status !== 'superseded');
   const list = live.length ? live : settle(ledger).map((t) => ({ ...t, status: 'preview' }));
   const me = currentUid();
-  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: isManual(t) ? '직접 보내기' : new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: '송금 앱 열림', sent: !t.notReceivedAt ? '보냈어요' : t.to === me ? '확인을 부탁했어요' : '아직 못 받았대요', confirmed: '받았어요' })[t.status] ?? t.status;
+  const label = (t) => ({ preview: '청구서 보내기 전', scheduled: isManual(t) ? '편할 때 보내기' : new Date(t.remindAt) > Date.now() ? `${whenText(t.remindAt)} 예약` : '곧 알려 드려요', due: '보낼 때가 됐어요', opened: '송금 앱 열림', sent: !t.notReceivedAt ? '보냈어요' : t.to === me ? '확인을 부탁했어요' : '아직 못 받았대요', confirmed: '받았어요' })[t.status] ?? t.status;
   const rows = list.map((t) => {
     const mine = t.id && (t.from === me || t.to === me);
     const tag = mine ? `button type="button" class="row" data-action="open-transfer" data-id="${esc(t.id)}"` : 'div class="row"';
@@ -940,7 +940,7 @@ function renderChannel() {
 const enc = encodeURIComponent;
 const byId = (col, id) => state.data?.[col]?.find((x) => x.id === id);
 const whenText = (iso) => `${dayLabel(new Date(new Date(iso).getTime() + 9 * 3600_000).toISOString().slice(0, 10))} 09:00`;
-// 직접 보내기 송금. remindAt이 없는 예전 송금도 직접 보내기다(그때는 알리지 않았다)
+// 편할 때 보내기 송금. remindAt이 없는 예전 송금도 편할 때 보내기다(그때는 알리지 않았다)
 const isManual = (t) => Boolean(t.manual) || !t.remindAt;
 
 // 할 일마다 누를 버튼. 다음 할 일 카드와 좁은 화면의 기록 패널이 함께 쓴다
@@ -1018,11 +1018,11 @@ function settlingCard(addButtons) {
       ${blocked ? blockedHtml(blocked, state.announceBlocked) : ''}</section>`;
   }
   const live = transfers.filter((t) => t.version === room.version);
-  // 직접 보내기로 정한 송금은 바로 알리지 않는다. 대신 방을 열었을 때 내 차례임을 보여 준다
+  // 편할 때 보내기로 정한 송금은 바로 알리지 않는다. 대신 방을 열었을 때 내 차례임을 보여 준다
   const manual = live.find((t) => t.from === state.data.me.uid && t.status === 'scheduled' && isManual(t));
   if (manual) {
-    return `<section class="next"><p class="eyebrow">직접 보내기</p><h2>${esc(nameOf(manual.to))}에게 ${won(manual.amount)}을 보내면 돼요</h2>
-      <p>직접 보내기로 정해서 비서가 바로 알리지 않아요. 편할 때 보내 주세요.${manual.remindAt ? ` ${esc(whenText(manual.remindAt))}까지 받았다는 확인이 없으면 한 번 알려 드려요.` : ''}</p><div class="actions"><button class="btn" data-action="open-transfer" data-id="${esc(manual.id)}">보내러 가기</button>${addButtons}</div></section>`;
+    return `<section class="next"><p class="eyebrow">편할 때 보내기</p><h2>${esc(nameOf(manual.to))}에게 ${won(manual.amount)}을 보내면 돼요</h2>
+      <p>편할 때 보내기로 정해서 비서가 바로 알리지 않아요. 준비되면 보내 주세요.${manual.remindAt ? ` ${esc(whenText(manual.remindAt))}까지 받았다는 확인이 없으면 한 번 알려 드려요.` : ''}</p><div class="actions"><button class="btn" data-action="open-transfer" data-id="${esc(manual.id)}">보내러 가기</button>${addButtons}</div></section>`;
   }
   // 서버가 모든 송금이 '받았어요'로 끝나면 방을 완료로 바꾼다(#55). 끝난 방은 기록으로만 남아 지출을 더 받지 않는다
   if (room.status === 'done') {
@@ -1350,7 +1350,7 @@ function transferSheet() {
       ${t.link && !isComputer() ? `<button class="btn secondary" data-action="reopen-link" data-id="${esc(t.id)}">토스 다시 열기</button>` : ''}
       <button class="btn plain" data-action="close-sheet">아직이에요</button></div>${t.link && isComputer() ? qrBlock(t, { sentButton: false }) : ''}`;
   } else if (t.to === me && isManual(t) && ['scheduled', 'due', 'opened'].includes(t.status)) {
-    actions = `<p class="group-note">${esc(subj(nameOf(t.from)))} 직접 보내기로 했어요. 돈이 들어왔으면 알려 주세요. 그러면 비서가 ${esc(nameOf(t.from))}에게 따로 알리지 않아요.</p>
+    actions = `<p class="group-note">${esc(subj(nameOf(t.from)))} 편할 때 보내기로 했어요. 돈이 들어왔으면 알려 주세요. 그러면 비서가 ${esc(nameOf(t.from))}에게 따로 알리지 않아요.</p>
       <button class="btn" style="width:100%;margin-top:10px" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>`;
   } else if (t.to === me && t.status === 'sent' && !t.notReceivedAt) {
     actions = `<div style="display:grid;gap:8px"><button class="btn" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>
@@ -1360,7 +1360,7 @@ function transferSheet() {
     actions = `<p class="group-note">${esc(nameOf(t.from))}에게 다시 확인해 달라고 했어요. 그 사이 들어왔다면 알려 주세요.</p>
       <button class="btn" style="width:100%;margin-top:10px" data-action="confirm-receipt" data-id="${esc(t.id)}">받았어요</button>`;
   } else {
-    actions = `<p class="group-note">${{ scheduled: !isManual(t) ? `${whenText(t.remindAt)}에 ${esc(nameOf(t.from))}에게 알려요.` : `${esc(subj(nameOf(t.from)))} 직접 보내기로 했어요.`, due: `${esc(subj(nameOf(t.from)))} 보낼 차례예요.`, opened: `${esc(subj(nameOf(t.from)))} 송금 앱을 열었어요.`, sent: t.notReceivedAt ? `${esc(subj(toName))} 아직 못 받았대요. ${esc(subj(nameOf(t.from)))} 확인하고 있어요.` : `${esc(subj(nameOf(t.from)))} 보냈어요. 받는 사람의 확인을 기다려요.`, confirmed: '받았다고 확인했어요. 이 송금은 끝났어요.', superseded: '지출이 바뀌어 대체된 송금이에요.' }[t.status] ?? ''}</p>`;
+    actions = `<p class="group-note">${{ scheduled: !isManual(t) ? `${whenText(t.remindAt)}에 ${esc(nameOf(t.from))}에게 알려요.` : `${esc(subj(nameOf(t.from)))} 편할 때 보내기로 했어요.`, due: `${esc(subj(nameOf(t.from)))} 보낼 차례예요.`, opened: `${esc(subj(nameOf(t.from)))} 송금 앱을 열었어요.`, sent: t.notReceivedAt ? `${esc(subj(toName))} 아직 못 받았대요. ${esc(subj(nameOf(t.from)))} 확인하고 있어요.` : `${esc(subj(nameOf(t.from)))} 보냈어요. 받는 사람의 확인을 기다려요.`, confirmed: '받았다고 확인했어요. 이 송금은 끝났어요.', superseded: '지출이 바뀌어 대체된 송금이에요.' }[t.status] ?? ''}</p>`;
   }
   return {
     title: '송금',

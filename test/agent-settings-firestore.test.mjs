@@ -30,7 +30,7 @@ test('Firestore: 규칙·기억·방별 공유·변경 기록이 저장되고 �
   assert.deepEqual((await settings.get('u1')).memory, []);
 });
 
-test('Firestore: 직접 보내기 송금은 3일 전에는 알리지 않고, 계좌를 바꾸면 두 방의 대기 송금이 바뀌며 저장본은 잠겨 있다', { skip }, async () => {
+test('Firestore: 편할 때 보내기 송금은 3일 전에는 알리지 않고, 계좌를 바꾸면 두 방의 대기 송금이 바뀌며 저장본은 잠겨 있다', { skip }, async () => {
   const { emulatorStore } = await load();
   const inner = emulatorStore();
   const store = encryptedStore(inner, Buffer.alloc(32, 6));
