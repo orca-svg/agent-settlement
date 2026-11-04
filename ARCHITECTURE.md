@@ -116,6 +116,8 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 
 ### #7 위치 근거의 판단과 승인 (11/3 리뷰 반영)
 
+지출의 주문 시각은 각각 결제일 또는 전날의 절대 시각으로 변환한 뒤 첫 주문을 선택해요. 자정 전후 주문을 문자열 순서로 정렬하지 않아요. 위치 요약은 요약마다 붙인 뒤 7일 보관해요(`LocationEvidence.expiresAt`). 나중에 붙인 요약이 먼저 붙인 요약의 기한을 늘리거나 줄이지 않아요. 동의(`LocationConsent`)는 그 방에 가장 늦게 붙인 요약이 끝날 때까지 이어지고, 기한이 지난 요약은 동의가 남아 있어도 하나씩 지우며 그 요약을 쓴 이의만 다시 열어요.
+
 위치 근거는 이의를 낼 때 사용자가 고른 Google 지도 타임라인 파일에서 브라우저가 찾은 시각만 받아요(`public/timeline.js`). `LocationEvidence`는 `leftAt`·`nextAt`·`nextHome` 또는 `stayedUntil`과 서버가 다시 만든 `summary`만 가져요. `Evidence`로는 떠난 시각이면 `left_at`(`time`), 결제까지 머물렀으면 `text`(`stayedUntil`)로, 늘 `requiresHumanApproval=true`와 함께 넘겨요. 파일·좌표·장소 이름은 서버로 보내지 않아요. 예전 체크인·체크아웃 기록(`source` 없음)은 근거로 쓰지 않아요.
 
 중재 모델 출력의 줄별 `evidenceConflict`가 true인 경우만 서버가 그 줄의 confidence를 0.49 이하로 제한해요. 다른 줄의 확신도는 그대로예요. 모델의 의미 판단은 완전한 충돌 검출을 보장하지 않아요. 규칙 fallback에서는 충돌을 추측하지 않아요. 타임라인 요약은 본인이 낸 자료라 confidence와 별도로 `confirmed=false`이며 자동 동의를 하지 않아요. 두 당사자의 명시적 동의 후에만 배분을 확정해요.

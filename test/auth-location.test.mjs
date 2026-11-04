@@ -103,6 +103,31 @@ const attach = (request, exp, extra = {}, uid = 'me') => {
 };
 const stay = { leftAt: undefined, nextAt: undefined, nextHome: undefined };
 
+// 요약마다 붙인 뒤 7일이다(PRIVACY.md '붙인 뒤 7일'). 나중에 붙인 요약이 먼저 붙인 요약의 기한을 늘리지도, 줄이지도 않는다
+test('each timeline summary is kept 7 days from its own attachment; a later one neither extends nor shortens an earlier one', async t => {
+  const { request, exp, store, advance } = await setup(t);
+  const records = async () => (await (await request('/api/rooms/room-one/location')).json()).records;
+  assert.equal((await attach(request, exp)).status, 200);
+  assert.equal((await request('/api/rooms/room-one/disputes', { body: { expenseId: exp.id, claim: '첫 지출을 다시 봐 주세요' } })).status, 200);
+  advance(6 * 86400000);
+  const second = { ...exp, id: `${exp.id}-second` };
+  await store.put('expenses', second);
+  assert.equal((await attach(request, second)).status, 200);
+  assert.equal((await request('/api/rooms/room-one/disputes', { body: { expenseId: second.id, claim: '둘째 지출도 봐 주세요' } })).status, 200);
+
+  advance(86400000 + 1000); // 첫 요약을 붙인 지 7일 + 1초
+  assert.deepEqual((await records()).map(r => r.expenseId), [second.id], '첫 요약만 지워지고 6일째 붙인 요약은 남는다');
+  const disputeOf = async id => (await store.list('disputes')).find(d => d.expenseId === id);
+  assert.deepEqual((await disputeOf(exp.id)).evidence, [], '지운 요약을 쓰던 이의에서만 근거가 빠진다');
+  assert.equal((await disputeOf(second.id)).evidence.length, 1);
+  assert.equal((await store.listEvents('room-one')).at(-1).kind, 'location_removed');
+
+  advance(6 * 86400000); // 둘째 요약을 붙인 지 7일 + 1초
+  assert.deepEqual(await records(), []);
+  assert.deepEqual(await store.list('locationEvidence'), []);
+  assert.deepEqual(await store.list('locationConsents'), [], '마지막 요약이 끝나면 동의도 끝난다');
+});
+
 test('timeline evidence needs consent, takes only times inside the expense window, once per expense, and expires', async t => {
   const { request, exp, advance, store } = await setup(t);
   const { from, until } = expenseWindow(exp);
