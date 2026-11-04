@@ -187,7 +187,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   registerRoomRoutes(routes, { ...ctx, member, authenticate });
   registerExpenseRoutes(routes, { ...ctx, member });
   const orchestrator = createOrchestrator({ store, gemini, clock, evidenceFor, counterFor: dev ? counterFor : async () => [] });
-  registerAgentRoutes(routes, { orchestrator, member, store, overLimit });
+  registerAgentRoutes(routes, { orchestrator, member, store, overLimit, authenticate });
   const agentSettings = createAgentSettings({ store, clock });
   registerAgentSettingsRoutes(routes, { settings: agentSettings, authenticate, member });
 
@@ -202,7 +202,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   // 위치 화면(GET …/location)은 읽다가 끝난 동의를 지우므로 쓰기처럼 줄에 선다
   const WRITE_FREE = /\/receipts\/extract$/; // POST지만 저장하지 않는다(사진 → 초안)
   // 방 주소지만 사람마다 하나인 비서 문서를 고치고, 계좌는 다른 방의 송금까지 고치므로 모든 방의 줄에 선다(#5)
-  const ACROSS_ROOMS = /^\/api\/rooms\/[^/]+\/(payout|agent\/shared|agent\/rule)$/;
+  const ACROSS_ROOMS = /^\/api\/rooms\/[^/]+\/(payout|agent\/shared|agent\/rules)$/;
   async function withStateLock(req, url, params, invoke) {
     if (!/^\/api\/(rooms|me|dev|cron|invites)(\/|$)/.test(url.pathname)) return invoke(); // 참가하기(/api/invites/:token/join)도 방 멤버를 고친다(#4)
     if ((req.method === 'GET' && !url.pathname.endsWith('/location')) || WRITE_FREE.test(url.pathname)) return invoke();

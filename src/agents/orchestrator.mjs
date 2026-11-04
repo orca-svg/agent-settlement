@@ -310,7 +310,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     // 은행은 목록의 이름으로 통일해 저장한다('국민은행' → 'KB국민은행'). 목록에 없으면 쓴 그대로
     const payout = { bank: (findBank(bank)?.label ?? String(bank).trim()).slice(0, 30), accountNo: String(accountNo).replace(/[^\d-]/g, '').slice(0, 30), holder: String(holder ?? '').trim().slice(0, 30) };
     await store.put('agents', { ...agent, id: actorUid, uid: actorUid, payout });
-    const rooms = new Set([roomId]);
+    const rooms = new Set(roomId ? [roomId] : []); // 내 계정에서 정하면(roomId 없음) 대기 중 송금이 있는 방에만 알린다
     for (const t of (await store.list('transfers', { to: actorUid })).filter((x) => ['scheduled', 'due', 'opened'].includes(x.status))) {
       await store.put('transfers', { ...t, ...paymentOf(payout, t.amount) });
       rooms.add(t.roomId);

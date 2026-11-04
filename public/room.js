@@ -7,12 +7,12 @@ import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
 import { initAuth, authOptions, onSessionChange, login } from './auth.js';
-import { BANKS } from './banks.js';
 import { createAgentPanel, personChipHtml } from './agent-panel.js';
 import { notifies } from './agent-rules.js';
 import { readVisits, departure, timelineSummary, expenseWindow, kstTime, keepForSettlement } from './timeline.js';
 import { createRoomHtml, joinHtml, setupHtml, notAgreed, inviteUrl, datesLabel } from './room-setup.js';
 import { pickDay, presetRange, nextFocus, shiftMonth, todayIso } from './date-range.js';
+import { payoutFieldsHtml, payoutDraftFrom } from './payout-form.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
@@ -1263,20 +1263,10 @@ function transferSheet() {
 }
 
 function payoutSheet() {
-  const p = state.payoutDraft;
-  // 은행은 목록에서 고른다(#8). 토스는 모르는 은행 이름이면 에러를 내서, 실기기로 확인한 은행만 목록에 둔다(public/banks.js).
-  // 목록에 없는 은행만 직접 쓴다
-  const options = BANKS.map((b) => `<option value="${esc(b.label)}"${!p.other && p.bank === b.label ? ' selected' : ''}>${esc(b.label)}</option>`).join('');
   return {
     title: '받을 계좌',
-    html: `<p class="how">계좌번호는 나에게 돈을 보낼 사람에게만 보여요. 받을 송금이 있으면 바로 토스 링크가 채워져요.</p>
-      <section class="group"><div class="list">
-        <label class="row field"><span class="grow">은행</span><select data-bank-pick>${options}<option value=""${p.other ? ' selected' : ''}>목록에 없어요</option></select></label>
-        ${p.other ? `<label class="row field"><span class="grow">은행 이름</span><input data-pf="bank" value="${esc(p.bank)}" maxlength="30" placeholder="예: 경남은행"></label>` : ''}
-        <label class="row field"><span class="grow">계좌번호</span><input data-pf="accountNo" value="${esc(p.accountNo)}" inputmode="numeric" maxlength="30" placeholder="${p.last4 ? `지금은 •••• ${esc(p.last4)}. 새 번호 전체 입력` : '숫자만 또는 - 포함'}"></label>
-        <label class="row field"><span class="grow">예금주</span><input data-pf="holder" value="${esc(p.holder)}" maxlength="30"></label>
-      </div></section>
-      ${p.other ? '<p class="group-note">목록에 없는 은행은 토스가 알아보지 못할 수 있어요. 그때는 보내는 사람에게 계좌번호를 복사해 보내도록 안내해요.</p>' : ''}${formError()}
+    html: `<p class="how">계좌번호는 나에게 돈을 보낼 사람에게만 보여요. 받을 송금이 있으면 바로 토스 링크가 채워져요. 계좌는 모든 방에 같아요.</p>
+      <section class="group">${payoutFieldsHtml(state.payoutDraft)}</section>${formError()}
       <button class="btn" style="width:100%" data-action="save-payout">저장</button>`,
   };
 }
@@ -1298,10 +1288,7 @@ const AGENT_SHEETS = { invoice: invoiceSheet, dispute: disputeSheet, transfer: t
 
 // 방의 할 일에서 열면 비어 있고, 내 비서 설정에서 열면 저장된 은행·예금주를 채운다. 계좌번호는 끝 4자리만 알아서 새로 입력한다
 function openPayoutSheet(saved = null) {
-  const known = saved && BANKS.some((b) => b.label === saved.bank);
-  state.payoutDraft = saved
-    ? { bank: saved.bank, accountNo: '', holder: saved.holder, other: !known, last4: saved.last4 }
-    : { bank: BANKS[0].label, accountNo: '', holder: state.data.me.name, other: false };
+  state.payoutDraft = payoutDraftFrom(saved, state.data.me.name);
   state.payoutFromAgent = Boolean(saved) || state.sheet === 'agent';
   openAgentSheet('payout');
 }

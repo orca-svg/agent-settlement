@@ -133,7 +133,7 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 - **`AgentSettings`:**
   - `memory`: 정산에 쓰는 기억이에요. 무료 요금제는 5개까지예요. `memoryHidden[roomId]`는 그 방에서 공유를 끈 기억이고, 기본은 모두 공유예요. 모델에 가는 기억은 `sharedMemory()`를 거쳐요.
   - 공개 범위: 정산에 쓰는 것과 남에게 보이는 것은 달라요. 기억 내용과 자동 수락 한도 금액은 본인만 봐요. 배분 이유는 모델·규칙이 쓴 글 대신 누구 몫인지만으로 코드가 다시 쓰고(`publicReason`), 청구서 이유와 비서 기록에는 한도 금액을 싣지 않아요. 기억은 이의 중재에서만 근거로 인용될 수 있어요.
-  - `rules`: 자동 수락 한도, 보낼 시기(`'now'`, `{ payday: 25 }`, `'manual'`), 이의 처리, 알림 수준(`'actions'`, `'all'`)이에요. 사람마다 하나이고 모든 방에 적용돼요. `rulesOff[roomId]`에 적은 규칙(자동 수락 한도·보낼 시기·이의 처리)만 그 방에서 기본값으로 돌아가요(`rulesIn()`). `'manual'` 송금은 `manual: true`이고, 3일 뒤 09:00 KST까지 받는 사람이 받았다고 하지 않았을 때만 보내는 사람에게 한 번 알려요. 값이 망가졌으면 기본값으로 읽어서 한도는 0이 돼요. 즉 모든 청구서를 물어요.
+  - `rules`: 자동 수락 한도, 보낼 시기(`'now'`, `{ payday: 25 }`, `'manual'`), 이의 처리, 알림 수준(`'actions'`, `'all'`)이에요. 사람마다 하나인 기본 설정(내 계정의 '내 비서 기본 설정')이고 모든 방에 쓰여요. `roomRules[roomId]`에 그 방에서만 정한 값(자동 수락 한도·보낼 시기·이의 처리)이 있으면 그 칸만 덮어요(`rulesIn()`). 예전 `rulesOff`는 읽을 때 그 방 전용 안전값으로 옮겨요. `'manual'` 송금은 `manual: true`이고, 3일 뒤 09:00 KST까지 받는 사람이 받았다고 하지 않았을 때만 보내는 사람에게 한 번 알려요. 값이 망가졌으면 기본값으로 읽어서 한도는 0이 돼요. 즉 모든 청구서를 물어요.
   - `ruleHistory`: 규칙 변경 기록(최근 50개)이에요. `onboardedAt`: 처음 설정을 마친 시각이에요.
   - `payout`: 받는 계좌예요. 사람마다 하나이고, 바꾸면 그 사람이 받을 모든 방의 대기 중 송금 링크가 함께 바뀌어요.
 - **`AgentEvent.action`:** 사람이 할 일이에요. `type`은 `confirm_line`, `answer_invoice`, `agree_dispute`, `approve_transfer`, `confirm_receipt`, `set_payout` 중 하나이고, `for`가 그 일을 할 사람이에요.
@@ -178,11 +178,12 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | POST | `/api/rooms/:id/disputes/:did/agree` | 중재안에 동의. 양쪽이 동의하면 지출을 다시 나누고 version을 올려 청구서를 다시 보내요 |
 | POST | `/api/rooms/:id/disputes/:did/reject` | 중재안 거부 `{ reason? }`(한 줄, 100자까지). 이의가 끝나고(이의를 낸 사람이 거부하면 `withdrawn`, 지출을 낸 사람이 거부하면 `dismissed`) 지출은 지금 배분 그대로 둔 채 정산이 이어져요. 당사자만(아니면 403), 중재안이 있을 때만(아니면 409). 같은 사람이 다시 보내면 처음 결과를 돌려줘요 |
 | POST | `/api/rooms/:id/payout` | 받을 계좌 `{ bank, accountNo, holder }`. 내가 받을 모든 방의 대기 중 송금에 토스 링크를 채워요. 여러 방을 고치므로 모든 방의 줄에 서요(`src/state-locks.mjs`) |
+| POST | `/api/me/payout` | 내 계정의 비서 기본 설정에서 정하는 받을 계좌 `{ bank, accountNo, holder }`. 방 없이 정하고, 대기 중 송금이 있는 방에만 알려요. 모든 방의 줄에 서요 |
 | GET | `/api/me/agent` | 내 비서 설정 전체. 계좌번호는 끝 4자리(`payout.last4`)만 내려가요. 방 응답의 `myAgent`는 계좌 유무만 있는 요약이에요. 방 응답의 `agentReady`는 비서 설정을 마친 멤버 uid 목록이고, 화면은 이름 옆 로봇 표시로만 보여 줘요(규칙·기억은 담지 않아요) |
 | POST | `/api/me/agent/rules` | 규칙 일부 `{ autoAccept?, sendWhen?, onDispute?, notify? }`. 바뀐 칸만 `ruleHistory`에 남아요. 다음 청구서부터 적용되고, 이미 만들어진 청구서·송금은 그대로예요 |
 | POST | `/api/me/agent/onboarding` | 처음 설정 마치기 `{ rules? }` |
 | POST | `/api/me/agent/memory` · `memory/edit` · `memory/delete` | 기억 더하기 `{ text }`, 고치기 `{ from, to }`, 지우기 `{ text }`. 한도를 넘으면 409 |
-| POST | `/api/rooms/:id/agent/rule` | 이 방에 내 비서 규칙 하나 적용·빼기 `{ field: 'autoAccept'|'sendWhen'|'onDispute', on }`(방 멤버만). 뺀 규칙은 이 방에서만 기본값(모두 묻기·바로 보내기·나에게 묻기)으로 동작해요. 방 응답의 `myAgent`는 이 방에서 실제로 쓰는 값과 뺀 규칙 목록(`off`)이에요. 모든 방의 줄에 서요 |
+| POST | `/api/rooms/:id/agent/rules` | 이 방에서만 쓸 규칙 `{ autoAccept?, sendWhen?, onDispute? }`(방 멤버만). 값을 주면 그 칸을 정하고, `null`이면 비워 기본 설정을 따라요. 알림 수준은 방마다 나누지 않아요. 방 응답의 `myAgent`는 이 방에서 실제로 쓰는 값, 이 방에서 정한 칸(`custom`), 기본 설정(`defaults`)이에요. 사람마다 하나인 비서 문서를 고치므로 모든 방의 줄에 서요 |
 | POST | `/api/rooms/:id/agent/shared` | 이 방에 기억 하나 공유·끄기 `{ text, shared }`(방 멤버만). 공유해도 방 사람에게 기억 내용이 보이지는 않아요. 사람마다 하나인 비서 문서를 고치므로 모든 방의 줄에 서요 |
 | POST | `/api/rooms/:id/transfers/:tid/approve` · `sent` · `confirm` · `not-received` | 송금 화면 열기·보냈어요(보내는 사람), 받았어요·아직 안 들어왔어요(받는 사람). `not-received`는 `sent`일 때만 되고, 상태는 `sent` 그대로 두고 `notReceivedAt`만 붙여 보내는 사람에게 다시 물어요. 보냈다고 한 돈이라 지출이 바뀌어도 대체되지 않고, 받는 사람이 계좌를 바꿔도 링크가 바뀌지 않아요. 보내는 사람이 송금 내역을 보고 `sent`를 다시 부르면 표시를 내리고 `recheckedAt`을 남겨요(지출이 바뀐 뒤여도 돼요). 그 사이 돈이 들어왔으면 `confirm`도 돼요 |
 | POST | `/api/rooms/:id/transfers/:tid/qr` | 컴퓨터 송금 화면에 띄울 QR 토큰 받기(보내는 사람만). 응답 `{ qrToken, expiresAt }`, 15분 뒤 만료. 받을 계좌가 없거나 이미 보낸 송금이면 409(받는 사람이 안 들어왔다고 한 송금은 다시 보낼 수 있게 만들어 줘요) |

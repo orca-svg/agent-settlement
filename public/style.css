@@ -1106,7 +1106,7 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
 .nav-lead { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .nav-back { font-size: 1rem; margin-left: -4px; flex: none; }
 
-/* 내 비서: 규칙마다 '이 방에 적용'. 끈 규칙의 입력은 흐리게 두되(모든 방 기본값은 여전히 고칠 수 있다) 무엇으로 하는지 글로 알린다 */
-.rule-scope { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
-.rule-scope .group-note { margin: 0; padding: 0; }
-.group.is-off .list, .group.is-off .seg, .group.is-off .agent-presets { opacity: 0.5; }
+/* 방의 내 비서: 규칙마다 [기본 설정 | 이 방에서만]. 기본 설정을 따르면 그 값을 글로만, 이 방에서만이면 고치는 칸을 그 아래에 둔다 */
+.room-rule-body { margin-top: 10px; }
+.room-rule-body > .group-note:only-child { padding-top: 0; }
+.group-note a { color: var(--tint); text-decoration: none; font-weight: 500; }

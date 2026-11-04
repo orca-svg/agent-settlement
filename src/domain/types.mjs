@@ -60,12 +60,12 @@ export const ACTION_TYPES = ['confirm_line', 'answer_invoice', 'agree_dispute', 
  * 비서 설정. #5가 화면과 저장을, #8이 payout 화면을 만든다. 읽을 때는 src/agents/settings.mjs의 normalizeSettings를 거친다.
  * memory: 정산에 쓰는 기억. memoryHidden: 방마다 공유에서 뺀 기억(기본은 모두 공유). 모델에는 sharedMemory()를 거쳐서만 간다.
  * 기억 내용과 autoAccept 금액은 본인만 본다. 배분 이유·청구서·비서 기록에는 싣지 않고, 기억은 이의 중재에서만 근거로 인용될 수 있다.
- * rules는 모든 방에 적용되고, rulesOff[roomId]의 규칙만 그 방에서 기본값으로 돌아간다(src/agents/settings.mjs의 rulesIn).
+ * rules는 내 계정의 기본 설정으로 모든 방에 쓰이고, roomRules[roomId]에 그 방에서만 정한 칸이 있으면 그 칸만 덮는다(src/agents/settings.mjs의 rulesIn).
  * sendWhen: 'now' 바로, { payday } 매달 그날, 'manual' 직접(바로 알리지 않고 3일 뒤 09:00 KST까지 받았다는 확인이 없을 때만 알림, Transfer.manual).
  * notify: 종 배지에 올릴 기록. 'actions' 내가 확인할 일만, 'all' 모든 진행 상황. 기록 자체는 어느 쪽이든 모두 남는다.
  * ruleHistory: 규칙 변경 기록(오래된 것부터, 최근 50개). onboardedAt: 처음 설정을 마친 시각, 전이면 null.
  * @typedef {{
- *   uid: string, plan: 'free', memory: string[], memoryHidden: Record<string, string[]>, rulesOff: Record<string, ('autoAccept'|'sendWhen'|'onDispute')[]>,
+ *   uid: string, plan: 'free', memory: string[], memoryHidden: Record<string, string[]>, roomRules: Record<string, { autoAccept?: number, sendWhen?: 'now'|'manual'|{ payday: number }, onDispute?: 'ask'|'evidence'|'mediator' }>,
  *   rules: { autoAccept: number, sendWhen: 'now'|'manual'|{ payday: number }, onDispute: 'ask'|'evidence'|'mediator', notify: 'actions'|'all' },
  *   ruleHistory: { at: string, field: string, from: unknown, to: unknown, text: string }[],
  *   onboardedAt: string | null,

@@ -2,9 +2,12 @@
 // 프로필 화면은 왼쪽 위 '내 방'(바꾼 것은 버림)과 오른쪽 위 '저장'(저장하고 내 방으로)으로 나간다. 브라우저 뒤로도 저장하지 않는다
 import { initAuth, currentUser, login, logout } from './auth.js';
 import { api } from './room-api.js';
-import { esc, avatarHtml, CHEVRON, GOOGLE_G, nextAfterLogin } from './ui.js';
+import { esc, avatarHtml, CHEVRON, GOOGLE_G, nextAfterLogin, mountSegs } from './ui.js';
 import { profileFormHtml, mountProfileForm, initial } from './profile-form.js';
 import { inviteTokenFrom, joinLinkHtml } from './join-link.js';
+import { defaultsHtml, defaultsBody } from './agent-defaults.js';
+import { draftFromRules, limitNote } from './agent-panel.js';
+import { payoutDraftFrom } from './payout-form.js';
 const panel = document.querySelector('#account');
 const nav = document.querySelector('#nav-inner');
 // 알림은 방금 누른 버튼 바로 아래에 띄운다. 화면을 다시 그릴 때마다 #message 자리도 함께 그린다
@@ -35,13 +38,18 @@ const DELETED = 'account.html?deleted=1';
 let notice = new URLSearchParams(location.search).has('deleted') ? '계정을 지웠어요. 함께 정산한 금액은 익명 기록으로 남아요.' : ''; // 화면을 옮긴 뒤 그 화면에 띄울 한 줄
 if (notice) history.replaceState(null, '', location.pathname); // 새로고침해도 다시 뜨지 않게
 const onProfile = () => location.hash === '#profile';
+const onAgent = () => location.hash === '#agent'; // 방의 내 비서에서 '기본 설정 바꾸기'로도 바로 들어온다
 function openProfile() {
   history.pushState({ view: 'profile' }, '', '#profile');
   run(render);
 }
-// 내 방으로 돌아간다. 프로필로 들어올 때 쌓은 기록이면 되돌려 브라우저 뒤로와 같은 자리로 간다
+function openAgent() {
+  history.pushState({ view: 'agent' }, '', '#agent');
+  run(render);
+}
+// 내 방으로 돌아간다. 프로필·비서 기본 설정으로 들어올 때 쌓은 기록이면 되돌려 브라우저 뒤로와 같은 자리로 간다
 function toRooms() {
-  if (history.state?.view === 'profile') history.back();
+  if (['profile', 'agent'].includes(history.state?.view)) history.back();
   else {
     history.replaceState(null, '', location.pathname + location.search);
     run(render);
@@ -81,7 +89,9 @@ async function render() {
   }
   if (next) return void location.replace(next); // 로그인했으면 보던 방·초대로 돌아간다
   const [{ profile }, { rooms }] = await Promise.all([api('/api/me'), api('/api/rooms')]);
+  panel.onclick = panel.oninput = panel.onchange = null; // 비서 기본 설정 화면이 단 처리기를 다른 화면에 남기지 않는다
   if (onProfile()) profileView(profile);
+  else if (onAgent()) agentView(await api('/api/me/agent'), profile);
   else roomsView(profile, rooms, config);
 }
 
@@ -95,11 +105,73 @@ function roomsView(profile, rooms, config) {
       ${joinLinkHtml()}
       ${rooms.map((r) => linkRow(`room.html?room=${encodeURIComponent(r.id)}`, esc(r.name), esc(r.dates || ''))).join('')
         || '<div class="row"><span class="grow meta">아직 참여한 방이 없어요. 새 방을 만들거나 친구에게 초대 링크를 받으면 여기에 보여요.</span></div>'}
+    </div></section>
+    <section class="group"><h2 class="group-label"><span>내 비서</span></h2><div class="list">
+      <button type="button" class="row" id="open-agent"><span class="grow"><span class="title">기본 설정</span>
+        <span class="meta" style="display:block">받을 계좌 · 자동 수락 한도 · 보낼 시기 · 이의 처리. 모든 방에 이 설정으로 들어가요</span></span>${CHEVRON}</button>
     </div></section>${demoRows('둘러보기', config.dev)}`;
   say(notice);
   notice = '';
   nav.querySelector('#open-profile').onclick = openProfile;
+  panel.querySelector('#open-agent').onclick = openAgent;
   mountJoinLink(panel);
+}
+
+// 내 비서 기본 설정: 왼쪽 위 '내 방'은 바꾼 것을 버리고 돌아가고, 오른쪽 위 '저장'은 바꾼 것만 저장한 뒤 내 방으로 간다(프로필과 같은 약속).
+// 처음 정하는 사람은 여기서 저장하면 처음 설정도 마친 것으로 친다
+function agentView(view, profile) {
+  setNav(`<button type="button" class="nav-text" id="back">${BACK}<span>내 방</span></button>`, '내 비서', '<button type="button" class="nav-text strong" id="save">저장</button>');
+  const ui = { draft: draftFromRules(view.rules), payout: payoutDraftFrom(view.payout, profile.name), editPayout: !view.payout };
+  const draw = () => {
+    panel.innerHTML = `${defaultsHtml(view, ui)}${MESSAGE}`;
+    mountSegs(panel);
+  };
+  draw();
+  const saveButton = nav.querySelector('#save');
+  panel.onclick = (e) => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    if (el.dataset.action === 'agent-set') ui.draft[el.dataset.field] = el.dataset.id;
+    if (el.dataset.action === 'payout-edit') ui.editPayout = true;
+    draw();
+    if (el.dataset.action === 'payout-edit') panel.querySelector('[data-pf="accountNo"]')?.focus();
+  };
+  // 입력칸은 다시 그리지 않고 값만 기억한다(타이핑 중 초점을 잃지 않게)
+  panel.oninput = (e) => {
+    const { ag, pf } = e.target.dataset;
+    if (ag === 'autoAccept') {
+      e.target.value = e.target.value.replace(/\D/g, '');
+      ui.draft.autoAccept = e.target.value;
+      const note = panel.querySelector('#agent-limit-note');
+      if (note) note.textContent = limitNote(ui.draft);
+    }
+    if (pf) ui.payout[pf] = e.target.value;
+  };
+  panel.onchange = (e) => {
+    if (e.target.dataset.ag === 'payday') ui.draft.payday = Number(e.target.value);
+    if (e.target.matches('select[data-bank-pick]')) Object.assign(ui.payout, { other: !e.target.value, bank: e.target.value });
+    if (e.target.matches('select')) draw();
+  };
+  async function save() {
+    if (saveButton.disabled) return;
+    const { rules, payout } = defaultsBody(view, ui);
+    if (!rules && !payout && view.onboardedAt) return toRooms();
+    saveButton.disabled = true;
+    saveButton.textContent = '저장 중…';
+    const ok = await run(async () => {
+      if (payout) await api('/api/me/payout', { method: 'POST', body: payout });
+      if (rules || !view.onboardedAt) await api('/api/me/agent/onboarding', { method: 'POST', body: { rules: rules ?? view.rules } });
+      return true;
+    });
+    if (ok) {
+      notice = '내 비서 기본 설정을 저장했어요. 방마다 다르게 정한 규칙은 그대로예요.';
+      return toRooms();
+    }
+    saveButton.disabled = false;
+    saveButton.textContent = '저장';
+  }
+  nav.querySelector('#back').onclick = toRooms;
+  saveButton.onclick = save;
 }
 
 // 초대 링크로 참가하기: 줄을 누르면 그 자리에 입력칸을 펼치고 바로 붙여 넣게 초점을 둔다.

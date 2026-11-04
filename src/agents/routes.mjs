@@ -3,7 +3,7 @@
 import { readJson, HttpError } from '../http.mjs';
 import { notAgreed } from '../rooms/policy.mjs';
 
-export function registerAgentRoutes(routes, { orchestrator, member, store, overLimit = () => false }) {
+export function registerAgentRoutes(routes, { orchestrator, member, store, overLimit = () => false, authenticate }) {
   const limited = (uid) => {
     if (overLimit(`uid:${uid}`)) throw new HttpError(429, '요청이 너무 많아요. 10분 뒤에 다시 시도해 주세요.');
   };
@@ -54,6 +54,11 @@ export function registerAgentRoutes(routes, { orchestrator, member, store, overL
   routes.post('/api/rooms/:id/payout', async ({ req, params }) => {
     const { me } = await member(req, params.id);
     return orchestrator.setPayout(params.id, me.uid, await readJson(req));
+  });
+  // 내 계정의 비서 기본 설정에서 정하는 받을 계좌. 계좌는 사람마다 하나라 방 없이 정하고, 모든 방의 대기 중 송금에 들어간다
+  routes.post('/api/me/payout', async ({ req }) => {
+    const me = await authenticate(req);
+    return orchestrator.setPayout(null, me.uid, await readJson(req));
   });
 
   // qr: 데스크톱 송금 화면을 열 때 휴대폰으로 넘길 QR 토큰을 새로 받는다(보내는 사람만)

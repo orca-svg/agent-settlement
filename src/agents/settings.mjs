@@ -4,7 +4,7 @@ import { HttpError, readJson } from '../http.mjs';
 import { DEFAULT_RULES, MEMORY_LIMITS, MEMORY_MAX_CHARS, AUTO_ACCEPT_MAX, ON_DISPUTE, NOTIFY, RULE_FIELDS, ruleChangeText } from '../../public/agent-rules.js';
 
 const HISTORY_MAX = 50;
-// 방마다 '이 방에는 적용하지 않을' 수 있는 규칙. 알림 수준은 화면 설정이라 방마다 나누지 않는다
+// 방마다 그 방에만 쓸 값을 따로 정할 수 있는 규칙. 알림 수준은 화면 설정이라 방마다 나누지 않는다
 export const ROOM_RULES = ['autoAccept', 'sendWhen', 'onDispute'];
 
 const validAutoAccept = (v) => Number.isSafeInteger(v) && v >= 0 && v <= AUTO_ACCEPT_MAX;
@@ -21,15 +21,21 @@ export function normalizeRules(rules) {
   return Object.fromEntries(RULE_FIELDS.map((f) => [f, CHECKS[f][0](rules?.[f]) ? rules[f] : DEFAULT_RULES[f]]));
 }
 
+// 예전에 방에서 끈 규칙(rulesOff: 그 방에서는 안전한 기본값)은 그 방 전용 값으로 옮겨 읽는다
+const fromRulesOff = (off) => Object.fromEntries(Object.entries(off ?? {})
+  .map(([roomId, fields]) => [roomId, Object.fromEntries((fields ?? []).filter((f) => ROOM_RULES.includes(f)).map((f) => [f, DEFAULT_RULES[f]]))])
+  .filter(([, rules]) => Object.keys(rules).length));
+
 export function normalizeSettings(doc, uid) {
+  const { rulesOff, ...rest } = doc ?? {};
   return {
-    ...doc,
+    ...rest,
     id: uid,
     uid,
     plan: doc?.plan ?? 'free',
     memory: Array.isArray(doc?.memory) ? doc.memory : [],
     memoryHidden: doc?.memoryHidden ?? {},
-    rulesOff: doc?.rulesOff ?? {},
+    roomRules: { ...fromRulesOff(rulesOff), ...(doc?.roomRules ?? {}) },
     rules: normalizeRules(doc?.rules),
     ruleHistory: Array.isArray(doc?.ruleHistory) ? doc.ruleHistory : [],
     payout: doc?.payout ?? null,
@@ -37,10 +43,11 @@ export function normalizeSettings(doc, uid) {
   };
 }
 
-// 이 방에서 실제로 쓰는 규칙. 내 비서 규칙이 모든 방의 기본이고, 이 방에서 끈 규칙만 안전한 기본값(DEFAULT_RULES)으로 돌아간다
+// 이 방에서 실제로 쓰는 규칙. 내 계정의 기본 설정(rules)이 모든 방에 쓰이고, 이 방에서 따로 정한 칸(roomRules)만 덮는다.
+// 저장된 방 값이 망가졌으면 그 칸은 기본 설정을 따른다
 export function rulesIn(settings, roomId) {
-  const off = (settings.rulesOff?.[roomId] ?? []).filter((f) => ROOM_RULES.includes(f));
-  return { ...settings.rules, ...Object.fromEntries(off.map((f) => [f, DEFAULT_RULES[f]])) };
+  const own = settings.roomRules?.[roomId] ?? {};
+  return { ...settings.rules, ...Object.fromEntries(ROOM_RULES.filter((f) => own[f] !== undefined && CHECKS[f][0](own[f])).map((f) => [f, own[f]])) };
 }
 
 export const memoryLimit = (doc) => MEMORY_LIMITS[doc.plan] ?? MEMORY_LIMITS.free;
@@ -99,12 +106,17 @@ export function createAgentSettings({ store, clock = () => new Date() }) {
   return {
     get: async (uid) => view(await read(uid)),
 
-    // 방 화면이 매번 부르는 요약. 계좌번호 없이 있는지만 알린다
-    // roomId가 있으면 그 방에서 실제로 쓰는 값(끈 규칙은 기본값)과 끈 규칙 목록(off)을 준다
+    // 방 화면이 매번 부르는 요약(본인에게만). 계좌번호 없이 있는지만 알린다.
+    // roomId가 있으면 그 방에서 실제로 쓰는 값, 그 방에서 따로 정한 칸(custom), 내 계정의 기본 설정(defaults)을 준다
     async summary(uid, roomId) {
       const doc = await read(uid);
-      const { autoAccept, sendWhen, notify } = roomId ? rulesIn(doc, roomId) : doc.rules;
-      return { onboarded: Boolean(doc.onboardedAt), autoAccept, sendWhen, notify, hasPayout: Boolean(doc.payout), off: roomId ? doc.rulesOff[roomId] ?? [] : [] };
+      const { autoAccept, sendWhen, onDispute, notify } = roomId ? rulesIn(doc, roomId) : doc.rules;
+      const own = roomId ? doc.roomRules[roomId] ?? {} : {};
+      return {
+        onboarded: Boolean(doc.onboardedAt), autoAccept, sendWhen, onDispute, notify, hasPayout: Boolean(doc.payout),
+        custom: ROOM_RULES.filter((f) => own[f] !== undefined),
+        defaults: Object.fromEntries(ROOM_RULES.map((f) => [f, doc.rules[f]])),
+      };
     },
 
     updateRules: async (uid, input) => saved(withRules(await read(uid), input)),
@@ -139,14 +151,25 @@ export function createAgentSettings({ store, clock = () => new Date() }) {
       });
     },
 
-    // 내 비서 규칙은 모든 방에 적용되고, 이 방에 적용하지 않을 규칙만 끈다(on: false). 다시 켜면 흔적을 지운다
-    async setRuleInRoom(uid, roomId, field, on) {
-      if (!ROOM_RULES.includes(field)) throw new HttpError(400, '방마다 끌 수 있는 규칙은 자동 수락 한도, 보낼 시기, 이의 처리예요');
+    // 이 방에만 쓸 값을 정한다. { autoAccept?, sendWhen?, onDispute? }에서 값을 주면 그 칸을 정하고, null이면 기본 설정을 따르게 비운다.
+    // 다 비우면 그 방의 흔적을 지운다. 기본 설정(rules)은 건드리지 않는다
+    async setRoomRules(uid, roomId, input) {
+      const fields = Object.keys(input ?? {});
+      if (fields.some((f) => !ROOM_RULES.includes(f))) throw new HttpError(400, '방마다 정할 수 있는 규칙은 자동 수락 한도, 보낼 시기, 이의 처리예요');
       const doc = await read(uid);
-      const rest = (doc.rulesOff[roomId] ?? []).filter((f) => f !== field);
-      const off = on ? rest : [...rest, field];
-      const { [roomId]: _, ...others } = doc.rulesOff;
-      return saved({ ...doc, rulesOff: off.length ? { ...others, [roomId]: off } : others });
+      const own = { ...(doc.roomRules[roomId] ?? {}) };
+      for (const f of fields) {
+        const v = input[f];
+        if (v === null) {
+          delete own[f];
+          continue;
+        }
+        const [valid, message] = CHECKS[f];
+        if (!valid(v)) throw new HttpError(400, message);
+        own[f] = f === 'sendWhen' && v.payday ? { payday: v.payday } : v;
+      }
+      const { [roomId]: _, ...others } = doc.roomRules;
+      return saved({ ...doc, roomRules: Object.keys(own).length ? { ...others, [roomId]: own } : others });
     },
 
     // 새 기억과 새 방은 공유가 기본이고, 이 방에 보이고 싶지 않은 기억만 끈다
@@ -178,10 +201,9 @@ export function registerAgentSettingsRoutes(routes, { settings, authenticate, me
   mine('/memory/edit', (uid, { from, to }) => settings.editMemory(uid, from, to));
   mine('/memory/delete', (uid, { text }) => settings.deleteMemory(uid, text));
 
-  routes.post('/api/rooms/:id/agent/rule', async ({ req, params }) => {
+  routes.post('/api/rooms/:id/agent/rules', async ({ req, params }) => {
     const { me } = await member(req, params.id);
-    const { field, on } = await body(req);
-    return settings.setRuleInRoom(me.uid, params.id, field, Boolean(on));
+    return settings.setRoomRules(me.uid, params.id, await body(req));
   });
 
   routes.post('/api/rooms/:id/agent/shared', async ({ req, params }) => {
