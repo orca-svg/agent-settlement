@@ -1154,9 +1154,18 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
 
 /* ---------- 내 방·내 계정: 웹 배치 ----------
    화면마다 읽기 좋은 폭이 다르다(로그인은 520px, 내 방은 목록 폭, 내 계정은 목차 + 설정).
-   상단바·본문·꼬리말이 같은 폭을 따라 왼쪽 선이 하나다(account.js가 body[data-view]를 바꾼다) */
+   상단바·본문이 같은 폭을 따라 왼쪽 선이 하나다(account.js가 body[data-view]를 바꾼다) */
 .solo-page[data-view="rooms"] :is(.nav-inner, .solo, .foot) { max-width: 760px; }
 .solo-page[data-view="settings"] :is(.nav-inner, .solo, .foot) { max-width: 1040px; }
+/* 꼬리말(만든 팀·개인정보 처리방침)은 어느 화면에서나 가운데. 본문 폭이 화면마다 달라도 같은 자리라 찾기 쉽다.
+   좁은 화면에서는 행사 이름·팀 이름을 가운데서 끊지 않고 '·' 뒤에서 줄을 바꾼다 */
+.foot { text-align: center; text-wrap: balance; }
+.foot span { white-space: nowrap; }
+/* 내 방·내 계정은 내용이 짧아도 꼬리말이 화면 맨 아래에 붙는다. body를 세로로 쌓고 꼬리말을 아래로 밀며,
+   내용이 화면보다 길면 꼬리말은 평소처럼 내용 뒤에 온다. flex 안에서 margin: 0 auto인 칸은 내용 폭으로 줄어드니 폭을 다시 채운다 */
+.solo-page { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+.solo-page > :is(.solo, .foot) { width: 100%; }
+.solo-page > .foot { margin-top: auto; }
 
 /* 내 방 머리말: 왼쪽에 제목, 오른쪽에 할 일(초대 링크로 참가·새 방 만들기). 좁으면 할 일이 제목 아래로 내려와 반씩 나눈다 */
 .page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; padding-bottom: 24px; }
