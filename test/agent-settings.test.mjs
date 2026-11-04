@@ -11,7 +11,7 @@ import { evidenceFor } from '../src/agents/evidence.mjs';
 import { pendingActions } from '../src/actions.mjs';
 import { createApp } from '../src/app.mjs';
 import { notifies, DEFAULT_RULES, ruleChangeText } from '../public/agent-rules.js';
-import { draftFromRules, rulesFromDraft, memoryRowsHtml, historyHtml, limitInputHtml, limitPresetsHtml, meChipHtml, personChipHtml } from '../public/agent-panel.js';
+import { draftFromRules, rulesFromDraft, memoryRowsHtml, historyHtml, limitInputHtml, limitPresetsHtml, meChipHtml, personChipHtml, AGENT_MARK } from '../public/agent-panel.js';
 
 const ROOM = 'demo-t';
 async function setup({ evidence = false, store = new MemoryStore() } = {}) {
@@ -573,6 +573,7 @@ test('방 머리의 칩: 비서 설정을 마친 사람에게 로봇 표시, 설
   const other = personChipHtml({ name: '철수', avatar: '', ready: true });
   assert.match(other, /^<span class="person">철수<span class="agent-mark"/);
   assert.equal(personChipHtml({ name: '영희', avatar: '', ready: false }), '<span class="person">영희</span>');
+  assert.ok(AGENT_MARK.includes('<rect width="16" height="12" x="4" y="8" rx="2"'), '로봇 표시는 Lucide bot 아이콘이다');
 });
 
 test('normalizeSettings: 빈 문서와 옛 문서(notify 없음)를 기본값으로 채우고 있던 값은 지킨다', () => {

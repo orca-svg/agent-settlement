@@ -85,10 +85,11 @@ export function historyHtml(view) {
     <ol>${[...view.ruleHistory].reverse().map((h) => `<li><span>${esc(h.text)}</span><time>${esc(clockText(h.at))}</time></li>`).join('')}</ol></details></section>`;
 }
 
-// 비서 설정을 마친 사람의 이름 옆 로봇 표시. 방 사람 누구나 보지만 '설정을 마쳤다'는 사실만 담는다
-export const AGENT_MARK = '<span class="agent-mark" role="img" aria-label="비서 설정함" title="비서 설정을 마쳤어요"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">'
-  + '<path d="M12 2.5v3M7 5.5h10a3 3 0 0 1 3 3V16a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V8.5a3 3 0 0 1 3-3zM9.5 15.5h5M2 11v3M22 11v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
-  + '<circle cx="9" cy="11" r="1.4" fill="currentColor"/><circle cx="15" cy="11" r="1.4" fill="currentColor"/></svg></span>';
+// 비서 설정을 마친 사람의 이름 옆 로봇 표시. 방 사람 누구나 보지만 '설정을 마쳤다'는 사실만 담는다.
+// 아이콘: Lucide 'bot'(lucide-static 0.460.0). ISC License, Copyright (c) Lucide Contributors 2022, portions Copyright (c) Cole Bemis 2013-2022 (Feather, MIT). https://lucide.dev/license
+export const AGENT_MARK = '<span class="agent-mark" role="img" aria-label="비서 설정함" title="비서 설정을 마쳤어요">'
+  + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+  + '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></span>';
 
 // 방 머리의 다른 사람 칩. 누를 수 없고, 비서 설정을 마쳤으면 로봇 표시만 붙는다
 export const personChipHtml = ({ name, avatar, ready }) => `<span class="person">${avatar}${esc(name)}${ready ? AGENT_MARK : ''}</span>`;
