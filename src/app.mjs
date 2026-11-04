@@ -14,6 +14,7 @@ import { registerAccountRoutes } from './accounts.mjs';
 import { createLocationService } from './location.mjs';
 import { seedDemoRoom } from './dev/seed.mjs';
 import { registerExpenseRoutes } from './expenses/routes.mjs';
+import { registerRoomRoutes } from './rooms/routes.mjs';
 import { pendingActions } from './actions.mjs';
 import { createOrchestrator } from './agents/orchestrator.mjs';
 import { createAgentSettings, registerAgentSettingsRoutes } from './agents/settings.mjs';
@@ -169,7 +170,7 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
       invoices,
       disputes: disputes.map((d) => redactDispute(d, me.uid, expenses.find((e) => e.id === d.expenseId)?.payer)),
       transfers: transfers.map((t) => redactTransfer(t, me.uid)),
-      myAgent: await agentSettings.summary(me.uid),
+      myAgent: await agentSettings.summary(me.uid, room.id),
       // 방 사람에게는 누가 비서 설정을 마쳤는지만 보인다(이름 옆 로봇 표시). 규칙·기억은 본인의 myAgent에만 있다(#5)
       agentReady: room.members.filter((m) => !m.deleted && agents[m.uid]?.onboardedAt).map((m) => m.uid),
       ledger: ledger(room, expenses, room.policy),
@@ -183,9 +184,10 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   });
 
   locationService.register(routes, member);
+  registerRoomRoutes(routes, { ...ctx, member, authenticate });
   registerExpenseRoutes(routes, { ...ctx, member });
   const orchestrator = createOrchestrator({ store, gemini, clock, evidenceFor, counterFor: dev ? counterFor : async () => [] });
-  registerAgentRoutes(routes, { orchestrator, member, overLimit });
+  registerAgentRoutes(routes, { orchestrator, member, store, overLimit, authenticate });
   const agentSettings = createAgentSettings({ store, clock });
   registerAgentSettingsRoutes(routes, { settings: agentSettings, authenticate, member });
 
@@ -200,9 +202,9 @@ export function createApp({ store, gemini = null, clock = () => new Date(), evid
   // 위치 화면(GET …/location)은 읽다가 끝난 동의를 지우므로 쓰기처럼 줄에 선다
   const WRITE_FREE = /\/receipts\/extract$/; // POST지만 저장하지 않는다(사진 → 초안)
   // 방 주소지만 사람마다 하나인 비서 문서를 고치고, 계좌는 다른 방의 송금까지 고치므로 모든 방의 줄에 선다(#5)
-  const ACROSS_ROOMS = /^\/api\/rooms\/[^/]+\/(payout|agent\/shared)$/;
+  const ACROSS_ROOMS = /^\/api\/rooms\/[^/]+\/(payout|agent\/shared|agent\/rules)$/;
   async function withStateLock(req, url, params, invoke) {
-    if (!/^\/api\/(rooms|me|dev|cron)(\/|$)/.test(url.pathname)) return invoke();
+    if (!/^\/api\/(rooms|me|dev|cron|invites)(\/|$)/.test(url.pathname)) return invoke(); // 참가하기(/api/invites/:token/join)도 방 멤버를 고친다(#4)
     if ((req.method === 'GET' && !url.pathname.endsWith('/location')) || WRITE_FREE.test(url.pathname)) return invoke();
     // 본문은 줄에 서기 전에 받는다. 본문을 느리게 보내는 요청이 줄을 붙잡지 못하게(영수증 사진이 실리는 지출 남기기만 큰 한도)
     await readBody(req, { limit: /^\/api\/rooms\/[^/]+\/expenses$/.test(url.pathname) ? MAX_RECEIPT : undefined });

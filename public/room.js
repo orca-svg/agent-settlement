@@ -6,14 +6,21 @@ import { reduceMotion } from './motion.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
-import { initAuth, authOptions, onSessionChange } from './auth.js';
-import { BANKS } from './banks.js';
+import { initAuth, authOptions, onSessionChange, login } from './auth.js';
 import { createAgentPanel, personChipHtml } from './agent-panel.js';
 import { notifies } from './agent-rules.js';
 import { readVisits, departure, timelineSummary, expenseWindow, kstTime, keepForSettlement } from './timeline.js';
+import { createRoomHtml, joinHtml, setupHtml, notAgreed, inviteUrl, datesLabel, inviteSheetHtml, inviteButtonHtml } from './room-setup.js';
+import { pickDay, presetRange, nextFocus, shiftMonth, todayIso } from './date-range.js';
+import { payoutFieldsHtml, payoutDraftFrom } from './payout-form.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
+const inviteToken = roomId ? null : new URLSearchParams(location.search).get('invite');
+// #4 방 만들기·참가하기·정책 동의·초대 링크 화면 상태. 방에 보일 이름·색은 입력받지 않고 내 프로필(profile)을 쓴다
+const setup = { create: { name: '', start: '', end: '', policy: 'actual' }, picker: { open: false, month: '', focus: '', entering: false }, join: {}, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, copied: false, busy: false, error: '' };
+// 로그인이 없는 개발용 서버에서만: 처음 방을 만들거나 참가할 때 이 브라우저용 uid를 하나 만든다. 배포에서는 Google 로그인 신원을 쓴다
+const ensureUid = () => currentUid() || (authOptions().dev ? (setCurrentUid(`u-${crypto.randomUUID().slice(0, 8)}`), currentUid()) : null);
 const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null, disputeDone: null, rejectDraft: null, sendBlocked: false, announceBlocked: false, focusLine: null };
 let unsubscribe = () => {};
 
@@ -95,6 +102,11 @@ async function load() {
   try {
     state.data = await api(`/api/rooms/${encodeURIComponent(roomId)}`);
     state.error = null;
+    // 살아 있는 초대 링크는 처음 한 번만 물어본다(정산 중인 방은 초대를 막는다)
+    if (setup.invite === undefined && state.data.room.status !== 'settling') {
+      setup.invite = null;
+      api(`/api/rooms/${encodeURIComponent(roomId)}/invite`).then(({ invite }) => { setup.invite = invite; render(); }, () => {});
+    }
   } catch (e) {
     state.error = e;
   }
@@ -386,8 +398,153 @@ function closePhoto() {
 
 const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit) || 0), 0);
 
+// #4 방 만들기·참가하기·정책·초대. 복사·공유는 클릭 처리기 안에서 바로 불러야 브라우저가 허락한다
+const SETUP_ACTIONS = new Set(['open-invite', 'range-toggle', 'range-day', 'range-month', 'range-preset', 'range-clear', 'cf-policy','sign-in', 'create-room', 'join-room', 'agree-policy', 'edit-policy', 'set-policy', 'make-invite', 'copy-invite', 'share-invite']);
+// 기간 고르기(방 만들기 폼). 화면을 통째로 다시 그리므로, 방금 누른 자리로 초점을 돌려놓아 키보드로 이어 고를 수 있게 한다
+function rangeAct(name, d) {
+  const p = setup.picker;
+  const c = setup.create;
+  const today = todayIso();
+  let back = '[data-action="range-toggle"]';
+  if (name === 'range-toggle') {
+    p.open = !p.open;
+    p.entering = p.open; // 펼칠 때만 한 번 나타나는 움직임(날짜를 누를 때마다 다시 움직이지 않게)
+    if (p.open) Object.assign(p, { month: (c.start || today).slice(0, 7), focus: c.start || today });
+  }
+  if (name === 'range-month') {
+    p.month = shiftMonth(p.month, Number(d.step));
+    back = `[data-action="range-month"][data-step="${d.step}"]`;
+  }
+  if (name === 'range-day') {
+    Object.assign(c, pickDay(c, d.date));
+    p.focus = d.date;
+    back = `[data-date="${d.date}"]`;
+  }
+  if (name === 'range-preset') {
+    Object.assign(c, presetRange(d.id, c, today));
+    Object.assign(p, { month: c.start.slice(0, 7), focus: c.end });
+    back = `[data-action="range-preset"][data-id="${d.id}"]`;
+  }
+  if (name === 'range-clear') Object.assign(c, { start: '', end: '' });
+  render();
+  p.entering = false;
+  document.querySelector(back)?.focus({ preventScroll: true });
+}
+// 달력 안의 방향키: 초점만 옮기고(달이 바뀌면 그 달을 보여 준다) 고르기는 Enter·Space(버튼 누르기)로 한다
+function rangeKeys(e) {
+  const next = e.target.dataset?.date && nextFocus(e.target.dataset.date, e.key);
+  if (!next) return false;
+  e.preventDefault();
+  Object.assign(setup.picker, { focus: next, month: next.slice(0, 7) });
+  render();
+  document.querySelector(`[data-date="${next}"]`)?.focus();
+  return true;
+}
+
+async function setupAct(name, d) {
+  const base = `/api/rooms/${encodeURIComponent(roomId)}`;
+  if (name.startsWith('range-')) return rangeAct(name, d);
+  if (name === 'cf-policy') {
+    setup.create.policy = d.id;
+    return render();
+  }
+  if (name === 'edit-policy') {
+    setup.policyEdit = !setup.policyEdit;
+    return render();
+  }
+  // 시트를 먼저 열고, 링크가 없으면 그때 만든다. 처음 불러오는 중에 눌러도 이미 보낸 링크를 새 링크로 덮지 않게 있는지부터 본다
+  if (name === 'open-invite') {
+    setup.copyError = '';
+    openAgentSheet('invite');
+    if (setup.invite) return undefined;
+    try {
+      const { invite } = await api(`${base}/invite`);
+      setup.invite = invite ?? await api(`${base}/invite`, { method: 'POST', body: {} });
+    } catch (e) {
+      setup.copyError = e.message;
+    }
+    return renderSheet();
+  }
+  if (name === 'copy-invite') {
+    const done = (ok) => {
+      setup.copied = ok;
+      setup.copyError = ok ? '' : '복사하지 못했어요. 링크를 눌러 통째로 고른 뒤 복사해 주세요.'; // 누른 링크 줄 바로 아래에 알린다
+      render();
+      if (ok) setTimeout(() => { setup.copied = false; render(); }, 1500);
+    };
+    if (!navigator.clipboard) return done(false);
+    return navigator.clipboard.writeText(inviteUrl(setup.invite.token)).then(() => done(true), () => done(false));
+  }
+  if (name === 'share-invite') {
+    const { room } = state.data;
+    return navigator.share({ title: room.name, text: `‘${room.name}’ 정산 방에 초대해요`, url: inviteUrl(setup.invite.token) }).catch(() => {});
+  }
+  if (setup.busy) return;
+  const need = (ok, msg) => {
+    if (!ok) throw new Error(msg);
+  };
+  setup.busy = true;
+  setup.error = '';
+  render();
+  try {
+    // 방 만들기·초대 화면에서 바로 로그인한다(계정 화면으로 갔다 오면 초대 링크를 잃는다). 로그인하면 내 프로필로 다시 그린다
+    if (name === 'sign-in') {
+      await login();
+      await loadProfile();
+      if (inviteToken) setup.invitePreview = await api(`/api/invites/${encodeURIComponent(inviteToken)}`).catch((e) => ({ error: e.message }));
+    }
+    if (name === 'create-room') {
+      const c = setup.create;
+      need(c.name.trim(), '방 이름을 적어 주세요');
+      need(!c.start || !c.end || c.end >= c.start, '끝나는 날이 시작하는 날보다 빨라요');
+      ensureUid();
+      const { room } = await api('/api/rooms', { method: 'POST', body: { name: c.name, dates: datesLabel(c.start, c.end), policy: c.policy } });
+      location.search = `?room=${encodeURIComponent(room.id)}`;
+      return;
+    }
+    if (name === 'join-room') {
+      ensureUid(); // '동의하고 참가하기'를 누른 것이 곧 동의다
+      const { roomId: id } = await api(`/api/invites/${encodeURIComponent(inviteToken)}/join`, { method: 'POST', body: { agree: true } });
+      location.search = `?room=${encodeURIComponent(id)}`;
+      return;
+    }
+    if (name === 'agree-policy') await api(`${base}/policy/agree`, { method: 'POST', body: {} });
+    if (name === 'set-policy') {
+      await api(`${base}/policy`, { method: 'POST', body: { policy: d.id } });
+      setup.policyEdit = false;
+    }
+    if (name === 'make-invite') setup.invite = await api(`${base}/invite`, { method: 'POST', body: {} });
+  } catch (e) {
+    setup.error = e.message;
+  } finally {
+    setup.busy = false;
+  }
+  if (roomId) await load();
+  else render();
+}
+
+// 방 만들기·참가 화면에 보일 내 프로필(이름·색). 아직 누구인지 모르면(로그인 전) null
+async function loadProfile() {
+  if (!currentUid()) return void (setup.profile = null);
+  try {
+    setup.profile = (await api('/api/me')).profile;
+  } catch {
+    setup.profile = null;
+  }
+}
+
+async function loadInvite() {
+  try {
+    setup.invitePreview = await api(`/api/invites/${encodeURIComponent(inviteToken)}`);
+  } catch (e) {
+    setup.invitePreview = { error: e.message };
+  }
+  render();
+}
+
 async function act(name, d) {
   if (name !== 'agree' && name !== 'reject') state.disputeDone = null; // 동의·거부 결과 한 줄은 다음 조작 전까지만 남긴다
+  if (SETUP_ACTIONS.has(name)) return setupAct(name, d);
   if (agentPanel.handles(name)) return agentPanel.act(name, d);
   if (AGENT_ACTIONS.has(name)) return agentAct(name, d); // 송금 링크는 이 호출 안에서 동기적으로 연다
   if (name === 'show-receipt') {
@@ -492,17 +649,13 @@ async function act(name, d) {
 
 // ---------------------------------------------------------------- 화면
 function noRoom() {
-  if (!authOptions().dev) return '<section class="hero"><h1>내 정산 방</h1><p><a class="btn" href="account.html">로그인·내 방 목록</a></p></section>';
-  const failed = state.error?.status === 'seed';
-  return `<section class="hero"><h1>열 방이 없어요</h1>
-    <p class="sub">실제 방 만들기·참가하기는 #4에서 생겨요. 그전까지는 개발용 데모 방으로 확인해요.</p></section>
-    <section class="next"><p class="eyebrow">개발용</p><h2>데모 방 만들기</h2>
-      <p>${failed ? '서버가 개발용 시드를 막았어요. <code>DEV_SEED=1 npm start</code>로 서버를 다시 켜 주세요.' : '오사카 2박 3일 지출 7건과 4명의 비서 설정이 들어간 방을 만들어요.'}</p>
-      <div class="actions"><button class="btn" data-action="seed">데모 방 만들기</button></div></section>`;
+  return createRoomHtml(setup.create, { busy: setup.busy, error: setup.error, seedFailed: state.error?.status === 'seed', dev: authOptions().dev, profile: setup.profile, picker: setup.picker, today: todayIso() });
 }
 
+const isDemoRoom = () => String(roomId).startsWith('demo-');
+
 function whoPicker() {
-  if (!authOptions().dev) return '';
+  if (!authOptions().dev || !isDemoRoom()) return ''; // 개발용 데모 방에서만 남의 신원으로 바꿔 본다
   const me = currentUid();
   return `<section class="group"><h2 class="group-label"><span>누구로 볼까요?</span><span>개발용 시드 신원</span></h2>
     <div class="seg" role="radiogroup" aria-label="보는 사람" data-seg="who"><span class="seg-thumb"></span>
@@ -517,7 +670,7 @@ function hero() {
   const person = (m) => (m.uid === me.uid ? agentPanel.chipHtml(m, avatar(m.uid)) : personChipHtml({ name: m.name, avatar: avatar(m.uid), ready: ready.has(m.uid) }));
   return `<section class="hero"><h1>${esc(room.name)}</h1>
     <p class="sub">${esc(room.dates || '')}${room.dates ? ' · ' : ''}${room.members.length}명 · 돈 얘기는 각자의 비서끼리 해요</p>
-    <div class="people">${room.members.map(person).join('')}</div></section>`;
+    <div class="people">${room.members.map(person).join('')}${room.status === 'settling' ? '' : inviteButtonHtml()}</div></section>`;
 }
 
 function nextCard() {
@@ -775,6 +928,13 @@ function settlingCard(addButtons) {
   const current = invoices.filter((i) => i.version === room.version);
   if (!current.length) {
     if (!expenses.length) return '';
+    // 정산 시작은 전원이 환율 정책에 동의해야 열린다(#4). 서버도 같은 조건으로 막는다
+    const waiting = notAgreed(room);
+    if (waiting.length) {
+      return `<section class="next"><p class="eyebrow">정산 시작 전</p><h2>환율 정책에 ${waiting.length}명이 아직 동의하지 않았어요</h2>
+        <p>${esc(waiting.map((m) => m.name).join(', '))}의 동의를 기다리고 있어요. 모두 동의하면 청구서를 보낼 수 있어요.</p>
+        <div class="actions"><button class="btn" disabled>비서들에게 청구서 보내기</button>${addButtons}</div></section>`;
+    }
     // 확인이 필요한 줄이 있으면 서버가 막는다. 미리 알리지 않고, 버튼을 눌렀을 때 그 자리에서 까닭을 알린다(agentAct의 send-invoices)
     const notice = blockedNotice(flaggedLines(expenses, isFlagged), { me: state.data.me.uid, nameOf });
     if (!notice) state.sendBlocked = false; // 막던 줄을 모두 확인했으면 안내는 저절로 사라진다
@@ -1116,20 +1276,10 @@ function transferSheet() {
 }
 
 function payoutSheet() {
-  const p = state.payoutDraft;
-  // 은행은 목록에서 고른다(#8). 토스는 모르는 은행 이름이면 에러를 내서, 실기기로 확인한 은행만 목록에 둔다(public/banks.js).
-  // 목록에 없는 은행만 직접 쓴다
-  const options = BANKS.map((b) => `<option value="${esc(b.label)}"${!p.other && p.bank === b.label ? ' selected' : ''}>${esc(b.label)}</option>`).join('');
   return {
     title: '받을 계좌',
-    html: `<p class="how">계좌번호는 나에게 돈을 보낼 사람에게만 보여요. 받을 송금이 있으면 바로 토스 링크가 채워져요.</p>
-      <section class="group"><div class="list">
-        <label class="row field"><span class="grow">은행</span><select data-bank-pick>${options}<option value=""${p.other ? ' selected' : ''}>목록에 없어요</option></select></label>
-        ${p.other ? `<label class="row field"><span class="grow">은행 이름</span><input data-pf="bank" value="${esc(p.bank)}" maxlength="30" placeholder="예: 경남은행"></label>` : ''}
-        <label class="row field"><span class="grow">계좌번호</span><input data-pf="accountNo" value="${esc(p.accountNo)}" inputmode="numeric" maxlength="30" placeholder="${p.last4 ? `지금은 •••• ${esc(p.last4)}. 새 번호 전체 입력` : '숫자만 또는 - 포함'}"></label>
-        <label class="row field"><span class="grow">예금주</span><input data-pf="holder" value="${esc(p.holder)}" maxlength="30"></label>
-      </div></section>
-      ${p.other ? '<p class="group-note">목록에 없는 은행은 토스가 알아보지 못할 수 있어요. 그때는 보내는 사람에게 계좌번호를 복사해 보내도록 안내해요.</p>' : ''}${formError()}
+    html: `<p class="how">계좌번호는 나에게 돈을 보낼 사람에게만 보여요. 받을 송금이 있으면 바로 토스 링크가 채워져요. 계좌는 모든 방에 같아요.</p>
+      <section class="group">${payoutFieldsHtml(state.payoutDraft)}</section>${formError()}
       <button class="btn" style="width:100%" data-action="save-payout">저장</button>`,
   };
 }
@@ -1147,14 +1297,16 @@ const agentPanel = createAgentPanel({
   openPayout: (payout) => openPayoutSheet(payout),
 });
 
-const AGENT_SHEETS = { invoice: invoiceSheet, dispute: disputeSheet, transfer: transferSheet, payout: payoutSheet, ...agentPanel.sheets };
+// 친구 초대(#4): 참여자 줄 끝 + 버튼으로 연다. 누가 참가하면 방이 다시 그려지면서 이 시트의 참여자 목록도 바로 바뀐다
+const inviteSheet = () => ({
+  title: '친구 초대',
+  html: inviteSheetHtml({ room: state.data.room, me: state.data.me, avatar, invite: setup.invite, copied: setup.copied, copyError: setup.copyError, canShare: !!navigator.share }),
+});
+const AGENT_SHEETS = { invoice: invoiceSheet, dispute: disputeSheet, transfer: transferSheet, payout: payoutSheet, invite: inviteSheet, ...agentPanel.sheets };
 
 // 방의 할 일에서 열면 비어 있고, 내 비서 설정에서 열면 저장된 은행·예금주를 채운다. 계좌번호는 끝 4자리만 알아서 새로 입력한다
 function openPayoutSheet(saved = null) {
-  const known = saved && BANKS.some((b) => b.label === saved.bank);
-  state.payoutDraft = saved
-    ? { bank: saved.bank, accountNo: '', holder: saved.holder, other: !known, last4: saved.last4 }
-    : { bank: BANKS[0].label, accountNo: '', holder: state.data.me.name, other: false };
+  state.payoutDraft = payoutDraftFrom(saved, state.data.me.name);
   state.payoutFromAgent = Boolean(saved) || state.sheet === 'agent';
   openAgentSheet('payout');
 }
@@ -1341,6 +1493,10 @@ async function agentAct(name, d) {
 function render() {
   const main = $('#main');
   if (!state.data) renderChannel();
+  if (inviteToken) {
+    main.innerHTML = joinHtml(setup.invitePreview, setup.join, { ...setup, dev: authOptions().dev });
+    return;
+  }
   if (!roomId || state.error?.status === 'seed') {
     main.innerHTML = noRoom();
     return;
@@ -1352,8 +1508,16 @@ function render() {
       <section class="next"><div class="actions"><button class="btn" data-action="seed">데모 방 만들기</button></div></section>`;
     return;
   }
+  // 실제 방(배포, 또는 개발용 서버에서 만든 방)을 열지 못했을 때. 어디로 나갈지 함께 보여 준다
+  if (!state.data && (!authOptions().dev || !isDemoRoom())) {
+    const notMember = state.error?.status === 403;
+    const title = !state.error ? '방을 여는 중…' : notMember ? '이 방의 멤버가 아니에요' : '방을 열 수 없어요';
+    const sub = !state.error ? '' : notMember ? '방에 있는 친구에게 초대 링크를 받아 들어와 주세요.' : state.error.message || '연결을 확인해 주세요';
+    main.innerHTML = `<section class="hero"><h1>${title}</h1>${sub ? `<p class="sub">${esc(sub)}</p>` : ''}</section>
+      ${state.error ? '<section class="next"><div class="actions"><a class="btn" href="account.html">내 방 목록</a><a class="btn plain" href="room.html">새 방 만들기</a></div></section>' : ''}`;
+    return;
+  }
   if (!state.data) {
-    if (!authOptions().dev) { main.innerHTML = `<section class="hero"><h1>방을 열 수 없어요</h1><p>${esc(state.error?.message || '연결을 확인해 주세요')}</p><a href="account.html">내 계정으로 돌아가기</a></section>`; return; }
     // 아직 누구인지 모르거나(401) 이 방 멤버가 아니면(403) 방 정보 없이 멤버 목록도 모른다.
     // 개발용 시드 방의 uid로 고르게 한다.
     const seedMembers = [['me', '나'], ['cs', '철수'], ['yh', '영희'], ['ms', '민수']];
@@ -1368,10 +1532,11 @@ function render() {
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
   meMenu.update();
-  main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), nextCard(), disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
+  const roomSetup = setupHtml({ room: state.data.room, me: state.data.me, avatar, policyEdit: setup.policyEdit, error: setup.error });
+  main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), nextCard(), roomSetup, disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
   mountSegs(main);
   // 이의·청구서 시트는 글을 쓰는 중이면 다시 그리지 않는다(타이핑 중 초점을 잃지 않게)
-  if (['exp', 'transfer'].includes(state.sheet) || (state.sheet === 'dispute' && !state.rejectDraft) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
+  if (['exp', 'transfer', 'invite'].includes(state.sheet) || (state.sheet === 'dispute' && !state.rejectDraft) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
 }
 
 // ---------------------------------------------------------------- 이벤트
@@ -1388,10 +1553,12 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   agentPanel.onKeydown(e);
+  if (rangeKeys(e)) return;
   if (e.key === 'Escape') {
     if (meMenu.isOpen) meMenu.close();
     else if (logPop.isOpen) logPop.close();
     else if (!$('#photo-modal').hidden) closePhoto();
+    else if (setup.picker.open && !roomId) rangeAct('range-toggle', {});
     else sheet.close();
   }
   else if (e.key === 'Enter' && e.target.dataset?.rd !== undefined && !e.isComposing) act('reject', { id: state.ref }); // 한글 조합 중의 Enter는 글자를 확정하는 키라 제외
@@ -1399,6 +1566,7 @@ document.addEventListener('keydown', (e) => {
 });
 // 입력칸은 다시 그리지 않고 값만 기억한다(타이핑 중 초점을 잃지 않게)
 document.addEventListener('input', (e) => {
+  if (e.target.dataset?.cf) setup.create[e.target.dataset.cf] = e.target.value;
   if (e.target.dataset?.dd && state.disputeDraft) {
     state.disputeDraft[e.target.dataset.dd] = e.target.value;
     const send = $('#dispute-send');
@@ -1476,14 +1644,24 @@ async function loadConfig() {
 }
 
 loadConfig();
+document.addEventListener('focusin', (e) => {
+  if (e.target.matches?.('[data-select-all]')) e.target.select(); // 초대 링크 칸은 누르면 통째로 고른다
+});
 try {
   await initAuth();
   if (roomId) {
-    if (!authOptions().dev && !currentUid()) location.replace('account.html');
+    // 로그인하지 않았으면 계정 화면에서 로그인한 뒤 이 방으로 돌아온다(next)
+    if (!authOptions().dev && !currentUid()) location.replace(`account.html?next=${encodeURIComponent(`room.html${location.search}`)}`);
     else { await load(); if (currentUid()) watch(); }
-  } else render();
+  } else {
+    // 방 만들기·초대 화면은 이 자리에서 로그인한다. 로그인하면 내 프로필(이름·색)을 불러와 다시 그린다
+    await loadProfile();
+    if (inviteToken) await loadInvite();
+    else render();
+  }
   const sessionUid = currentUid();
   onSessionChange(user => {
+    if (!roomId) return void loadProfile().then(render);
     if (!user || user.uid !== sessionUid) { unsubscribe(); state.data = null; state.events = []; location.replace('account.html'); }
   });
 } catch (e) { state.error = e; render(); }

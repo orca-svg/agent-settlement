@@ -8,7 +8,7 @@ import { eraseUserSnapshot } from './erase-user.mjs';
 
 const ORDER = '_order';
 const MEMBERS = '_memberUids';
-const ROOM_COLS = ['expenses', 'invoices', 'disputes', 'transfers'];
+const ROOM_COLS = ['expenses', 'invoices', 'disputes', 'transfers', 'invites']; // invites(#4): 탈퇴하면 링크를 만든 사람만 끊는다
 
 // Firestore 문서 id 규칙. '/'가 들어가면 다른 경로에 조용히 써지므로 넣기는 막는다.
 // 읽기·지우기는 그런 id를 '없음'으로 다룬다(요청에서 온 id가 이상해도 MemoryStore처럼 null → 404)

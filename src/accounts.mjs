@@ -2,6 +2,10 @@ import { HttpError, readJson } from './http.mjs';
 import { revokeQrLinks, revokeUserQr } from './payments/qr.mjs';
 import { randomProfileColor } from '../public/profile-colors.js';
 import { forgetVerified } from './identity.mjs';
+// 내 프로필(방에 보일 이름·색). 처음 들어온 사람은 로그인 이름과 견본 중 무작위 색으로 시작한다.
+// 저장해 두어 다시 열어도 같은 색이고, 동시에 와도 하나로 정해지게 없을 때만 넣는다. 방 만들기·참가(#4)도 이 값을 멤버에 넣는다
+export const profileOf = async (store, me) => await store.get('users', me.uid) || await store.putIfAbsent('users', { id: me.uid, name: me.name, color: randomProfileColor() });
+
 export function registerAccountRoutes(routes, { store, authenticate, auth, clock, onErased = () => {} }) {
   routes.get('/api/me/deletion', async ({ req }) => {
     const me = await authenticate(req, { allowDeleting: true });
@@ -9,10 +13,7 @@ export function registerAccountRoutes(routes, { store, authenticate, auth, clock
   });
   routes.get('/api/me', async ({ req }) => {
     const me = await authenticate(req);
-    // 처음 들어온 사람은 견본 중 무작위 색으로 시작한다. 저장해 두어 다시 열어도 같은 색이다.
-    // 이 GET은 줄에 서지 않으므로, 동시에 와도 색이 하나로 정해지게 없을 때만 넣는다
-    const profile = await store.get('users', me.uid) || await store.putIfAbsent('users', { id: me.uid, name: me.name, color: randomProfileColor() });
-    return { profile };
+    return { profile: await profileOf(store, me) };
   });
   routes.post('/api/me', async ({ req }) => {
     const me = await authenticate(req);
