@@ -93,13 +93,15 @@ const ICONS = {
 export const tile = (kind) => `<span class="tile ${ICONS[kind] ? kind : 'shop'}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICONS[kind] || ICONS.shop}</svg></span>`;
 export const CHEVRON = '<svg class="chev" width="8" height="14" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 export const CHECK = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-// 링크 줄의 아이콘(글자색을 따른다). Lucide link·copy·share·check(lucide-static 0.460.0), ISC License,
+// 링크 줄의 아이콘(글자색을 따른다). Lucide link·copy·share·check·external-link(lucide-static 0.460.0), ISC License,
 // Copyright (c) Lucide Contributors 2022, portions Copyright (c) Cole Bemis 2013-2022 (Feather, MIT). https://lucide.dev/license
 const lucide = (d, size = 18) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 export const ICON_LINK = lucide('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>', 16);
 export const ICON_COPY = lucide('<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>');
 export const ICON_SHARE = lucide('<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/>');
 export const ICON_DONE = lucide('<path d="M20 6 9 17l-5-5"/>');
+// 다른 앱·새 창으로 나가는 링크 버튼 끝에 붙인다
+export const ICON_EXTERNAL = lucide('<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>', 15);
 export const ALERT = '<svg class="alert-ico" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5l9 15.5H3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4.5M12 17.4v.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 export const CROSS = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>';
 export const ARROW = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -235,7 +237,9 @@ export function groupRuns(list) {
 
 // 시트: 스프링으로 올라오고, 손잡이를 끌어 내리면 놓는 속도로 닫힐지 정한다.
 // open(beforeMeasure)는 내용을 그린 뒤 높이를 재야 하므로 그리는 함수를 받는다.
-export function createSheet(root, { onClosed } = {}) {
+// onTravel(p)는 시트가 올라온 정도(0~1)를 매 프레임 받는다. 겹친 시트가 뒤 시트를 그만큼 물리는 데 쓴다
+let openSheets = 0; // 겹친 시트 하나를 닫아도 아래 시트가 열려 있으면 뒤 화면 스크롤을 계속 막는다
+export function createSheet(root, { onClosed, onTravel } = {}) {
   const sheetEl = root.querySelector('.sheet');
   const scrim = root.querySelector('.scrim');
   const handle = root.querySelector('.sheet-head');
@@ -243,8 +247,10 @@ export function createSheet(root, { onClosed } = {}) {
   let closing = false;
   let returnFocus = null;
   const y = new Spring(0, (v) => {
+    const p = Math.max(0, Math.min(1, 1 - v / (h || 1)));
     sheetEl.style.transform = `translate3d(0, ${v}px, 0)`;
-    scrim.style.opacity = String(Math.max(0, Math.min(1, 1 - v / (h || 1))));
+    scrim.style.opacity = String(p);
+    onTravel?.(p);
   });
 
   function open(beforeMeasure = () => {}) {
@@ -256,6 +262,7 @@ export function createSheet(root, { onClosed } = {}) {
     }
     returnFocus = document.activeElement;
     root.hidden = false;
+    openSheets += 1;
     document.body.classList.add('sheet-open');
     beforeMeasure();
     h = sheetEl.offsetHeight;
@@ -277,7 +284,9 @@ export function createSheet(root, { onClosed } = {}) {
       closing = false;
       root.hidden = true;
       root.classList.remove('shown');
-      document.body.classList.remove('sheet-open');
+      openSheets = Math.max(0, openSheets - 1);
+      if (!openSheets) document.body.classList.remove('sheet-open');
+      onTravel?.(0);
       onClosed?.();
       returnFocus?.focus?.({ preventScroll: true });
     };

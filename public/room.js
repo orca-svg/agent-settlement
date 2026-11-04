@@ -10,6 +10,7 @@ import { initAuth, authOptions, onSessionChange, login } from './auth.js';
 import { createAgentPanel, personChipHtml } from './agent-panel.js';
 import { notifies } from './agent-rules.js';
 import { readVisits, departure, timelineSummary, expenseWindow, kstTime, keepForSettlement } from './timeline.js';
+import { guessOs, guideHtml } from './timeline-guide.js';
 import { createRoomHtml, joinHtml, setupHtml, notAgreed, inviteUrl, datesLabel, inviteSheetHtml, inviteButtonHtml } from './room-setup.js';
 import { pickDay, presetRange, nextFocus, shiftMonth, todayIso } from './date-range.js';
 import { payoutFieldsHtml, payoutDraftFrom } from './payout-form.js';
@@ -1045,7 +1046,7 @@ function locationSection() {
     : visits
     ? `<div class="list"><div class="row">${tile('pin')}${rowText('Google 지도 타임라인을 올렸어요', visits.length ? `이 정산 기간 방문 ${visits.length}곳 · 이의를 낼 때 자동으로 찾아요` : '이 정산 기간의 기록이 없어요')}
         <button type="button" class="text-btn" data-action="timeline-forget">지우기</button></div></div>`
-    : `<div class="list"><button type="button" class="row" data-action="timeline-pick">${tile('pin')}${rowText('Google 지도 타임라인 올리기', '여행이 끝난 뒤 한 번만 올리면 돼요', CHEVRON)}</button></div>`;
+    : `<div class="list"><button type="button" class="row" data-action="timeline-guide" aria-haspopup="dialog">${tile('pin')}${rowText('Google 지도 타임라인 올리기', '여행이 끝난 뒤 한 번만 올리면 돼요', CHEVRON)}</button></div>`;
   return `<section class="group"><h2 class="group-label"><span>내 위치 기록</span><span>선택</span></h2>${body}
     ${state.timelineError ? `<p class="form-error" role="alert">${esc(state.timelineError)}</p>` : ''}
     <p class="group-note">파일은 이 기기에서만 읽어요. 이 정산 기간의 방문 시각만 이 브라우저에 ${TIMELINE_DAYS}일 두고, 이의를 낼 때 내가 켠 한 줄만 상대에게 가요.</p></section>`;
@@ -1060,7 +1061,7 @@ function timelineSection(exp, tl) {
     ? rowText(`결제(${r.stayedUntil})까지 머물렀어요`, `첫 주문 ${kstTime(from)}부터 같은 곳`)
     : rowText(`${r.leftAt}에 떠났어요`, `첫 주문 ${kstTime(from)} 때 있던 곳 · ${r.nextAt ? `${r.nextAt} ${r.nextHome ? '집' : '다른 장소'} 도착` : '도착 기록 없음'}`));
   const body = !tl
-    ? `<div class="list"><button type="button" class="row" data-action="timeline-pick">${tile('pin')}${rowText('Google 지도 타임라인 올리기', `이 지출 시간대(${kstTime(from)}~${kstTime(until)})를 찾아요`, CHEVRON)}</button></div>
+    ? `<div class="list"><button type="button" class="row" data-action="timeline-guide" aria-haspopup="dialog">${tile('pin')}${rowText('Google 지도 타임라인 올리기', `이 지출 시간대(${kstTime(from)}~${kstTime(until)})를 찾아요`, CHEVRON)}</button></div>
       <p class="group-note">휴대폰 Google 지도에서 내보낸 타임라인 파일(JSON)을 골라요. 한 번 올리면 이 정산의 다른 이의에도 다시 고르지 않고 써요.</p>`
     : tl.state === 'reading' ? `<div class="list" aria-busy="true"><div class="row">${tile('pin')}${rowText('이 시간대만 찾는 중…')}</div></div>`
     : tl.state === 'none' ? `<div class="list"><div class="row">${tile('pin')}${rowText('이 시간대 기록이 없어요', '위치 요약 없이 이의를 보내요')}</div></div>`
@@ -1077,6 +1078,16 @@ function timelineSection(exp, tl) {
 function applyTimeline(visits, exp, saved = false) {
   const result = departure(visits, exp);
   state.disputeDraft.timeline = result ? { state: 'found', result, summary: timelineSummary(result, exp), agree: false, saved } : { state: 'none', saved };
+}
+
+// 타임라인 올리기 안내(#7). 처음 올릴 때는 바로 파일을 고르게 하지 않고, 이 기기에 맞는 내보내기 단계와
+// 'Google 지도 열기'·'내보낸 파일 고르기'를 보여 준다. 컴퓨터에는 타임라인이 없어서 지도 링크 없이 파일만 고른다
+const deviceOs = guessOs(navigator.userAgent, navigator.maxTouchPoints);
+let guideOs = deviceOs === 'android' ? 'android' : 'ios';
+function renderGuide() {
+  const body = $('#guide-body');
+  body.innerHTML = guideHtml({ os: guideOs, phone: deviceOs !== 'computer' });
+  mountSegs(body);
 }
 
 // 파일 고르기. 문서에 붙인 입력은 다시 그릴 때 사라지므로 고를 때마다 만든다
@@ -1353,7 +1364,7 @@ function followUp(event) {
 }
 document.addEventListener('visibilitychange', () => followUp(document.hidden ? 'hidden' : 'visible'));
 
-const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'timeline-pick', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'reject-ask', 'reject-cancel', 'reject', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
+const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'timeline-pick', 'timeline-guide', 'tl-os', 'timeline-file', 'close-guide', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'reject-ask', 'reject-cancel', 'reject', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
 
 
 async function agentAct(name, d) {
@@ -1407,6 +1418,16 @@ async function agentAct(name, d) {
     renderSheet();
   } else if (name === 'timeline-pick') {
     pickTimeline();
+  } else if (name === 'timeline-guide') {
+    guide.open(renderGuide);
+  } else if (name === 'tl-os') {
+    guideOs = d.id;
+    renderGuide();
+  } else if (name === 'timeline-file') {
+    pickTimeline(); // 파일 선택 창은 이 누름 안에서 바로 열어야 한다. 안내는 그 뒤에 내린다
+    guide.close();
+  } else if (name === 'close-guide') {
+    guide.close();
   } else if (name === 'timeline-forget') {
     forgetVisits();
     render();
@@ -1559,6 +1580,7 @@ document.addEventListener('keydown', (e) => {
     else if (logPop.isOpen) logPop.close();
     else if (!$('#photo-modal').hidden) closePhoto();
     else if (setup.picker.open && !roomId) rangeAct('range-toggle', {});
+    else if (guide.visible) guide.close(); // 겹친 안내부터 내린다
     else sheet.close();
   }
   else if (e.key === 'Enter' && e.target.dataset?.rd !== undefined && !e.isComposing) act('reject', { id: state.ref }); // 한글 조합 중의 Enter는 글자를 확정하는 키라 제외
@@ -1618,6 +1640,8 @@ const sheet = createSheet($('#sheet-root'), {
     qrAsked = { id: null, at: 0 };
   },
 });
+// 안내가 올라오는 만큼 아래 시트가 작아지며 물러난다(style.css의 --behind)
+const guide = createSheet($('#guide-root'), { onTravel: (p) => $('#sheet').style.setProperty('--behind', p.toFixed(3)) });
 const nav = $('#nav');
 addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 56), { passive: true });
 addEventListener('resize', () => {

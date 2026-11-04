@@ -63,6 +63,21 @@
     </section>
   </div>
 
+  <!-- 타임라인 올리기 안내(#7). 이의 시트 위에 한 겹 더 올라오고, 닫으면 안내만 닫힌다 -->
+  <div class="sheet-root" id="guide-root" hidden>
+    <div class="scrim" data-action="close-guide"></div>
+    <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="guide-title" tabindex="-1">
+      <div class="sheet-head">
+        <div class="grabber" aria-hidden="true"></div>
+        <div class="sheet-bar">
+          <h2 id="guide-title">타임라인 올리기</h2>
+          <button class="text-btn" type="button" data-action="close-guide">닫기</button>
+        </div>
+      </div>
+      <div class="sheet-body" id="guide-body"></div>
+    </section>
+  </div>
+
   <div class="photo-modal" id="photo-modal" role="dialog" aria-modal="true" aria-label="영수증 사진" hidden>
     <div class="photo-scrim" data-action="close-photo"></div>
     <figure>
