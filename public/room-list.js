@@ -12,6 +12,8 @@ export function roomTabs(rooms, tab = 'live') {
       ${TABS.map(([id, label]) => `<button type="button" role="radio" aria-checked="${id === current}" data-id="${id}">${label} ${count[id]}</button>`).join('')}</div>`
     : '';
   // 진행 중인 방이 없을 때는 끝난 방이 어디 있는지 알려 준다
-  const empty = done.length ? '진행 중인 방이 없어요. 정산이 끝난 방은 ‘끝남’에서 볼 수 있어요.' : '아직 참여한 방이 없어요. 새 방을 만들거나 친구에게 초대 링크를 받으면 여기에 보여요.';
+  const empty = done.length
+    ? { title: '진행 중인 방이 없어요', meta: '정산이 끝난 방은 ‘끝남’에서 볼 수 있어요.' }
+    : { title: '아직 참여한 방이 없어요', meta: '새 방을 만들거나 친구에게 받은 초대 링크로 참가하면 여기에 보여요.' };
   return { tab: current, rooms: current === 'done' ? done : live, html, empty };
 }

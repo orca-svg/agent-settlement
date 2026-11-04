@@ -2,7 +2,7 @@
 // 카톡 안 브라우저에서 로그인이 막혀도, 링크를 복사해 앱(기본 브라우저)에서 이어서 참가할 수 있게 한다
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inviteTokenFrom, joinLinkHtml } from '../public/join-link.js';
+import { inviteTokenFrom, joinLinkHtml, joinFormHtml } from '../public/join-link.js';
 
 const token = 'AbCdEfGhIjKlMnOpQrStUv_-';
 
@@ -27,4 +27,12 @@ test('접힌 줄: 무엇을 하는 줄인지 알리고, 누르면 그 자리에 
   assert.match(html, /<input[^>]*id="join-input"[^>]*aria-label="받은 초대 링크"/);
   assert.match(html, /<button[^>]*type="submit"[^>]*>참가 화면 열기</);
   assert.match(html, /id="join-error"[^>]*role="alert"/, '알아볼 수 없을 때 입력칸 바로 아래에 알린다');
+});
+
+// 넓은 '내 방' 화면은 접힌 줄 대신 머리말 오른쪽의 버튼이 같은 입력칸을 연다. 입력칸은 어느 쪽이든 하나다
+test('입력칸만 따로: 머리말 버튼이 여는 입력칸과 접힌 줄이 여는 입력칸은 같다', () => {
+  const form = joinFormHtml();
+  assert.match(form, /^<form[^>]*id="join-link"[^>]*hidden/);
+  assert.doesNotMatch(form, /join-toggle/, '여닫는 버튼은 화면마다 따로 둔다');
+  assert.ok(joinLinkHtml().endsWith(form));
 });

@@ -200,5 +200,6 @@ test('내 방 목록: 끝난 방이 있을 때만 진행 중 | 끝남 탭으로 
   assert.match(first.html, /aria-checked="false" data-id="done">끝남 1/);
   assert.deepEqual(roomTabs(rooms, 'done').rooms.map((r) => r.id), ['c']);
   assert.equal(roomTabs(live, 'done').tab, 'live', '끝난 방이 없어지면 진행 중으로 돌아온다');
-  assert.match(roomTabs([{ id: 'c', status: 'done' }]).empty, /‘끝남’에서 볼 수 있어요/);
+  assert.match(roomTabs([{ id: 'c', status: 'done' }]).empty.meta, /‘끝남’에서 볼 수 있어요/);
+  assert.equal(roomTabs([]).empty.title, '아직 참여한 방이 없어요');
 });
