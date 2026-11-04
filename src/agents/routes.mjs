@@ -44,6 +44,12 @@ export function registerAgentRoutes(routes, { orchestrator, member, store, overL
     return orchestrator.agree(params.id, params.did, me.uid);
   });
 
+  // 중재안 거부: 이의가 끝나고 지금 배분 그대로 정산이 이어진다. { reason? }는 한 줄 사유
+  routes.post('/api/rooms/:id/disputes/:did/reject', async ({ req, params }) => {
+    const { me } = await member(req, params.id);
+    return orchestrator.reject(params.id, params.did, me.uid, await readJson(req));
+  });
+
   // 받을 계좌(#8이 설정 화면을 만든다). 계좌번호는 송금 당사자에게만 내려간다(GET room의 redactTransfer)
   routes.post('/api/rooms/:id/payout', async ({ req, params }) => {
     const { me } = await member(req, params.id);
@@ -51,7 +57,8 @@ export function registerAgentRoutes(routes, { orchestrator, member, store, overL
   });
 
   // qr: 데스크톱 송금 화면을 열 때 휴대폰으로 넘길 QR 토큰을 새로 받는다(보내는 사람만)
-  const step = { approve: 'approveTransfer', qr: 'qrFor', sent: 'markSent', confirm: 'confirmReceipt' };
+  // not-received: 받는 사람이 "아직 안 들어왔어요"(sent일 때만). 상태는 sent로 두고 표시만 붙여 보내는 사람에게 다시 묻는다
+  const step = { approve: 'approveTransfer', qr: 'qrFor', sent: 'markSent', confirm: 'confirmReceipt', 'not-received': 'reportNotReceived' };
   for (const [path, fn] of Object.entries(step)) {
     routes.post(`/api/rooms/:id/transfers/:tid/${path}`, async ({ req, params }) => {
       const { me } = await member(req, params.id);

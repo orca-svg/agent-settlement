@@ -11,7 +11,7 @@ let now = new Date('2026-11-03T10:00:00Z');
 let server;
 let base;
 before(async () => {
-  server = createApp({ store, gemini: null, clock: () => now, env: {} });
+  server = createApp({ store, gemini: null, clock: () => now, env: { DEV_SEED: '1' } });
   await new Promise((r) => server.listen(0, r));
   base = `http://localhost:${server.address().port}`;
 });
@@ -143,4 +143,12 @@ test('정산을 시작하면 초대·참가·정책 변경을 막는다', async 
 test('방을 만들 때 적은 내 이름이 멤버 이름이 된다', async () => {
   const { json } = await post('/api/rooms', 'me', { name: '회식', myName: '  재윤  ' });
   assert.deepEqual(json.room.members, [{ uid: 'me', name: '재윤' }]);
+});
+
+test('로그인 프로필(users/{uid})이 있으면 적은 이름 대신 프로필 이름·색으로 들어간다', async () => {
+  await store.put('users', { id: 'yh', name: '영희', color: '#ff9500' });
+  const { roomId, token } = await roomWithInvite();
+  await post(`/api/invites/${token}/join`, 'yh', { agree: true, name: '아무개' });
+  const joined = (await store.get('rooms', roomId)).members.find((m) => m.uid === 'yh');
+  assert.deepEqual(joined, { uid: 'yh', name: '영희', color: '#ff9500' });
 });

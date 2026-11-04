@@ -8,7 +8,7 @@ const store = new MemoryStore();
 let server;
 let base;
 before(async () => {
-  server = createApp({ store, gemini: null, env: {} });
+  server = createApp({ store, gemini: null, env: { DEV_SEED: '1' } });
   await new Promise((r) => server.listen(0, r));
   base = `http://localhost:${server.address().port}`;
 });
