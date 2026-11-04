@@ -3,7 +3,7 @@
 import { won, money, dayLabel, amountOf, toKrw, shares, settle, active } from './core.js';
 import { unitOf, decimalsOf } from './currencies.js';
 import { leaveBlock } from './leave.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, CROSS, ICON_DONE, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, flaggedLines, blockedNotice, askedBy, nudge, COMPUTER_QUERY, disputeWaiting, disputeChoices, disputeNote, disputeRejected, disputeLive, disputeStatus } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, CROSS, ICON_DONE, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, flaggedLines, blockedNotice, askedBy, nudge, COMPUTER_QUERY, disputeWaiting, disputeChoices, disputeNote, disputeRejected, disputeLive, disputeStatus, changedLines, proposalLinesHtml, reviseChoicesHtml } from './ui.js';
 import { reduceMotion } from './motion.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
@@ -25,7 +25,7 @@ const inviteToken = roomId ? null : new URLSearchParams(location.search).get('in
 const setup = { create: { name: '', start: '', end: '', foreign: false, fxCurrency: 'JPY', policy: 'actual' }, picker: { open: false, month: '', focus: '', entering: false }, join: {}, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, copied: false, busy: false, error: '', armed: null, removeError: null, leaving: false, leaveError: '' };
 // 로그인이 없는 개발용 서버에서만: 처음 방을 만들거나 참가할 때 이 브라우저용 uid를 하나 만든다. 배포에서는 Google 로그인 신원을 쓴다
 const ensureUid = () => currentUid() || (authOptions().dev ? (setCurrentUid(`u-${crypto.randomUUID().slice(0, 8)}`), currentUid()) : null);
-const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null, disputeDone: null, rejectDraft: null, sendBlocked: false, announceBlocked: false, focusLine: null };
+const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null, disputeDone: null, rejectDraft: null, reviseDraft: null, sendBlocked: false, announceBlocked: false, focusLine: null };
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
@@ -612,7 +612,7 @@ async function loadInvite() {
 }
 
 async function act(name, d) {
-  if (name !== 'agree' && name !== 'reject') state.disputeDone = null; // 동의·거부 결과 한 줄은 다음 조작 전까지만 남긴다
+  if (name !== 'agree' && name !== 'reject' && name !== 'revise-send') state.disputeDone = null; // 동의·거부·고쳐 제안한 결과 한 줄은 다음 조작 전까지만 남긴다
   if (SETUP_ACTIONS.has(name)) return setupAct(name, d);
   if (agentPanel.handles(name)) return agentPanel.act(name, d);
   if (AGENT_ACTIONS.has(name)) return agentAct(name, d); // 송금 링크는 이 호출 안에서 동기적으로 연다
@@ -1078,11 +1078,17 @@ function invoiceSheet() {
   };
 }
 
-// 중재안에 할 수 있는 것: 동의하거나, 거부해서 이의를 끝낸다. 거부는 되돌릴 수 없어서
+// 중재안에 할 수 있는 것: 동의하거나, 거부해서 이의를 끝내거나, 줄별 사람을 고쳐 다시 제안한다(#62).
+// 줄을 고쳤으면 보이는 배분이 중재안과 달라서 동의·거부 대신 '고친 배분으로 제안하기'와 '되돌리기'만 둔다.
+// 거부는 되돌릴 수 없어서
 // 한 번 누르면 까닭(선택)을 적는 칸과 확정 버튼이 열리고, 그동안 동의 버튼은 숨겨 칸이 동의에 딸린 것처럼 읽히지 않게 한다.
 // 동의와는 아이콘·글자·바탕이 달라 색만 보고 고르지 않게 한다
-function proposalChoices(d, exp, uid) {
+function proposalChoices(d, exp, uid, edited) {
   const choose = disputeChoices(d, exp, uid);
+  if (choose.revise && edited) {
+    const other = [exp.payer, d.by].find((u) => u !== uid);
+    return reviseChoicesHtml({ disputeId: d.id, other: other ? nameOf(other) : '상대', busy: state.busy === 'revise' });
+  }
   const rd = state.rejectDraft;
   const busy = state.busy === 'reject';
   const waiting = disputeWaiting(d, exp);
@@ -1237,19 +1243,30 @@ function disputeSheet() {
       ? `${formError()}<button class="btn" style="width:100%" data-action="mediate" data-id="${esc(d.id)}" ${state.busy === 'mediate' ? 'disabled' : ''}>${state.busy === 'mediate' ? '중재 비서가 보는 중…' : '중재 비서에게 맡기기'}</button>`
       : '<p class="group-note">당사자가 중재를 맡기면 중재안이 여기에 올라와요.</p>';
   } else if (d.proposal) {
+    // 당사자는 줄마다 사람 칩을 눌러 중재안을 고친다(#62). 고친 줄은 이 화면에만 두다가 '고친 배분으로 제안하기'로 보낸다.
+    // 그사이 상대가 먼저 고쳐 중재안의 판(rev)이 바뀌면 내가 고른 것은 거두고, 바뀐 배분을 보게 알린다
+    const choose = disputeChoices(d, exp, me.uid);
+    const rev = d.proposal.rev ?? 0;
+    const rd = state.reviseDraft?.id === d.id ? state.reviseDraft : null;
+    const draft = choose.revise && rd?.rev === rev ? rd.lines : {};
+    const edited = changedLines(d.proposal.alloc, draft).length > 0;
+    const stale = choose.revise && rd && rd.rev !== rev && d.proposal.revisedBy !== me.uid && changedLines(d.proposal.alloc, rd.lines).length > 0;
+    const alloc = Object.fromEntries(Object.entries(d.proposal.alloc).map(([id, a]) => [id, draft[id] ? { ...a, consumers: draft[id] } : a]));
     const now = shares(exp, room, room.policy).krwShare;
-    const after = shares({ ...exp, split: 'items' }, room, room.policy, d.proposal.alloc).krwShare;
-    const lines = (exp.items ?? []).map((it) => `<div class="row"><span class="grow"><span class="title">${esc(it.name)} ×${it.qty}</span>
-        <span class="meta" style="display:block">${esc(it.time || '')} · ${(d.proposal.alloc[it.id]?.consumers ?? []).map(nameOf).map(esc).join('·')}</span></span></div>`).join('');
+    const after = shares({ ...exp, split: 'items' }, room, room.policy, alloc).krwShare;
+    const lines = proposalLinesHtml(exp, d.proposal.alloc, { draft, editable: choose.revise && !state.rejectDraft && state.busy !== 'revise', nameOf, avatar });
     const people = exp.present.map((u) => `<div class="row" style="--inset:52px">${avatar(u)}<span class="grow">${esc(nameOf(u))}</span>
         <span class="amount num">${won(now[u] ?? 0)} → ${won(after[u] ?? 0)}</span></div>`).join('');
     body = `<section class="group"><h3 class="group-label"><span>중재안</span><span>${esc(allocLabel({ source: d.proposal.source }))}</span></h3>
-        <p class="how">${esc(d.proposal.summary)}</p><div class="list">${lines}</div></section>
-      <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>지금 → 중재안</span></h3><div class="list">${people}</div></section>
+        <p class="how">${esc(d.proposal.summary)}</p>
+        ${stale ? `<p class="group-note" role="status">그사이 ${esc(subj(nameOf(d.proposal.revisedBy)))} 중재안을 고쳐서 내가 고른 것은 거뒀어요. 바뀐 배분을 보고 다시 골라 주세요.</p>` : ''}
+        <div class="list">${lines}</div>
+        ${choose.revise && !edited && !state.rejectDraft ? '<p class="group-note">맞지 않는 줄은 이름을 눌러 고친 뒤 다시 제안할 수 있어요.</p>' : ''}</section>
+      <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>지금 → ${edited ? '고친 배분' : '중재안'}</span></h3><div class="list">${people}</div></section>
       ${formError()}
       ${d.status === 'resolved' ? '<p class="group-note">양쪽이 동의해서 이 지출을 다시 나눴어요.</p>'
         : disputeRejected(d) ? `<p class="group-note">${esc(disputeNote(d, exp, nameOf))}</p>${d.rejectReason ? `<p class="group-note">까닭: ${esc(d.rejectReason)}</p>` : ''}`
-        : proposalChoices(d, exp, me.uid)}`;
+        : proposalChoices(d, exp, me.uid, edited)}`;
   }
   return {
     title: `‘${exp.title}’ 이의`,
@@ -1453,7 +1470,7 @@ function followUp(event) {
 }
 document.addEventListener('visibilitychange', () => followUp(document.hidden ? 'hidden' : 'visible'));
 
-const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-toggle', 'timeline-pick', 'timeline-guide', 'tl-os', 'timeline-file', 'close-guide', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'reject-ask', 'reject-cancel', 'reject', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
+const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-toggle', 'timeline-pick', 'timeline-guide', 'tl-os', 'timeline-file', 'close-guide', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'reject-ask', 'reject-cancel', 'reject', 'revise-pick', 'revise-reset', 'revise-send', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
 
 
 async function agentAct(name, d) {
@@ -1554,6 +1571,7 @@ async function agentAct(name, d) {
     }
   } else if (name === 'open-dispute') {
     state.rejectDraft = null;
+    state.reviseDraft = null;
     openAgentSheet('dispute', d.id);
   } else if (name === 'mediate') {
     state.busy = 'mediate';
@@ -1562,12 +1580,51 @@ async function agentAct(name, d) {
     state.busy = null;
     renderSheet();
   } else if (name === 'agree') {
-    // 동의하면 시트를 닫고 결과는 방 화면에 한 줄로 남긴다. 실패(409 등)하면 시트를 그대로 두고 까닭을 보여 준다
-    if (await post(`/disputes/${enc(d.id)}/agree`)) {
+    // 동의하면 시트를 닫고 결과는 방 화면에 한 줄로 남긴다. 실패(409 등)하면 시트를 그대로 두고 까닭을 보여 준다.
+    // 보고 있던 중재안의 판을 함께 보내, 그사이 상대가 고친 배분에 모르고 동의하지 않게 한다(#62)
+    if (await post(`/disputes/${enc(d.id)}/agree`, { rev: byId('disputes', d.id)?.proposal?.rev ?? 0 })) {
       state.disputeDone = d.id;
       sheet.close();
       render();
       $('#dispute-note')?.scrollIntoView({ block: 'nearest' });
+    }
+  } else if (name === 'revise-pick') {
+    // 지출 시트의 줄 고르기(pick)와 같다: 누를 때마다 넣고 빼되, 줄마다 한 명은 남는다. 고르기 시작한 판(rev)을 함께 기억한다
+    const dsp = byId('disputes', state.ref);
+    const exp = dsp && byId('expenses', dsp.expenseId);
+    if (!exp || dsp.status !== 'proposed') return;
+    const rev = dsp.proposal.rev ?? 0;
+    if (state.reviseDraft?.id !== dsp.id || state.reviseDraft.rev !== rev) state.reviseDraft = { id: dsp.id, rev, lines: {} };
+    const lines = state.reviseDraft.lines;
+    const set = new Set(lines[d.line] ?? dsp.proposal.alloc[d.line]?.consumers ?? []);
+    if (set.has(d.p)) set.delete(d.p); else set.add(d.p);
+    if (set.size) lines[d.line] = exp.present.filter((u) => set.has(u));
+    state.formError = '';
+    renderSheet();
+    $(`[data-action="revise-pick"][data-line="${CSS.escape(d.line)}"][data-p="${CSS.escape(d.p)}"]`)?.focus({ preventScroll: true });
+  } else if (name === 'revise-reset') {
+    state.reviseDraft = null;
+    state.formError = '';
+    renderSheet();
+  } else if (name === 'revise-send') {
+    // 고친 배분으로 다시 제안하면 내가 동의한 것이 되어 시트를 닫고, 결과는 동의처럼 방 화면에 한 줄로 남긴다
+    const dsp = byId('disputes', d.id);
+    const exp = dsp && byId('expenses', dsp.expenseId);
+    const draft = state.reviseDraft;
+    if (state.busy === 'revise' || !exp || draft?.id !== d.id) return;
+    const alloc = Object.fromEntries(exp.items.map((it) => [it.id, draft.lines[it.id] ?? dsp.proposal.alloc[it.id]?.consumers ?? []]));
+    state.busy = 'revise';
+    renderSheet();
+    const ok = await post(`/disputes/${enc(d.id)}/revise`, { alloc, rev: draft.rev });
+    state.busy = null;
+    if (ok) {
+      state.reviseDraft = null;
+      state.disputeDone = d.id;
+      sheet.close();
+      render();
+      $('#dispute-note')?.scrollIntoView({ block: 'nearest' });
+    } else {
+      renderSheet();
     }
   } else if (name === 'reject-ask') {
     state.rejectDraft = { reason: '' };

@@ -197,6 +197,137 @@ test('라우트: 거부는 당사자만, 두 번 보내도 같은 결과', async
   }
 });
 
+// ---------------------------------------------------------------- 중재안 고치기(#62): 당사자가 줄별 사람을 고쳐 다시 제안한다
+const allocOf = (d) => Object.fromEntries(Object.entries(d.proposal.alloc).map(([id, a]) => [id, a.consumers]));
+// 민수도 위스키를 마셨다며 지출을 낸 사람(me)이 위스키 줄에 민수를 다시 넣는다. 고르는 순서는 아무래도 된다
+const withWhisky = (d) => ({ ...allocOf(d), 'b-whisky': ['ms', 'me', 'cs', 'yh'] });
+
+test('고치면 고친 사람만 동의한 새 안이 되고, 상대에게 다시 묻는다(지출은 그대로)', async () => {
+  const { store, orch, dispute } = await setup();
+  assert.deepEqual(dispute.agreedBy, ['ms']); // 민수의 비서가 근거 규칙으로 먼저 동의해 둔 상태
+  const out = await orch.revise('demo-t', dispute.id, 'me', { alloc: withWhisky(dispute), rev: 0 });
+  const bar = await store.get('expenses', 'demo-t-bar');
+  assert.equal(out.status, 'proposed');
+  assert.deepEqual(out.agreedBy, ['me']); // 먼저 해 둔 동의는 고친 안에 대한 동의가 아니다
+  assert.deepEqual([out.proposal.source, out.proposal.revisedBy, out.proposal.rev], ['human', 'me', 1]);
+  assert.deepEqual(out.proposal.alloc['b-whisky'].consumers, bar.present.filter((u) => ['me', 'cs', 'yh', 'ms'].includes(u))); // 함께 있던 사람 순서로
+  assert.match(out.proposal.alloc['b-whisky'].reason, /고친 줄/);
+  assert.deepEqual(out.proposal.alloc['b-nuts'], dispute.proposal.alloc['b-nuts']); // 고치지 않은 줄은 중재 비서의 안 그대로
+  assert.deepEqual(await store.get('disputes', dispute.id), out);
+  assert.equal(bar.split, 'equal');
+  assert.equal((await store.get('rooms', 'demo-t')).version, 1);
+  const forMs = await actionsFor(store, 'ms');
+  assert.deepEqual(forMs.map((a) => [a.type, a.ref]), [['agree_dispute', dispute.id]]);
+  assert.match(forMs[0].text, /중재안을 고쳤어요/);
+  assert.deepEqual(await actionsFor(store, 'me'), []);
+  const [ev] = await eventsOf(store, 'dispute_revised');
+  assert.deepEqual([ev.from, ev.to, ev.action], ['me', 'ms', { type: 'agree_dispute', ref: dispute.id, for: 'ms' }]);
+  assert.equal(ev.text, '‘2차 바’ 중재안을 고쳐 다시 제안했어요');
+  assert.match(ev.meta, /당사자가 고친 배분/); // 비서 기록에서 중재 비서의 안과 구분된다
+  assert.match(ev.meta, /위스키/);
+});
+
+test('상대가 고친 안에 동의하면 그 배분으로 다시 나누고 청구서를 다시 보낸다', async () => {
+  const { store, orch, dispute } = await setup();
+  const revised = await orch.revise('demo-t', dispute.id, 'me', { alloc: withWhisky(dispute) });
+  const resolved = await orch.agree('demo-t', dispute.id, 'ms', { rev: 1 });
+  assert.equal(resolved.status, 'resolved');
+  const bar = await store.get('expenses', 'demo-t-bar');
+  assert.equal(bar.split, 'items');
+  assert.deepEqual(Object.fromEntries(Object.entries(bar.alloc).map(([id, a]) => [id, a.consumers])), allocOf(revised));
+  assert.ok(Object.values(bar.alloc).every((a) => a.confirmed));
+  assert.equal((await store.get('rooms', 'demo-t')).version, 2);
+  assert.ok(await store.get('invoices', 'demo-t:v2:ms'));
+  const [ev] = await eventsOf(store, 'dispute_resolved');
+  assert.match(ev.text, /고친 배분대로/);
+});
+
+test('상대도 다시 고칠 수 있다. 그러면 처음 고친 사람에게 다시 묻는다', async () => {
+  const { store, orch, dispute } = await setup();
+  await orch.revise('demo-t', dispute.id, 'me', { alloc: withWhisky(dispute) });
+  const back = await orch.revise('demo-t', dispute.id, 'ms', { alloc: allocOf(dispute), rev: 1 });
+  assert.deepEqual([back.agreedBy, back.proposal.revisedBy, back.proposal.rev], [['ms'], 'ms', 2]);
+  assert.deepEqual((await actionsFor(store, 'me')).map((a) => a.type), ['agree_dispute']);
+  assert.deepEqual(await actionsFor(store, 'ms'), []);
+});
+
+test('본 안과 지금 안의 판(rev)이 다르면 동의·고치기 모두 409. 상대가 고친 줄을 모른 채 동의하지 않게', async () => {
+  const { orch, dispute } = await setup();
+  await orch.revise('demo-t', dispute.id, 'me', { alloc: withWhisky(dispute) });
+  await assert.rejects(orch.agree('demo-t', dispute.id, 'ms', { rev: 0 }), (e) => e.status === 409);
+  await assert.rejects(orch.revise('demo-t', dispute.id, 'ms', { alloc: allocOf(dispute), rev: 0 }), (e) => e.status === 409);
+  assert.equal((await orch.agree('demo-t', dispute.id, 'ms', { rev: 1 })).status, 'resolved');
+});
+
+test('고치기는 당사자만(403), 중재안이 살아 있을 때만(409)', async () => {
+  const { store, orch, dispute } = await setup();
+  await assert.rejects(orch.revise('demo-t', dispute.id, 'yh', { alloc: withWhisky(dispute) }), (e) => e.status === 403);
+  await store.put('disputes', { ...dispute, status: 'open' });
+  await assert.rejects(orch.revise('demo-t', dispute.id, 'me', { alloc: withWhisky(dispute) }), (e) => e.status === 409);
+  await store.put('disputes', dispute);
+  await orch.agree('demo-t', dispute.id, 'me'); // 양쪽이 동의해 이미 끝난 이의
+  await assert.rejects(orch.revise('demo-t', dispute.id, 'me', { alloc: withWhisky(dispute) }), (e) => e.status === 409);
+});
+
+test('줄이 맞지 않으면 400이고 아무것도 바꾸지 않는다', async () => {
+  const { store, orch, dispute } = await setup();
+  const events = (await store.listEvents('demo-t')).length;
+  const { 'b-cheese': _, ...missing } = withWhisky(dispute);
+  for (const alloc of [
+    undefined, [], 'b-whisky',
+    { ...withWhisky(dispute), 'b-ghost': ['me'] }, // 이 지출에 없는 줄
+    missing, // 빠진 줄
+    { ...withWhisky(dispute), 'b-cheese': [] }, // 아무도 고르지 않은 줄
+    { ...withWhisky(dispute), 'b-cheese': ['me', 'stranger'] }, // 함께 있지 않던 사람
+    { ...withWhisky(dispute), 'b-cheese': 'me' },
+    allocOf(dispute), // 고친 줄이 없다
+  ]) {
+    await assert.rejects(orch.revise('demo-t', dispute.id, 'me', { alloc }), (e) => e.status === 400, JSON.stringify(alloc));
+  }
+  assert.deepEqual(await store.get('disputes', dispute.id), dispute);
+  assert.equal((await store.listEvents('demo-t')).length, events);
+});
+
+test('위치 요약이 붙은 이의는 고친 안도 같은 규칙으로 가린다(당사자가 아닌 사람에게만)', async () => {
+  const { redactDispute } = await import('../src/app.mjs');
+  const { store, orch, dispute } = await setup();
+  await store.put('disputes', { ...dispute, evidence: [{ kind: 'left_at', time: '22:55', summary: '난바역 근처 22:55', locationId: 'loc-1' }] });
+  const out = await orch.revise('demo-t', dispute.id, 'me', { alloc: withWhisky(dispute) });
+  const seen = redactDispute(out, 'yh', 'me');
+  assert.ok(Object.values(seen.proposal.alloc).every((a) => a.reason === '위치 요약을 참고한 배분'));
+  assert.ok(!JSON.stringify(seen).includes('난바역'));
+  assert.deepEqual(allocOf(seen), allocOf(out)); // 누구 몫인지는 그대로 보인다
+  assert.deepEqual(redactDispute(out, 'ms', 'me'), out);
+});
+
+test('라우트: 고치기는 당사자만, 고친 뒤 상대의 할 일과 동의', async () => {
+  const { createApp } = await import('../src/app.mjs');
+  const server = createApp({ store: new MemoryStore(), env: { DEV_SEED: '1' } });
+  await new Promise((r) => server.listen(0, r));
+  const url = `http://localhost:${server.address().port}`;
+  const call = (path, uid, body) => fetch(url + path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-demo-user': uid }, body: JSON.stringify(body ?? {}) });
+  const view = async (roomId, uid) => (await fetch(`${url}/api/rooms/${roomId}`, { headers: { 'x-demo-user': uid } })).json();
+  try {
+    const roomId = (await (await fetch(`${url}/api/dev/seed`, { method: 'POST' })).json()).roomId;
+    await call(`/api/rooms/${roomId}/invoices/send`, 'me');
+    const [d] = (await view(roomId, 'me')).disputes;
+    const base = `/api/rooms/${roomId}/disputes/${encodeURIComponent(d.id)}`;
+    const alloc = withWhisky(d);
+    assert.equal((await call(`${base}/revise`, 'yh', { alloc })).status, 403);
+    assert.equal((await call(`${base}/revise`, 'me', { alloc: { ...alloc, 'b-whisky': [] } })).status, 400);
+    const ok = await call(`${base}/revise`, 'me', { alloc, rev: 0 });
+    assert.equal(ok.status, 200);
+    assert.equal((await ok.json()).proposal.revisedBy, 'me');
+    const ms = await view(roomId, 'ms');
+    assert.deepEqual(ms.actions.filter((a) => a.type === 'agree_dispute').map((a) => a.text), ['내가 ‘2차 바’ 중재안을 고쳤어요. 동의할까요?']); // 데모 방에서 me의 이름이 '나'다
+    assert.equal((await call(`${base}/agree`, 'ms', { rev: 0 })).status, 409);
+    assert.equal((await call(`${base}/agree`, 'ms', { rev: 1 })).status, 200);
+    assert.equal((await view(roomId, 'ms')).disputes[0].status, 'resolved');
+  } finally {
+    server.close();
+  }
+});
+
 // ---------------------------------------------------------------- 지출이 바뀌면 이의를 닫는다
 import { splitChanged, supersedeDisputes } from '../src/agents/disputes.mjs';
 

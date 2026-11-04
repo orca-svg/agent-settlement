@@ -25,14 +25,18 @@ export function pendingActions({ room, expenses = [], invoices = [], disputes = 
   for (const inv of invoices.filter((i) => i.status === 'asked' && current(i))) {
     out.push({ type: 'answer_invoice', ref: inv.id, for: inv.to, text: `${won(-inv.net)} 청구서를 받을까요?`, invoiceId: inv.id });
   }
-  // 이의: 중재 전에는 지출을 낸 사람에게 중재를 맡길지, 중재안이 나오면 아직 동의하지 않은 당사자에게 묻는다
+  // 이의: 중재 전에는 지출을 낸 사람에게 중재를 맡길지, 중재안이 나오면 아직 동의하지 않은 당사자에게 묻는다.
+  // 상대가 중재안을 고쳤으면(#62) 누가 고쳤는지 함께 알린다
   for (const d of disputes) {
     const exp = expenses.find((e) => e.id === d.expenseId);
     if (!exp) continue;
     const base = { type: 'agree_dispute', ref: d.id, disputeId: d.id, expenseId: exp.id };
     if (d.status === 'open') out.push({ ...base, for: exp.payer, text: `‘${exp.title}’에 이의가 왔어요. 중재를 맡길까요?` });
     if (d.status === 'proposed') {
-      for (const uid of [...new Set([exp.payer, d.by])].filter((u) => !d.agreedBy.includes(u))) out.push({ ...base, for: uid, text: `‘${exp.title}’ 중재안에 동의할까요?` });
+      const by = d.proposal?.revisedBy;
+      for (const uid of [...new Set([exp.payer, d.by])].filter((u) => !d.agreedBy.includes(u))) {
+        out.push({ ...base, for: uid, text: by && by !== uid ? `${subj(name(by))} ‘${exp.title}’ 중재안을 고쳤어요. 동의할까요?` : `‘${exp.title}’ 중재안에 동의할까요?` });
+      }
     }
   }
   // 송금: 때가 된 것은 보내는 사람에게, 받는 계좌가 없으면 받는 사람에게(한 번만), 보낸 뒤에는 받는 사람에게 확인을

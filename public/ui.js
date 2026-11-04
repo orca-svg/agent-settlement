@@ -1,6 +1,6 @@
 // 데모 화면과 실제 방 화면이 함께 쓰는 UI 부품. import할 때 DOM을 건드리지 않는다(테스트에서 불러올 수 있게).
 import { Spring, VelocityTracker, project, rubberband, reduceMotion } from './motion.js';
-import { won } from './core.js';
+import { won, money } from './core.js';
 
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export const chip = (text, cls = '') => `<span class="chip ${cls}">${esc(text)}</span>`;
@@ -21,6 +21,7 @@ export const whose = (w) => (w === '나' ? '내' : w);
 // 메뉴 배분을 어떻게 했는지(서버 응답의 how) 영수증 줄 위에 짧게 보인다.
 export function allocLabel({ source, how, latencyMs }) {
   if (how === 'obvious') return 'AI 없이 나눔';
+  if (source === 'human') return '당사자가 고친 배분'; // 이의 당사자가 중재안을 고쳐 다시 낸 안(#62)
   const sec = latencyMs ? ` · ${(latencyMs / 1000).toFixed(1)}초` : '';
   if (!source || source === 'rules') return `규칙${sec}`;
   const model = source.replace(/^gemini-/, 'Gemini ').replace(/-flash/, ' Flash').replace(/-preview/, ' Preview');
@@ -39,11 +40,11 @@ export const disputeLive = (d) => d.status === 'open' || d.status === 'proposed'
 // 중재안을 거부해서 끝난 이의(이의를 낸 사람이 거두면 withdrawn, 지출을 낸 사람이 거부하면 dismissed)
 export const disputeRejected = (d) => d.status === 'withdrawn' || d.status === 'dismissed';
 
-// 이의 시트에서 이 사람이 누를 수 있는 것. 중재안이 살아 있는(proposed) 동안 당사자만 동의·거부한다.
-// 비서가 근거 규칙으로 먼저 동의해 뒀어도 사람은 거부로 물러설 수 있어서, 동의했는지와 상관없이 거부는 열어 둔다
+// 이의 시트에서 이 사람이 누를 수 있는 것. 중재안이 살아 있는(proposed) 동안 당사자만 동의·거부하고 줄별 사람을 고친다(#62).
+// 비서가 근거 규칙으로 먼저 동의해 뒀어도 사람은 거부로 물러서거나 고칠 수 있어서, 동의했는지와 상관없이 거부·고치기는 열어 둔다
 export function disputeChoices(d, exp, uid) {
   const live = d.status === 'proposed' && [exp.payer, d.by].includes(uid);
-  return { agree: live && !d.agreedBy.includes(uid), reject: live };
+  return { agree: live && !d.agreedBy.includes(uid), reject: live, revise: live };
 }
 
 // 방 화면 '이의' 목록의 한 줄(글자만, 그리는 쪽에서 esc). 열린 이의는 누구를 기다리는지, 끝난 이의는 어떻게 끝났는지
@@ -51,7 +52,8 @@ export function disputeStatus(d, exp, nameOf) {
   if (d.status === 'open') return '아직 중재 전이에요';
   if (d.status === 'proposed') {
     const waiting = disputeWaiting(d, exp);
-    return `중재안이 나왔어요${waiting.length ? `. ${waiting.map(nameOf).join('·')}의 동의를 기다려요` : ''}`;
+    const head = d.proposal?.revisedBy ? `${subj(nameOf(d.proposal.revisedBy))} 중재안을 고쳤어요` : '중재안이 나왔어요';
+    return `${head}${waiting.length ? `. ${waiting.map(nameOf).join('·')}의 동의를 기다려요` : ''}`;
   }
   if (d.status === 'resolved') return '양쪽이 동의해서 다시 나눴어요';
   if (d.status === 'withdrawn') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부하고 이의를 거뒀어요`;
@@ -62,12 +64,41 @@ export function disputeStatus(d, exp, nameOf) {
 // 동의·거부해서 시트를 닫은 뒤 방 화면에 남기는 한 줄(글자만, 그리는 쪽에서 esc).
 // 상대가 나중에 동의하거나 거부해도 맞도록 그 순간이 아니라 지금 이의 상태로 만든다
 export function disputeNote(d, exp, nameOf) {
-  if (d.status === 'resolved') return `양쪽이 동의해서 ${obj(`‘${exp.title}’`)} 중재안대로 다시 나눴어요. 청구서도 다시 보냈어요.`;
+  if (d.status === 'resolved') return `양쪽이 동의해서 ${obj(`‘${exp.title}’`)} ${d.proposal?.revisedBy ? '고친 배분대로' : '중재안대로'} 다시 나눴어요. 청구서도 다시 보냈어요.`;
   if (d.status === 'superseded') return `지출이 바뀌어 ‘${exp.title}’ 이의가 닫혔어요.`;
   if (d.status === 'withdrawn') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부하고 ‘${exp.title}’ 이의를 거뒀어요. 지금 배분 그대로 정산해요.`;
   if (d.status === 'dismissed') return `${subj(nameOf(d.rejectedBy))} 중재안을 거부해서 ‘${exp.title}’ 이의가 끝났어요. 지금 배분 그대로 정산해요.`;
   const waiting = disputeWaiting(d, exp);
-  return `중재안에 동의했어요.${waiting.length ? ` ${waiting.map(nameOf).join('·')}의 동의를 기다려요.` : ''}`;
+  const head = d.proposal?.revisedBy ? `${subj(nameOf(d.proposal.revisedBy))} 중재안을 고쳐 다시 제안했어요.` : '중재안에 동의했어요.';
+  return `${head}${waiting.length ? ` ${waiting.map(nameOf).join('·')}의 동의를 기다려요.` : ''}`;
+}
+
+// 중재안 고치기(#62). draft는 이 화면에서 칩을 눌러 고른 줄별 사람 { [itemId]: [uid, ...] }이고, 중재안과 같아진 줄은 고친 줄이 아니다
+const sameMembers = (a = [], b = []) => a.length === b.length && a.every((u) => b.includes(u));
+export const changedLines = (alloc, draft = {}) => Object.keys(draft).filter((id) => alloc[id] && !sameMembers(draft[id], alloc[id].consumers));
+
+// 중재안의 줄마다 누구 몫인지. 지출 시트의 줄 고르기(.line·.pick)와 같은 모양·같은 조작으로 그린다.
+// editable이면(살아 있는 중재안의 당사자) 칩을 눌러 고치고, 아니면 같은 칩을 누를 수 없게 보인다
+export function proposalLinesHtml(exp, alloc, { draft = {}, editable = false, nameOf, avatar }) {
+  const changed = new Set(changedLines(alloc, draft));
+  return (exp.items ?? []).map((it) => {
+    const chosen = changed.has(it.id) ? draft[it.id] : alloc[it.id]?.consumers ?? [];
+    const picks = exp.present.map((u) => `<button type="button" class="pick" aria-pressed="${chosen.includes(u)}"${editable ? '' : ' disabled'}
+        data-action="revise-pick" data-line="${esc(it.id)}" data-p="${esc(u)}">${avatar(u)}${esc(nameOf(u))}</button>`).join('');
+    const reason = changed.has(it.id) ? '내가 고친 줄' : alloc[it.id]?.reason ?? '';
+    return `<div class="line" data-line-id="${esc(it.id)}">
+      <div class="line-top"><span class="line-name">${it.time ? `<small style="margin:0 6px 0 0">${esc(it.time)}</small>` : ''}${esc(it.name)}<small>×${it.qty}</small></span><span class="num">${money(it.qty * it.unit, exp.currency)}</span></div>
+      <div class="picks">${picks}</div>${reason ? `<p class="reason">${esc(reason)}</p>` : ''}</div>`;
+  }).join('');
+}
+
+// 중재안을 고친 뒤의 선택. 동의 대신 고친 배분으로 다시 제안하거나 중재안으로 되돌린다.
+// 보내면 내가 그 배분에 동의한 것이 되므로, 누구에게 다시 묻는지 버튼 바로 아래에 알린다
+export function reviseChoicesHtml({ disputeId, other, busy = false }) {
+  const off = busy ? ' disabled' : '';
+  return `<div class="stack"><button class="btn lead" data-action="revise-send" data-id="${esc(disputeId)}"${off}>${ARROW}${busy ? '제안하는 중…' : '고친 배분으로 제안하기'}</button>
+      <button class="btn plain" data-action="revise-reset"${off}>되돌리기</button></div>
+    <p class="group-note">보내면 내가 이 배분에 동의한 것으로 보고 ${esc(other)}에게 다시 물어요.</p>`;
 }
 
 // 영수증 사진을 넣는 버튼(#6). capture가 붙은 입력은 iOS·Android 모두 고르는 메뉴 없이 카메라로 바로 가고,
