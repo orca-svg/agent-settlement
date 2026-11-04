@@ -210,25 +210,76 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return proposed;
   }
 
+  // 중재안이 살아 있는지, 사람이 보고 누른 그 판(rev)인지. 처음 중재안은 0판이고 당사자가 고칠 때마다 1씩 오른다.
+  // rev를 보내지 않은 요청(옛 화면·비서의 자동 동의)은 판을 따지지 않는다
+  const assertLive = (dispute, rev) => {
+    if (dispute.status !== 'proposed') throw new HttpError(409, dispute.status === 'open' ? '아직 중재안이 없어요' : '이미 끝난 이의예요');
+    if (rev != null && rev !== (dispute.proposal.rev ?? 0)) throw new HttpError(409, '그사이 중재안이 바뀌었어요. 바뀐 배분을 보고 다시 골라 주세요');
+  };
+
   // 양쪽(지출을 낸 사람과 이의를 낸 사람)이 모두 동의하면 지출을 중재안대로 바꾸고 청구서를 다시 보낸다
-  async function agree(roomId, disputeId, actorUid, { auto = false } = {}) {
+  async function agree(roomId, disputeId, actorUid, { auto = false, rev } = {}) {
     const { dispute, room, exp, parties } = await disputeOf(roomId, disputeId);
     if (!parties.includes(actorUid)) throw new HttpError(403, '이의 당사자만 동의할 수 있어요');
-    if (dispute.status !== 'proposed') throw new HttpError(409, dispute.status === 'open' ? '아직 중재안이 없어요' : '이미 끝난 이의예요');
+    assertLive(dispute, rev);
     const saved = { ...dispute, agreedBy: [...new Set([...dispute.agreedBy, actorUid])] };
     await store.put('disputes', saved);
-    await say(roomId, { from: actorUid, to: 'all', kind: 'dispute_agreed', text: auto ? '근거와 맞는 중재안이라 동의했어요' : '중재안에 동의했어요', ...(auto ? { meta: '정해 둔 규칙: 근거와 맞는 중재안이면 동의' } : {}) });
+    await say(roomId, { from: actorUid, to: 'all', kind: 'dispute_agreed', text: auto ? '근거와 맞는 중재안이라 동의했어요' : dispute.proposal.revisedBy ? '고친 배분에 동의했어요' : '중재안에 동의했어요', ...(auto ? { meta: '정해 둔 규칙: 근거와 맞는 중재안이면 동의' } : {}) });
     if (!parties.every((p) => saved.agreedBy.includes(p))) return saved;
+    return resolve(roomId, saved, { room, exp, actorUid });
+  }
 
-    // 두 사람이 동의한 배분이므로 줄마다 확인된 것으로 둔다
+  // 두 사람이 동의한 배분이므로 줄마다 확인된 것으로 둔다
+  async function resolve(roomId, dispute, { room, exp, actorUid }) {
     const alloc = Object.fromEntries(Object.entries(dispute.proposal.alloc).map(([id, a]) => [id, { ...a, ...(dispute.evidence.some(e => e.locationId) ? { reason: '당사자가 합의한 배분' } : {}), confirmed: true }]));
     await store.put('expenses', { ...exp, split: 'items', alloc });
     await store.put('rooms', { ...room, version: room.version + 1 });
-    const resolved = { ...saved, status: 'resolved' };
+    const resolved = { ...dispute, status: 'resolved' };
     await store.put('disputes', resolved);
-    await say(roomId, { from: 'mediator', to: 'all', kind: 'dispute_resolved', text: `양쪽이 동의해서 ${obj(`‘${exp.title}’`)} 중재안대로 다시 나눴어요` });
+    await say(roomId, { from: 'mediator', to: 'all', kind: 'dispute_resolved', text: `양쪽이 동의해서 ${obj(`‘${exp.title}’`)} ${dispute.proposal.revisedBy ? '고친 배분대로' : '중재안대로'} 다시 나눴어요` });
     await sendInvoices(roomId, actorUid);
     return resolved;
+  }
+
+  // 당사자가 중재안의 줄별 사람을 고쳐 다시 제안한다(#62). alloc은 줄마다 고른 사람 { [itemId]: [uid, ...] }.
+  // 모든 줄이 이 지출의 줄이고 줄마다 함께 있던 사람이 한 명 이상이어야 하며, 하나라도 어긋나면 아무것도 바꾸지 않는다(400).
+  // 고친 사람은 그 배분에 동의한 것으로 보고 상대에게 다시 묻는다. 먼저 해 둔 동의는 고치기 전 안에 대한 것이라 지운다
+  async function revise(roomId, disputeId, actorUid, { alloc, rev } = {}) {
+    const { dispute, room, exp, parties } = await disputeOf(roomId, disputeId);
+    if (!parties.includes(actorUid)) throw new HttpError(403, '이의 당사자만 중재안을 고칠 수 있어요');
+    assertLive(dispute, rev);
+    const items = exp.items ?? [];
+    if (!alloc || typeof alloc !== 'object' || Array.isArray(alloc)) throw new HttpError(400, '줄마다 나눌 사람을 골라 주세요');
+    if (Object.keys(alloc).some((id) => !items.some((it) => it.id === id))) throw new HttpError(400, '이 지출에 없는 줄이 있어요');
+    const picked = {};
+    for (const it of items) {
+      const who = alloc[it.id];
+      if (!Array.isArray(who) || !who.length) throw new HttpError(400, `${obj(`‘${it.name}’`)} 나눌 사람을 한 명 이상 골라 주세요`);
+      if (who.some((u) => !exp.present.includes(u))) throw new HttpError(400, `‘${it.name}’에는 함께 있던 사람만 고를 수 있어요`);
+      picked[it.id] = exp.present.filter((u) => who.includes(u));
+    }
+    const before = dispute.proposal.alloc;
+    const same = (a = [], b = []) => a.length === b.length && a.every((u) => b.includes(u));
+    const changed = items.filter((it) => !same(picked[it.id], before[it.id]?.consumers));
+    if (!changed.length) throw new HttpError(400, '고친 줄이 없어요. 이대로라면 중재안에 동의해 주세요');
+
+    const name = (uid) => room.members.find((m) => m.uid === uid)?.name ?? uid;
+    const fixed = `${subj(name(actorUid))} 고친 줄`;
+    const proposal = {
+      summary: `${subj(name(actorUid))} 중재안에서 ${changed.length}줄을 고쳐 다시 제안했어요.`,
+      alloc: Object.fromEntries(items.map((it) => [it.id, changed.includes(it) ? { consumers: picked[it.id], confidence: 1, reason: fixed } : before[it.id]])),
+      source: 'human', revisedBy: actorUid, rev: (dispute.proposal.rev ?? 0) + 1,
+    };
+    const saved = { ...dispute, proposal, agreedBy: [actorUid] };
+    await store.put('disputes', saved);
+    const other = parties.find((p) => p !== actorUid);
+    await say(roomId, {
+      from: actorUid, to: other ?? 'all', kind: 'dispute_revised', text: `‘${exp.title}’ 중재안을 고쳐 다시 제안했어요`,
+      meta: `당사자가 고친 배분 · ${changed.map((it) => `${it.name}: ${picked[it.id].map(name).join('·')}`).join(' / ')}`,
+      ...(other ? { action: { type: 'agree_dispute', ref: dispute.id, for: other } } : {}),
+    });
+    // 지출을 낸 사람이 자기 지출에 이의를 낸 경우처럼 당사자가 한 사람뿐이면 고친 것으로 합의가 끝난다
+    return other ? saved : resolve(roomId, saved, { room, exp, actorUid });
   }
 
   // 중재안을 거부하면 이의가 끝나고 지출은 지금 배분 그대로 둔 채 정산이 이어진다.
@@ -461,5 +512,5 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return { due, reminded };
   }
 
-  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, reject, createTransfers, setPayout, approveTransfer, qrFor, markSent, reportNotReceived, confirmReceipt, tick };
+  return { sendInvoices, answerInvoice, raiseDispute, mediate, agree, revise, reject, createTransfers, setPayout, approveTransfer, qrFor, markSent, reportNotReceived, confirmReceipt, tick };
 }

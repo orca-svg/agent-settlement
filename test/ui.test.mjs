@@ -1,7 +1,7 @@
 // 화면 공용 모듈 중 DOM 없이 쓰는 순수 함수.
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, disputeWaiting, disputeChoices, disputeNote, disputeStatus, disputeLive, flaggedLines, blockedNotice, askedBy, shake, nudge } from '../public/ui.js';
+import { esc, topic, subj, whose, restNote, allocLabel, allocButton, groupRuns, logItemHtml, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, disputeWaiting, disputeChoices, disputeNote, disputeStatus, disputeLive, changedLines, proposalLinesHtml, reviseChoicesHtml, flaggedLines, blockedNotice, askedBy, shake, nudge } from '../public/ui.js';
 import { reduceMotion } from '../public/motion.js';
 
 test('allocButton: 나눈 뒤 바뀐 게 없으면 막고, 남은 일을 알려 준다', () => {
@@ -51,14 +51,14 @@ test('disputeNote: 거부로 끝난 이의는 누가 거부했는지와 다음 �
   assert.equal(disputeNote({ status: 'withdrawn', by: 'ms', agreedBy: [], rejectedBy: 'ms' }, exp, nameOf), '민수가 중재안을 거부하고 ‘2차 바’ 이의를 거뒀어요. 지금 배분 그대로 정산해요.');
 });
 
-test('disputeChoices: 중재안이 살아 있는 동안 당사자만 동의·거부한다', () => {
+test('disputeChoices: 중재안이 살아 있는 동안 당사자만 동의·거부하고 줄별 사람을 고친다', () => {
   const exp = { payer: 'me' };
   const d = (over) => ({ status: 'proposed', by: 'ms', agreedBy: ['ms'], ...over });
-  assert.deepEqual(disputeChoices(d(), exp, 'me'), { agree: true, reject: true });
-  assert.deepEqual(disputeChoices(d(), exp, 'ms'), { agree: false, reject: true }); // 비서가 먼저 동의했어도 사람은 물러설 수 있다
-  assert.deepEqual(disputeChoices(d(), exp, 'yh'), { agree: false, reject: false });
+  assert.deepEqual(disputeChoices(d(), exp, 'me'), { agree: true, reject: true, revise: true });
+  assert.deepEqual(disputeChoices(d(), exp, 'ms'), { agree: false, reject: true, revise: true }); // 비서가 먼저 동의했어도 사람은 물러서거나 고칠 수 있다
+  assert.deepEqual(disputeChoices(d(), exp, 'yh'), { agree: false, reject: false, revise: false });
   for (const status of ['open', 'resolved', 'withdrawn', 'dismissed', 'superseded']) {
-    assert.deepEqual(disputeChoices(d({ status }), exp, 'me'), { agree: false, reject: false }, status);
+    assert.deepEqual(disputeChoices(d({ status }), exp, 'me'), { agree: false, reject: false, revise: false }, status);
   }
 });
 
@@ -154,6 +154,69 @@ test('disputeStatus: 이의 목록의 한 줄. 열린 이의는 누구를 기다
 
 test('disputeLive: 열린(open·proposed) 이의만', () => {
   assert.deepEqual(['open', 'proposed', 'resolved', 'withdrawn', 'dismissed', 'superseded'].map((status) => disputeLive({ status })), [true, true, false, false, false, false]);
+});
+
+// ---------------------------------------------------------------- 중재안 고치기(#62)
+test('중재안을 고친 뒤의 한 줄들: 누가 고쳤는지 알리고, 고친 배분대로 끝났다고 말한다', () => {
+  const exp = { title: '2차 바', payer: 'me' };
+  const nameOf = (u) => ({ me: '나', ms: '민수' })[u];
+  const revised = { status: 'proposed', by: 'ms', agreedBy: ['me'], proposal: { source: 'human', revisedBy: 'me', rev: 1 } };
+  assert.equal(allocLabel({ source: 'human' }), '당사자가 고친 배분');
+  assert.equal(disputeStatus(revised, exp, nameOf), '내가 중재안을 고쳤어요. 민수의 동의를 기다려요');
+  assert.equal(disputeNote(revised, exp, nameOf), '내가 중재안을 고쳐 다시 제안했어요. 민수의 동의를 기다려요.');
+  assert.equal(disputeNote({ ...revised, status: 'resolved', agreedBy: ['me', 'ms'] }, exp, nameOf), '양쪽이 동의해서 ‘2차 바’를 고친 배분대로 다시 나눴어요. 청구서도 다시 보냈어요.');
+});
+
+const bar = {
+  id: 'bar', currency: 'KRW', present: ['me', 'cs', 'ms'],
+  items: [{ id: 'w', time: '23:10', name: '위스키', qty: 2, unit: 1200 }, { id: 'n', name: '믹스넛', qty: 1, unit: 600 }],
+};
+const proposal = { w: { consumers: ['me', 'cs'], reason: '22:55 뒤 주문이라 민수는 빠져요' }, n: { consumers: ['me', 'cs', 'ms'], reason: '나눠 먹는 안주' } };
+const lineOpts = { nameOf: (u) => ({ me: '재윤', cs: '철수', ms: '민수' })[u], avatar: (u) => `<i>${u}</i>` };
+// 사람 칩을 (줄, 사람, 눌림, 누를 수 없음, 동작)으로 읽는다
+const picksOf = (html) => [...html.matchAll(/<button([^>]*)>/g)].map(([, a]) => [
+  a.match(/data-line="([^"]*)"/)?.[1], a.match(/data-p="([^"]*)"/)?.[1], a.includes('aria-pressed="true"'), /\sdisabled(\s|$)/.test(a), a.match(/data-action="([^"]*)"/)?.[1],
+]);
+
+test('changedLines: 고른 사람이 중재안과 달라진 줄만(고른 순서는 따지지 않는다)', () => {
+  assert.deepEqual(changedLines(proposal, {}), []);
+  assert.deepEqual(changedLines(proposal, { w: ['cs', 'me'] }), []);
+  assert.deepEqual(changedLines(proposal, { w: ['me', 'cs', 'ms'], n: ['me', 'cs', 'ms'] }), ['w']);
+});
+
+test('proposalLinesHtml: 당사자에게는 줄마다 지출 시트와 같은 사람 칩을 보이고, 중재안이 고른 사람이 눌려 있다', () => {
+  const html = proposalLinesHtml(bar, proposal, { ...lineOpts, editable: true });
+  assert.deepEqual(picksOf(html), [
+    ['w', 'me', true, false, 'revise-pick'], ['w', 'cs', true, false, 'revise-pick'], ['w', 'ms', false, false, 'revise-pick'],
+    ['n', 'me', true, false, 'revise-pick'], ['n', 'cs', true, false, 'revise-pick'], ['n', 'ms', true, false, 'revise-pick'],
+  ]);
+  assert.equal((html.match(/class="pick"/g) ?? []).length, 6); // 지출 시트의 줄 고르기와 같은 캡슐
+  assert.match(html, /<i>me<\/i>재윤/);
+  assert.match(html, /22:55 뒤 주문이라 민수는 빠져요/); // 중재 비서가 줄마다 든 까닭
+  assert.match(html, /₩2,400/);
+});
+
+test('proposalLinesHtml: 고친 줄은 고친 대로 눌리고 "내가 고친 줄"로 표시된다', () => {
+  const html = proposalLinesHtml(bar, proposal, { ...lineOpts, editable: true, draft: { w: ['me', 'cs', 'ms'], n: ['me', 'cs', 'ms'] } });
+  assert.deepEqual(picksOf(html).filter(([line]) => line === 'w').map(([, , on]) => on), [true, true, true]);
+  assert.equal((html.match(/내가 고친 줄/g) ?? []).length, 1); // 중재안과 같아진 줄은 고친 줄이 아니다
+  assert.ok(!html.includes('22:55 뒤 주문이라 민수는 빠져요'));
+});
+
+test('proposalLinesHtml: 당사자가 아니거나 끝난 이의는 칩을 누를 수 없다', () => {
+  const html = proposalLinesHtml(bar, proposal, lineOpts);
+  assert.ok(picksOf(html).every(([, , , off]) => off));
+});
+
+test('reviseChoicesHtml: 고친 뒤에는 동의 대신 "고친 배분으로 제안하기"와 "되돌리기"', () => {
+  const html = reviseChoicesHtml({ disputeId: 'd"1', other: '민수' });
+  assert.match(html, /data-action="revise-send" data-id="d&quot;1"[^>]*>[\s\S]*고친 배분으로 제안하기<\/button>/);
+  assert.match(html, /data-action="revise-reset"[^>]*>되돌리기<\/button>/);
+  assert.ok(!html.includes('data-action="agree"') && !html.includes('data-action="reject-ask"'));
+  assert.match(html, /민수에게 다시 물어요/);
+  const busy = reviseChoicesHtml({ disputeId: 'd1', other: '민수', busy: true });
+  assert.match(busy, /data-action="revise-send" data-id="d1" disabled>[\s\S]*제안하는 중…/);
+  assert.match(busy, /data-action="revise-reset" disabled>/);
 });
 
 // 영수증 사진 버튼을 (라벨, capture 여부)로 읽는다. 모두 영수증 입력(data-receipt)이고 이미지만 받아야 한다.

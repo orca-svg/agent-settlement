@@ -41,9 +41,18 @@ export function registerAgentRoutes(routes, { orchestrator, member, store, overL
     return orchestrator.mediate(params.id, params.did, me.uid);
   });
 
+  // { rev? }: 화면이 보고 있던 중재안의 판. 그사이 상대가 고쳤으면 409로 막아, 보지 못한 배분에 동의하지 않게 한다
   routes.post('/api/rooms/:id/disputes/:did/agree', async ({ req, params }) => {
     const { me } = await member(req, params.id);
-    return orchestrator.agree(params.id, params.did, me.uid);
+    const { rev } = await readJson(req);
+    return orchestrator.agree(params.id, params.did, me.uid, { rev });
+  });
+
+  // 중재안 고치기(#62): { alloc: { [itemId]: [uid, ...] }, rev? }. 고친 사람은 동의한 것으로 보고 상대에게 다시 묻는다
+  routes.post('/api/rooms/:id/disputes/:did/revise', async ({ req, params }) => {
+    const { me } = await member(req, params.id);
+    const { alloc, rev } = await readJson(req);
+    return orchestrator.revise(params.id, params.did, me.uid, { alloc, rev });
   });
 
   // 중재안 거부: 이의가 끝나고 지금 배분 그대로 정산이 이어진다. { reason? }는 한 줄 사유
