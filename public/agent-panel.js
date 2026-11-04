@@ -85,14 +85,22 @@ export function historyHtml(view) {
     <ol>${[...view.ruleHistory].reverse().map((h) => `<li><span>${esc(h.text)}</span><time>${esc(clockText(h.at))}</time></li>`).join('')}</ol></details></section>`;
 }
 
-// 방 머리의 멤버 칩 중 내 칩이 '내 비서' 입구를 겸한다. 화면 맨 위 시선 경로에 있고, 방마다 정하는 기억 사용과도 맥락이 맞는다.
-// 처음 설정 전이거나 받을 계좌가 없으면 색만이 아니라 글자로도 알린다. 규칙 요약은 툴팁과 읽어 주기 글로 둔다
+// 비서 설정을 마친 사람의 이름 옆 로봇 표시. 방 사람 누구나 보지만 '설정을 마쳤다'는 사실만 담는다
+export const AGENT_MARK = '<span class="agent-mark" role="img" aria-label="비서 설정함" title="비서 설정을 마쳤어요"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">'
+  + '<path d="M12 2.5v3M7 5.5h10a3 3 0 0 1 3 3V16a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V8.5a3 3 0 0 1 3-3zM9.5 15.5h5M2 11v3M22 11v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+  + '<circle cx="9" cy="11" r="1.4" fill="currentColor"/><circle cx="15" cy="11" r="1.4" fill="currentColor"/></svg></span>';
+
+// 방 머리의 다른 사람 칩. 누를 수 없고, 비서 설정을 마쳤으면 로봇 표시만 붙는다
+export const personChipHtml = ({ name, avatar, ready }) => `<span class="person">${avatar}${esc(name)}${ready ? AGENT_MARK : ''}</span>`;
+
+// 방 머리의 내 칩은 '내 비서' 입구를 겸한다. 설정은 내 칩에서만 열리고(화살표·호버로 알린다),
+// 처음 설정 전이거나 받을 계좌가 없으면 작은 꼬리표를 글자로 붙인다. 규칙 요약은 툴팁과 읽어 주기 글로 둔다
 export function meChipHtml({ name, avatar }, s) {
   if (!s) return `<span class="person">${avatar}${esc(name)}</span>`;
-  const flag = !s.onboarded ? '설정 전' : !s.hasPayout ? '계좌 없음' : '';
+  const tag = !s.onboarded ? '설정 전' : !s.hasPayout ? '계좌 없음' : '';
   const rules = `${autoAcceptLabel(s.autoAccept)} · ${sendWhenLabel(s.sendWhen)}`;
-  return `<button type="button" class="person me" data-action="open-agent" title="${esc(rules)}" aria-label="내 비서 열기. ${esc(rules)}${flag ? `. ${esc(flag)}` : ''}">${avatar}${esc(name)}`
-    + `<span class="person-agent${flag ? ' warn' : ''}">내 비서${flag ? ` · ${flag}` : ''}</span>${CHEVRON}</button>`;
+  return `<button type="button" class="person me" data-action="open-agent" title="내 비서: ${esc(rules)}" aria-label="내 비서 열기. ${esc(rules)}${tag ? `. ${tag}` : ''}">${avatar}${esc(name)}`
+    + `${s.onboarded ? AGENT_MARK : ''}${tag ? `<span class="person-tag">${tag}</span>` : ''}${CHEVRON}</button>`;
 }
 
 const ACTIONS = new Set(['open-agent', 'open-agent-setup', 'agent-set', 'agent-preset', 'agent-save-rules', 'mem-add', 'mem-edit', 'mem-edit-save', 'mem-del', 'mem-share', 'agent-payout', 'setup-next', 'setup-back', 'setup-skip', 'setup-done']);

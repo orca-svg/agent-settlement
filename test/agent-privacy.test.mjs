@@ -136,3 +136,18 @@ test('설정 화면: 기억은 기본으로 이 방에 쓰지 않고, 고른 기
   assert.match(html, /aria-pressed="true"[^>]*aria-label="이 방 정산에 ‘고른 기억’ 쓰기"[^>]*>이 방에 씀/);
   assert.match(memoryRowsHtml({ memory: ['고른 기억'], memoryShared: { r1: ['고른 기억'] } }, 'r2'), /aria-pressed="false"/, '다른 방에서는 쓰지 않는다');
 });
+
+test('방 사람에게는 누가 비서 설정을 마쳤는지만 보인다(규칙·기억은 없다)', async () => {
+  const { store, server, req } = await serve();
+  try {
+    await seedDemoRoom(store, { id: 'r' });
+    const cs = await store.get('agents', 'cs');
+    await store.put('agents', { ...cs, onboardedAt: null }); // 철수는 아직 설정 전
+    const seen = (await req('/api/rooms/r', 'me')).json;
+    assert.deepEqual(seen.agentReady, ['me', 'yh', 'ms']);
+    assert.equal(seen.myAgent.onboarded, true);
+    assert.equal((await req('/api/rooms/r', 'cs')).json.myAgent.onboarded, false, '철수 화면에서는 내 칩에 설정 전이 붙는다');
+  } finally {
+    server.close();
+  }
+});

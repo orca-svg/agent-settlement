@@ -8,7 +8,7 @@ import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
 import { initAuth, authOptions, onSessionChange } from './auth.js';
 import { BANKS } from './banks.js';
-import { createAgentPanel } from './agent-panel.js';
+import { createAgentPanel, personChipHtml } from './agent-panel.js';
 import { notifies } from './agent-rules.js';
 import { readVisits, departure, timelineSummary, expenseWindow, kstTime, keepForSettlement } from './timeline.js';
 
@@ -512,8 +512,9 @@ function whoPicker() {
 
 function hero() {
   const { room, me } = state.data;
-  // 내 칩은 '내 비서' 입구를 겸한다(#5). 다른 사람 칩은 그대로 이름표다
-  const person = (m) => (m.uid === me.uid ? agentPanel.chipHtml(m, avatar(m.uid)) : `<span class="person">${avatar(m.uid)}${esc(m.name)}</span>`);
+  // 내 칩은 '내 비서' 입구를 겸한다(#5). 다른 사람 칩은 이름표이고, 비서 설정을 마쳤는지만 로봇 표시로 보인다
+  const ready = new Set(state.data.agentReady ?? []);
+  const person = (m) => (m.uid === me.uid ? agentPanel.chipHtml(m, avatar(m.uid)) : personChipHtml({ name: m.name, avatar: avatar(m.uid), ready: ready.has(m.uid) }));
   return `<section class="hero"><h1>${esc(room.name)}</h1>
     <p class="sub">${esc(room.dates || '')}${room.dates ? ' · ' : ''}${room.members.length}명 · 돈 얘기는 각자의 비서끼리 해요</p>
     <div class="people">${room.members.map(person).join('')}</div></section>`;

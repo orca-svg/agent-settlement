@@ -8,9 +8,13 @@ export function sharedMemory(agent, roomId) {
   return (agent?.memory ?? []).filter((m) => chosen.has(m));
 }
 
+// 방 멤버의 비서 문서 { uid: AgentSettings | null }. 방 응답처럼 기억과 설정 여부를 함께 볼 때 한 번만 읽는다
+export const agentsOf = async (store, room) => Object.fromEntries(await Promise.all(room.members.map(async (m) => [m.uid, await store.get('agents', m.uid)])));
+export const memoryOf = (room, agents) => Object.fromEntries(room.members.map((m) => [m.uid, sharedMemory(agents[m.uid], room.id)]));
+
 // 방 멤버별 기억 { uid: string[] }
 export async function roomMemory(store, room) {
-  return Object.fromEntries(await Promise.all(room.members.map(async (m) => [m.uid, sharedMemory(await store.get('agents', m.uid), room.id)])));
+  return memoryOf(room, await agentsOf(store, room));
 }
 
 // 배분에 쓴 기억의 지문. 지출에 남겨 두고, 같으면 다시 나눠도 같은 답이라 다시 나누지 않는다.

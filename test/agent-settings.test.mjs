@@ -11,7 +11,7 @@ import { evidenceFor } from '../src/agents/evidence.mjs';
 import { pendingActions } from '../src/actions.mjs';
 import { createApp } from '../src/app.mjs';
 import { notifies, DEFAULT_RULES, ruleChangeText } from '../public/agent-rules.js';
-import { draftFromRules, rulesFromDraft, memoryRowsHtml, historyHtml, limitInputHtml, limitPresetsHtml, meChipHtml } from '../public/agent-panel.js';
+import { draftFromRules, rulesFromDraft, memoryRowsHtml, historyHtml, limitInputHtml, limitPresetsHtml, meChipHtml, personChipHtml } from '../public/agent-panel.js';
 
 const ROOM = 'demo-t';
 async function setup({ evidence = false, store = new MemoryStore() } = {}) {
@@ -555,16 +555,24 @@ test('처음 설정의 금액 버튼은 네 개이고 고른 금액이 눌려 �
   assert.match(limitPresetsHtml({ autoAccept: '30000' }), /aria-pressed="true"[^>]*>₩30,000/);
 });
 
-test('방 머리의 내 칩이 내 비서 입구를 겸한다: 누르면 설정이 열리고, 할 일이 있으면 글자로 알린다', () => {
+test('방 머리의 칩: 비서 설정을 마친 사람에게 로봇 표시, 설정 입구는 내 칩뿐이고 내 할 일은 꼬리표로', () => {
   const me = { name: '나', avatar: '<span class="avatar">나</span>' };
-  const ok = meChipHtml(me, { onboarded: true, autoAccept: 50_000, sendWhen: { payday: 10 }, hasPayout: true });
-  assert.match(ok, /^<button type="button" class="person me" data-action="open-agent"/);
-  assert.match(ok, />내 비서</);
-  assert.ok(ok.includes('₩50,000까지 자동 수락 · 매달 10일에 보내기'), '요약은 툴팁과 읽어 주기 글로 남는다');
-  assert.ok(!ok.includes('계좌 없음') && !ok.includes('설정 전'));
-  assert.match(meChipHtml(me, { onboarded: true, autoAccept: 0, sendWhen: 'now', hasPayout: false }), /class="person-agent warn">내 비서 · 계좌 없음</);
-  assert.match(meChipHtml(me, { onboarded: false, autoAccept: 0, sendWhen: 'now', hasPayout: false }), /class="person-agent warn">내 비서 · 설정 전</);
+  const ready = meChipHtml(me, { onboarded: true, autoAccept: 50_000, sendWhen: { payday: 10 }, hasPayout: true });
+  assert.match(ready, /^<button type="button" class="person me" data-action="open-agent"/);
+  assert.ok(ready.includes('class="agent-mark"'), '설정을 마쳤으면 로봇 표시');
+  assert.ok(!ready.includes('person-tag'), '할 일이 없으면 꼬리표가 없다');
+  assert.ok(ready.includes('₩50,000까지 자동 수락 · 매달 10일에 보내기'), '규칙 요약은 툴팁과 읽어 주기 글로 남는다');
+
+  const before = meChipHtml(me, { onboarded: false, autoAccept: 0, sendWhen: 'now', hasPayout: false });
+  assert.ok(before.includes('<span class="person-tag">설정 전</span>') && !before.includes('agent-mark'), '설정 전이면 로봇 대신 꼬리표');
+  const noAccount = meChipHtml(me, { onboarded: true, autoAccept: 0, sendWhen: 'now', hasPayout: false });
+  assert.ok(noAccount.includes('agent-mark') && noAccount.includes('<span class="person-tag">계좌 없음</span>'));
   assert.equal(meChipHtml({ name: '<b>', avatar: '' }, null), '<span class="person">&lt;b&gt;</span>', '서버가 요약을 주지 않으면 그냥 칩이다');
+
+  // 다른 사람 칩은 누를 수 없고, 설정을 마쳤는지만 보인다
+  const other = personChipHtml({ name: '철수', avatar: '', ready: true });
+  assert.match(other, /^<span class="person">철수<span class="agent-mark"/);
+  assert.equal(personChipHtml({ name: '영희', avatar: '', ready: false }), '<span class="person">영희</span>');
 });
 
 test('normalizeSettings: 빈 문서와 옛 문서(notify 없음)를 기본값으로 채우고 있던 값은 지킨다', () => {

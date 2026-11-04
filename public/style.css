@@ -982,24 +982,29 @@ body.pop-open { overflow: hidden; }
 
 /* ---------- 내 비서 입구(#5) ---------- */
 /* 방 머리의 내 칩은 '내 비서' 입구를 겸한다. 누를 수 있다는 것을 테두리·화살표·호버·커서로 알린다 */
-button.person { appearance: none; border: 0; font: inherit; color: inherit; cursor: pointer; }
+/* font 축약형은 .person의 글자 크기·굵기를 본문 값으로 되돌리므로 글꼴 종류만 물려받는다(다른 칩과 같은 크기) */
+button.person { appearance: none; border: 0; font-family: inherit; line-height: inherit; color: inherit; cursor: pointer; }
 .person.me { padding-right: 10px; box-shadow: inset 0 0 0 1px var(--tint-soft); transition: transform 100ms ease-out, background 100ms ease-out; }
 .person.me:hover { background: var(--tint-soft); }
 .person.me:active { transform: scale(0.97); }
-.person-agent { color: var(--tint); font-weight: 600; }
-.person-agent.warn { color: var(--orange); }
 .person.me .chev { width: 6px; height: 10px; color: var(--label-3); }
+/* 비서 설정을 마친 사람: 이름 옆 로봇. 이름보다 한 단계 옅게 두어 이름을 가리지 않는다 */
+.agent-mark { display: inline-flex; color: var(--label-2); margin-left: -2px; }
+/* 내 칩의 할 일 꼬리표(설정 전·계좌 없음): 이름보다 작게, 색과 글자를 함께 */
+.person-tag { font-size: 0.6875rem; font-weight: 600; line-height: 1; padding: 3px 6px; border-radius: 999px; color: var(--orange); background: var(--orange-soft); }
 
 /* 우측 상단 내 프로필 메뉴: 내 계정과 이 방의 내 비서 */
 .me-menu-wrap { position: relative; }
 .nav-btn.nav-me { padding: 0 12px 0 4px; }
 .nav-btn.nav-me .avatar { width: 28px; height: 28px; font-size: 0.8125rem; }
-/* 아바타 오른쪽에 종·지출 남기기가 있어 아바타 끝에 맞추면 화면 밖으로 나간다. 기록 팝업처럼 화면 오른쪽에 붙인다 */
+/* 메뉴는 누른 버튼 바로 아래에서 열린다(왼쪽 끝을 버튼에 맞춘다). 버튼 오른쪽에 종·지출 남기기가 있어 화면 안에 들어온다 */
 .me-menu {
-  position: fixed;
-  top: calc(env(safe-area-inset-top) + 52px);
-  right: 12px;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
   z-index: 40;
+  transform-origin: top left;
+  animation: me-menu-in 180ms cubic-bezier(0.2, 0.9, 0.3, 1);
   display: grid;
   min-width: 180px;
   padding: 6px;
@@ -1028,3 +1033,5 @@ button.person { appearance: none; border: 0; font: inherit; color: inherit; curs
   .nav-actions .nav-btn.nav-me { display: inline-flex; padding: 0 4px; }
   .nav-me-label { display: none; }
 }
+@keyframes me-menu-in { from { opacity: 0; transform: scale(0.96) translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .me-menu { animation: none; } }
