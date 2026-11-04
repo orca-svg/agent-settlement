@@ -1259,7 +1259,7 @@ h3.set-title { font-size: 1.0625rem; font-weight: 600; }
 .set-intro { margin-top: 4px; max-width: 40em; font-size: 0.875rem; line-height: 1.5; color: var(--label-2); letter-spacing: 0; }
 /* 체험 데모의 '샘플 계좌·한도로 채우기': 소개 글 바로 아래에 버튼과 무엇이 채워지는지를 한 줄로 */
 .set-sample { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 12px; }
-.set-sample .group-note { margin: 0; }
+.set-sample .group-note { margin: 0; padding: 0; }
 .set-card { margin-top: 12px; background: var(--card); border-radius: var(--radius); }
 
 /* 설정 한 줄: 왼쪽 이름·설명 | 오른쪽 컨트롤. 계좌 입력칸(방 시트와 같은 마크업 .row.field)도 이 두 칸에 맞춘다 */
