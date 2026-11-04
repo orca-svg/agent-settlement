@@ -37,12 +37,10 @@ export async function seedDemoRoom(store, { id }) {
   // 가상 계좌다. 실제 계좌가 아니다.
   for (const [i, m] of DEMO_ROOM.members.entries()) {
     const r = DEMO_RULES[m.uid];
-    const prev = await store.get('agents', uid(m.uid));
     await store.put('agents', {
       id: uid(m.uid),
       uid: uid(m.uid),
       memory: [...DEMO_MEMORY[m.uid]],
-      memoryShared: { ...(prev?.memoryShared ?? {}), [id]: [...DEMO_MEMORY[m.uid]] }, // 데모 기억은 이 방 정산에 쓰기로 골라 둔다(앞서 만든 데모 방도 그대로)
       rules: { autoAccept: r.autoAccept, sendWhen: SEND_WHEN[r.sendWhen] ?? 'now', onDispute: ON_DISPUTE[r.onDispute] ?? 'ask' },
       payout: { bank: '토스뱅크', accountNo: `10000000000${i + 1}`, holder: m.name },
       onboardedAt: new Date().toISOString(),

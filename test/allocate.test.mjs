@@ -101,8 +101,6 @@ test('방 응답의 allocFresh: 나누기 전 false, 나눈 뒤 true, 비서의 
   assert.equal(await fresh(), true);
   const yh = await store.get('agents', 'yh');
   await store.put('agents', { ...yh, memory: [...yh.memory, '요즘 디저트를 끊었어요'] });
-  assert.equal(await fresh(), true, '이 방에 쓰기로 고르지 않은 기억은 배분을 바꾸지 않는다');
-  await store.put('agents', { ...yh, memory: [...yh.memory, '요즘 디저트를 끊었어요'], memoryShared: { ...yh.memoryShared, [roomId]: [...yh.memoryShared[roomId], '요즘 디저트를 끊었어요'] } });
   assert.equal(await fresh(), false);
   assert.equal((await call(`/api/rooms/${roomId}/expenses/${eid}/allocate`, 'me', {})).status, 200);
   assert.equal(await fresh(), true);

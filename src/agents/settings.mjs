@@ -26,7 +26,7 @@ export function normalizeSettings(doc, uid) {
     uid,
     plan: doc?.plan ?? 'free',
     memory: Array.isArray(doc?.memory) ? doc.memory : [],
-    memoryShared: doc?.memoryShared ?? {},
+    memoryHidden: doc?.memoryHidden ?? {},
     rules: normalizeRules(doc?.rules),
     ruleHistory: Array.isArray(doc?.ruleHistory) ? doc.ruleHistory : [],
     payout: doc?.payout ?? null,
@@ -81,8 +81,8 @@ export function createAgentSettings({ store, clock = () => new Date() }) {
     return { ...doc, memory: [...doc.memory, s] };
   }
 
-  // 기억은 글자로 가리킨다. 방별로 고른 목록도 같은 글자를 보므로, 고칠 때 함께 바꾸고 지울 때 함께 지운다
-  const eachRoom = (shared, fn) => Object.fromEntries(Object.entries(shared).map(([roomId, list]) => [roomId, fn(list)]));
+  // 기억은 글자로 가리킨다. 방별 공유 선택도 같은 글자를 보므로, 고칠 때 함께 바꾸고 지울 때 함께 지운다
+  const eachRoom = (hidden, fn) => Object.fromEntries(Object.entries(hidden).map(([roomId, list]) => [roomId, fn(list)]));
   const mustHave = (doc, text) => {
     if (!doc.memory.includes(text)) throw new HttpError(404, '그 기억을 찾을 수 없어요');
   };
@@ -115,7 +115,7 @@ export function createAgentSettings({ store, clock = () => new Date() }) {
       return saved({
         ...doc,
         memory: doc.memory.map((m) => (m === from ? s : m)),
-        memoryShared: eachRoom(doc.memoryShared, (list) => list.map((m) => (m === from ? s : m))),
+        memoryHidden: eachRoom(doc.memoryHidden, (list) => list.map((m) => (m === from ? s : m))),
       });
     },
 
@@ -125,18 +125,18 @@ export function createAgentSettings({ store, clock = () => new Date() }) {
       return saved({
         ...doc,
         memory: doc.memory.filter((m) => m !== text),
-        memoryShared: eachRoom(doc.memoryShared, (list) => list.filter((m) => m !== text)),
+        memoryHidden: eachRoom(doc.memoryHidden, (list) => list.filter((m) => m !== text)),
       });
     },
 
-    // 새 기억과 새 방은 쓰지 않는 것이 기본이고, 이 방 정산에 쓸 기억만 켠다
+    // 새 기억과 새 방은 공유가 기본이고, 이 방에 보이고 싶지 않은 기억만 끈다
     async shareMemory(uid, roomId, text, shared) {
       const doc = await read(uid);
       mustHave(doc, text);
-      const rest = (doc.memoryShared[roomId] ?? []).filter((m) => m !== text);
-      const chosen = shared ? [...rest, text] : rest;
-      const { [roomId]: _, ...others } = doc.memoryShared;
-      return saved({ ...doc, memoryShared: chosen.length ? { ...others, [roomId]: chosen } : others });
+      const rest = (doc.memoryHidden[roomId] ?? []).filter((m) => m !== text);
+      const hidden = shared ? rest : [...rest, text];
+      const { [roomId]: _, ...others } = doc.memoryHidden;
+      return saved({ ...doc, memoryHidden: hidden.length ? { ...others, [roomId]: hidden } : others });
     },
   };
 }

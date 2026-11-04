@@ -1,5 +1,6 @@
 // 개인 비서 설정(#5)의 공개 범위. 자동 수락 한도 금액과 비서 기억은 본인만 본다.
-// 기억은 방마다 고른 것만 그 방 정산(배분·중재)에 쓰고, 다른 사람에게 기억 내용이 보일 수 있는 곳은 이의 중재뿐이다.
+// 기억은 팀원 원본(#48)대로 모든 방에 공유하는 것이 기본이고 방마다 끌 수 있다. 공유는 그 방 정산(배분·중재)에 쓴다는 뜻이고,
+// 다른 사람에게 기억 내용이 보일 수 있는 곳은 이의 중재뿐이다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MemoryStore } from '../src/store/memory.mjs';
@@ -67,28 +68,25 @@ test('자동 수락 한도 금액은 본인만 본다: 다른 사람의 방 화�
   }
 });
 
-// ---------------------------------------------------------------- 기억: 방마다 고른 것만 정산에
-test('기억은 방마다 고른 것만 정산에 쓴다: 새 기억은 어느 방에도 쓰이지 않는다', async () => {
+// ---------------------------------------------------------------- 기억: 기본은 모든 방에 공유, 방마다 끄기
+test('기억은 모든 방에 공유하는 것이 기본이고, 끈 방의 정산에만 쓰지 않는다', async () => {
   const store = new MemoryStore();
   const settings = createAgentSettings({ store });
   const secret = '임신 중이라 술 안 마셔요';
   await settings.addMemory('yh', secret);
   const room = (id) => ({ id, members: [{ uid: 'yh', name: '영희' }] });
-  assert.deepEqual((await roomMemory(store, room('r1'))).yh, [], '고르기 전에는 어느 방에도 쓰지 않는다');
+  assert.deepEqual((await roomMemory(store, room('r1'))).yh, [secret], '새 기억은 어느 방에나 공유된다');
 
-  const v = await settings.shareMemory('yh', 'r1', secret, true);
-  assert.deepEqual(v.memoryShared, { r1: [secret] });
-  assert.deepEqual((await roomMemory(store, room('r1'))).yh, [secret]);
-  assert.deepEqual((await roomMemory(store, room('r2'))).yh, [], '고르지 않은 방에는 쓰지 않는다');
+  const v = await settings.shareMemory('yh', 'r1', secret, false);
+  assert.deepEqual(v.memoryHidden, { r1: [secret] });
+  assert.deepEqual((await roomMemory(store, room('r1'))).yh, [], '끈 방에는 쓰지 않는다');
+  assert.deepEqual((await roomMemory(store, room('r2'))).yh, [secret], '다른 방에는 그대로 쓴다');
 
   await settings.editMemory('yh', secret, '술 안 마셔요');
-  assert.deepEqual((await roomMemory(store, room('r1'))).yh, ['술 안 마셔요'], '고쳐도 고른 방은 그대로');
-  await settings.shareMemory('yh', 'r1', '술 안 마셔요', false);
-  assert.deepEqual((await store.get('agents', 'yh')).memoryShared, {}, '끄면 흔적이 없다');
+  assert.deepEqual((await roomMemory(store, room('r1'))).yh, [], '고쳐도 끈 상태는 그대로');
   await settings.shareMemory('yh', 'r1', '술 안 마셔요', true);
-  await settings.deleteMemory('yh', '술 안 마셔요');
-  assert.deepEqual((await store.get('agents', 'yh')).memoryShared, { r1: [] }, '지우면 고른 방 목록에서도 빠진다');
-  assert.deepEqual(sharedMemory({ memory: ['a'] }, 'r1'), [], '고른 방이 없는 옛 문서도 쓰지 않는다');
+  assert.deepEqual((await store.get('agents', 'yh')).memoryHidden, {}, '다시 켜면 흔적이 없다');
+  assert.deepEqual(sharedMemory({ memory: ['a'] }, 'r1'), ['a'], '끈 방이 없는 문서는 모두 공유');
 });
 
 test('배분 이유에는 기억 내용이 없다: 모델이 기억을 인용해도 방 사람 누구에게도 보이지 않는다', async () => {
@@ -97,11 +95,10 @@ test('배분 이유에는 기억 내용이 없다: 모델이 기억을 인용해
   const { store, server, req } = await serve({ gemini });
   try {
     await seedDemoRoom(store, { id: 'r' });
-    assert.equal((await req('/api/me/agent/memory', 'yh', { text: secret })).status, 200);
-    assert.equal((await req('/api/rooms/r/agent/shared', 'yh', { text: secret, shared: true })).status, 200);
+    assert.equal((await req('/api/me/agent/memory', 'yh', { text: secret })).status, 200); // 더하면 이 방에도 공유된다
     const out = await req('/api/rooms/r/expenses/r-izakaya/allocate', 'me', {});
     assert.equal(out.status, 200);
-    assert.ok(gemini.prompts.at(-1).includes(secret), '고른 기억은 이 방 배분에 쓰인다');
+    assert.ok(gemini.prompts.at(-1).includes(secret), '공유한 기억은 이 방 배분에 쓰인다');
 
     const memories = [secret, ...Object.values(await roomMemory(store, await store.get('rooms', 'r'))).flat()];
     for (const uid of ['me', 'cs', 'yh', 'ms']) {
@@ -120,7 +117,7 @@ test('규칙으로 나눠도(키 없음) 배분 이유에 기억 내용이 없�
     await seedDemoRoom(store, { id: 'r' });
     assert.equal((await req('/api/rooms/r/expenses/r-izakaya/allocate', 'me', {})).status, 200);
     const memories = Object.values(await roomMemory(store, await store.get('rooms', 'r'))).flat();
-    assert.ok(memories.length, '시드 방은 기억을 이 방 정산에 쓰기로 골라 둔다');
+    assert.ok(memories.length, '시드 방의 기억은 공유되어 있다');
     const seen = await seenBy(req, 'r', 'cs');
     for (const m of memories) assert.ok(!seen.includes(m), `기억 ‘${m}’이 보이지 않는다`);
     const exp = (await req('/api/rooms/r', 'cs')).json.expenses.find((e) => e.id === 'r-izakaya');
@@ -130,11 +127,11 @@ test('규칙으로 나눠도(키 없음) 배분 이유에 기억 내용이 없�
   }
 });
 
-test('설정 화면: 기억은 기본으로 이 방에 쓰지 않고, 고른 기억만 이 방에 쓰는 중으로 보인다', () => {
-  const html = memoryRowsHtml({ memory: ['고르지 않은 기억', '고른 기억'], memoryShared: { r1: ['고른 기억'] } }, 'r1');
-  assert.match(html, /aria-pressed="false"[^>]*aria-label="이 방 정산에 ‘고르지 않은 기억’ 쓰기"[^>]*>안 씀/);
-  assert.match(html, /aria-pressed="true"[^>]*aria-label="이 방 정산에 ‘고른 기억’ 쓰기"[^>]*>이 방에 씀/);
-  assert.match(memoryRowsHtml({ memory: ['고른 기억'], memoryShared: { r1: ['고른 기억'] } }, 'r2'), /aria-pressed="false"/, '다른 방에서는 쓰지 않는다');
+test('설정 화면: 기억은 기본으로 공유 중이고, 이 방에서 끈 기억만 공유 안 함으로 보인다', () => {
+  const html = memoryRowsHtml({ memory: ['공유한 기억', '끈 기억'], memoryHidden: { r1: ['끈 기억'] } }, 'r1');
+  assert.match(html, /aria-pressed="true"[^>]*aria-label="이 방에 ‘공유한 기억’ 공유"[^>]*>공유 중/);
+  assert.match(html, /aria-pressed="false"[^>]*aria-label="이 방에 ‘끈 기억’ 공유"[^>]*>공유 안 함/);
+  assert.match(memoryRowsHtml({ memory: ['끈 기억'], memoryHidden: { r1: ['끈 기억'] } }, 'r2'), /aria-pressed="true"/, '다른 방에서는 공유');
 });
 
 test('방 사람에게는 누가 비서 설정을 마쳤는지만 보인다(규칙·기억은 없다)', async () => {

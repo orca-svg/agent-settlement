@@ -174,7 +174,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     if (!parties.includes(actorUid)) throw new HttpError(403, '이의 당사자만 중재를 맡길 수 있어요');
     if (dispute.status !== 'open') throw new HttpError(409, '이미 중재안이 나왔어요');
     if (!exp.items?.length) throw new HttpError(409, '영수증 줄이 없어 중재할 수 없어요. 지출을 고쳐 줄을 넣어 주세요');
-    const memoryByUid = await roomMemory(store, room); // 이 방에 쓰기로 고른 기억만 중재 비서에게 보여 준다(이의 중재는 기억이 근거로 인용될 수 있는 유일한 곳)
+    const memoryByUid = await roomMemory(store, room); // 이 방에 공유한 기억만 중재 비서에게 보여 준다(이의 중재는 기억이 근거로 인용될 수 있는 유일한 곳)
     const started = Date.now();
     const out = await mediateWithGemini(gemini, { exp, room, dispute, counter: await counterFor(exp, room), memoryByUid });
     if (dispute.evidence.some(e => e.locationId)) {

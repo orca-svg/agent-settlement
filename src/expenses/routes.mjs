@@ -89,7 +89,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     return { mimeType: photo.mimeType, data: photo.data };
   });
 
-  // 비서들이 이 방 정산에 쓰기로 고른 기억(#5의 agents 문서)으로 영수증 줄을 나눈다. 근거 없는 줄은 지출을 남긴 사람에게 묻는다.
+  // 비서들이 공유한 기억(#5의 agents 문서)으로 영수증 줄을 나눈다. 근거 없는 줄은 지출을 남긴 사람에게 묻는다.
   routes.post('/api/rooms/:id/expenses/:eid/allocate', async ({ req, params }) => {
     const { room, me, exp } = await roomExpense(req, params.id, params.eid);
     if (!exp.items?.length) throw new HttpError(400, '영수증 줄이 있는 지출만 나눌 수 있어요');
@@ -111,7 +111,7 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     const label = out.source === 'rules' ? '규칙' : out.source;
     await store.appendEvent(room.id, {
       from: exp.createdBy, to: 'all', kind: 'allocated',
-      text: out.how === 'obvious' ? `${topic(`‘${exp.title}’`)} ${out.why}` : `${exp.title} 영수증 ${exp.items.length}줄을 비서들이 이 방 정산에 쓰는 기억 ${used}개로 나눴어요.`,
+      text: out.how === 'obvious' ? `${topic(`‘${exp.title}’`)} ${out.why}` : `${exp.title} 영수증 ${exp.items.length}줄을 비서들이 공유한 기억 ${used}개로 나눴어요.`,
       meta: out.how === 'obvious' ? '나눈 방법: AI 없이 규칙으로'
         : out.how === 'cache' ? `나눈 방법: ${label} · 이전 답 재사용`
         : `나눈 방법: ${label} · ${(latencyMs / 1000).toFixed(1)}초 걸렸어요`,
