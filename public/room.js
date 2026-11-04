@@ -10,7 +10,7 @@ import { initAuth, authOptions, onSessionChange, login } from './auth.js';
 import { createAgentPanel, personChipHtml } from './agent-panel.js';
 import { notifies } from './agent-rules.js';
 import { readVisits, departure, timelineSummary, expenseWindow, kstTime, keepForSettlement } from './timeline.js';
-import { createRoomHtml, joinHtml, setupHtml, notAgreed, inviteUrl, datesLabel } from './room-setup.js';
+import { createRoomHtml, joinHtml, setupHtml, notAgreed, inviteUrl, datesLabel, inviteSheetHtml, inviteButtonHtml } from './room-setup.js';
 import { pickDay, presetRange, nextFocus, shiftMonth, todayIso } from './date-range.js';
 import { payoutFieldsHtml, payoutDraftFrom } from './payout-form.js';
 
@@ -399,7 +399,7 @@ function closePhoto() {
 const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit) || 0), 0);
 
 // #4 방 만들기·참가하기·정책·초대. 복사·공유는 클릭 처리기 안에서 바로 불러야 브라우저가 허락한다
-const SETUP_ACTIONS = new Set(['range-toggle', 'range-day', 'range-month', 'range-preset', 'range-clear', 'cf-policy','sign-in', 'create-room', 'join-room', 'agree-policy', 'edit-policy', 'set-policy', 'make-invite', 'copy-invite', 'share-invite']);
+const SETUP_ACTIONS = new Set(['open-invite', 'range-toggle', 'range-day', 'range-month', 'range-preset', 'range-clear', 'cf-policy','sign-in', 'create-room', 'join-room', 'agree-policy', 'edit-policy', 'set-policy', 'make-invite', 'copy-invite', 'share-invite']);
 // 기간 고르기(방 만들기 폼). 화면을 통째로 다시 그리므로, 방금 누른 자리로 초점을 돌려놓아 키보드로 이어 고를 수 있게 한다
 function rangeAct(name, d) {
   const p = setup.picker;
@@ -451,6 +451,19 @@ async function setupAct(name, d) {
   if (name === 'edit-policy') {
     setup.policyEdit = !setup.policyEdit;
     return render();
+  }
+  // 시트를 먼저 열고, 링크가 없으면 그때 만든다. 처음 불러오는 중에 눌러도 이미 보낸 링크를 새 링크로 덮지 않게 있는지부터 본다
+  if (name === 'open-invite') {
+    setup.copyError = '';
+    openAgentSheet('invite');
+    if (setup.invite) return undefined;
+    try {
+      const { invite } = await api(`${base}/invite`);
+      setup.invite = invite ?? await api(`${base}/invite`, { method: 'POST', body: {} });
+    } catch (e) {
+      setup.copyError = e.message;
+    }
+    return renderSheet();
   }
   if (name === 'copy-invite') {
     const done = (ok) => {
@@ -657,7 +670,7 @@ function hero() {
   const person = (m) => (m.uid === me.uid ? agentPanel.chipHtml(m, avatar(m.uid)) : personChipHtml({ name: m.name, avatar: avatar(m.uid), ready: ready.has(m.uid) }));
   return `<section class="hero"><h1>${esc(room.name)}</h1>
     <p class="sub">${esc(room.dates || '')}${room.dates ? ' · ' : ''}${room.members.length}명 · 돈 얘기는 각자의 비서끼리 해요</p>
-    <div class="people">${room.members.map(person).join('')}</div></section>`;
+    <div class="people">${room.members.map(person).join('')}${room.status === 'settling' ? '' : inviteButtonHtml()}</div></section>`;
 }
 
 function nextCard() {
@@ -1284,7 +1297,12 @@ const agentPanel = createAgentPanel({
   openPayout: (payout) => openPayoutSheet(payout),
 });
 
-const AGENT_SHEETS = { invoice: invoiceSheet, dispute: disputeSheet, transfer: transferSheet, payout: payoutSheet, ...agentPanel.sheets };
+// 친구 초대(#4): 참여자 줄 끝 + 버튼으로 연다. 누가 참가하면 방이 다시 그려지면서 이 시트의 참여자 목록도 바로 바뀐다
+const inviteSheet = () => ({
+  title: '친구 초대',
+  html: inviteSheetHtml({ room: state.data.room, me: state.data.me, avatar, invite: setup.invite, copied: setup.copied, copyError: setup.copyError, canShare: !!navigator.share }),
+});
+const AGENT_SHEETS = { invoice: invoiceSheet, dispute: disputeSheet, transfer: transferSheet, payout: payoutSheet, invite: inviteSheet, ...agentPanel.sheets };
 
 // 방의 할 일에서 열면 비어 있고, 내 비서 설정에서 열면 저장된 은행·예금주를 채운다. 계좌번호는 끝 4자리만 알아서 새로 입력한다
 function openPayoutSheet(saved = null) {
@@ -1514,11 +1532,11 @@ function render() {
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
   meMenu.update();
-  const roomSetup = setupHtml({ room: state.data.room, me: state.data.me, avatar, invite: setup.invite, policyEdit: setup.policyEdit, copied: setup.copied, error: setup.error, copyError: setup.copyError, canShare: !!navigator.share });
+  const roomSetup = setupHtml({ room: state.data.room, me: state.data.me, avatar, policyEdit: setup.policyEdit, error: setup.error });
   main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), nextCard(), roomSetup, disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
   mountSegs(main);
   // 이의·청구서 시트는 글을 쓰는 중이면 다시 그리지 않는다(타이핑 중 초점을 잃지 않게)
-  if (['exp', 'transfer'].includes(state.sheet) || (state.sheet === 'dispute' && !state.rejectDraft) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
+  if (['exp', 'transfer', 'invite'].includes(state.sheet) || (state.sheet === 'dispute' && !state.rejectDraft) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();
 }
 
 // ---------------------------------------------------------------- 이벤트

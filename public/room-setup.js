@@ -86,7 +86,7 @@ export function joinHtml(inv, d, { busy = false, error = '', profile = null, dev
 // 링크 줄 오른쪽의 원형 아이콘 버튼. 보이는 원은 작게, 누르는 자리는 44px(애플 최소 크기)로 둔다
 const iconBtn = (action, label, svg, done = false) => `<button type="button" class="icon-btn${done ? ' done' : ''}" data-action="${action}" aria-label="${label}" title="${label}"><span>${svg}</span></button>`;
 
-export function setupHtml({ room, me, avatar, invite, policyEdit, copied, error, copyError, canShare }) {
+export function setupHtml({ room, me, avatar, policyEdit, error }) {
   const settling = room.status === 'settling';
   const p = policyOf(room.policy);
   const waiting = notAgreed(room);
@@ -100,19 +100,34 @@ export function setupHtml({ room, me, avatar, invite, policyEdit, copied, error,
     ${!settling && !iAgreed ? '<div class="actions" style="margin-top:10px"><button class="btn" data-action="agree-policy">이 정책에 동의해요</button></div>' : ''}
     ${policyEdit && !settling ? `<p class="group-note">바꾸면 모두 다시 동의해야 해요.</p>${policyPicker(room.policy, 'set-policy')}` : ''}
     ${errorHtml(error)}</section>`;
-  if (settling) return policy;
-  const link = invite ? inviteUrl(invite.token) : '';
-  // 링크 한 줄에 링크와 만료일, 그 오른쪽에 복사·공유 아이콘(iOS 공유 링크 줄). 복사하면 그 버튼이 잠깐 체크로 바뀐다.
-  // 새 링크 만들기는 이전 링크를 무효로 하는 보조 동작이라 아래 안내 옆의 글자 버튼으로 둔다
-  const inviteBox = invite
+  return policy;
+}
+
+// 친구 초대는 사람이 모여 있는 곳(방 제목 아래 참여자 줄)의 끝 + 버튼에서 연다. 정산 중인 방에는 두지 않는다
+const PLUS = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5v11M1.5 7h11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+export const inviteButtonHtml = () => `<button type="button" class="person add" data-action="open-invite" aria-label="친구 초대" title="친구 초대">${PLUS}</button>`;
+
+// 친구 초대 시트: 링크 한 줄(복사·공유 아이콘), 친구에게 보일 초대 화면, 지금 참여한 사람(참가하면 여기에 바로 보인다).
+// 링크가 아직 없으면 시트를 여는 순간 만든다(그동안 '만드는 중'). 새 링크 만들기는 이전 링크를 무효로 하는 보조 동작이라 맨 아래 글자 버튼
+export function inviteSheetHtml({ room, me, avatar, invite, copied = false, copyError = '', canShare = false }) {
+  const p = policyOf(room.policy);
+  const linkRow = invite
     ? `<div class="list"><div class="row invite-row"><span class="new-room-icon" aria-hidden="true">${ICON_LINK}</span>
-        <span class="grow"><input class="invite-url" readonly value="${esc(link)}" aria-label="초대 링크" data-select-all>
+        <span class="grow"><input class="invite-url" readonly value="${esc(inviteUrl(invite.token))}" aria-label="초대 링크" data-select-all>
           <span class="meta" style="display:block">${esc(until(invite.expiresAt))}까지 열 수 있어요</span></span>
         ${copied ? iconBtn('copy-invite', '복사했어요', ICON_DONE, true) : iconBtn('copy-invite', '링크 복사', ICON_COPY)}
         ${canShare ? iconBtn('share-invite', '공유하기', ICON_SHARE) : ''}</div></div>
-      ${errorHtml(copyError)}<span class="sr-only" role="status">${copied ? '링크를 복사했어요' : ''}</span>
-      <p class="group-note">새 링크를 만들면 이 링크는 더 이상 열리지 않아요. <button type="button" class="text-btn" data-action="make-invite">새 링크 만들기</button></p>`
-    : `<p class="group-note">링크를 받은 친구가 방 이름과 환율 정책을 보고 직접 참가해요.</p>
-      <div class="actions"><button class="btn secondary" data-action="make-invite">초대 링크 만들기</button></div>`;
-  return `${policy}<section class="group"><h2 class="group-label"><span>친구 초대</span><span>${room.members.length}명</span></h2>${inviteBox}</section>`;
+      ${errorHtml(copyError)}<span class="sr-only" role="status">${copied ? '링크를 복사했어요' : ''}</span>`
+    : '<div class="list"><div class="row invite-row" aria-busy="true"><span class="grow meta">링크를 만드는 중…</span></div></div>';
+  const people = room.members.filter((m) => !m.deleted);
+  return `<p class="how">링크를 받은 친구가 아래 화면을 보고 Google로 로그인해 바로 참가해요. 카톡으로 보내거나 복사해서 건네주세요.</p>
+    <section class="group">${linkRow}</section>
+    <section class="group"><h3 class="group-label"><span>친구에게 이렇게 보여요</span></h3>
+      <div class="invite-preview"><p class="eyebrow">초대받았어요</p><p class="invite-preview-title">${esc(room.name)}</p>
+        <p class="meta">${esc(room.dates || '')}${room.dates ? ' · ' : ''}${people.map((m) => esc(m.name)).join(', ')} (${people.length}명)</p>
+        <p class="meta">환율 정책: ${esc(p.label)}</p></div></section>
+    <section class="group"><h3 class="group-label"><span>지금 ${people.length}명</span></h3>
+      <div class="list">${people.map((m) => `<div class="row">${avatar(m.uid)}<span class="grow">${esc(m.name)}${m.uid === me.uid ? ' (나)' : ''}</span></div>`).join('')}
+        <div class="row invite-waiting"><span class="invite-dot" aria-hidden="true"></span><span class="grow meta">초대한 친구가 참가하면 여기에 바로 보여요</span></div></div></section>
+    ${invite ? '<p class="group-note">새 링크를 만들면 지금 링크는 더 이상 열리지 않아요. <button type="button" class="text-btn" data-action="make-invite">새 링크 만들기</button></p>' : ''}`;
 }

@@ -1,7 +1,7 @@
 // #4 방 만들기·참가 화면(public/room-setup.js)과 로그인 뒤 돌아갈 곳. 로그인(#2)한 계정의 프로필로 들어가고, 이름은 따로 받지 않는다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRoomHtml, joinHtml, setupHtml, datesLabel } from '../public/room-setup.js';
+import { createRoomHtml, joinHtml, setupHtml, datesLabel, inviteSheetHtml, inviteButtonHtml } from '../public/room-setup.js';
 import { nextAfterLogin } from '../public/ui.js';
 
 const profile = { name: '<재윤>', color: '#34c759' };
@@ -72,19 +72,34 @@ test('방 화면: 모두 동의한 정책은 한 줄과 바꾸기만, 안내는 
   assert.ok(!waiting.includes('preview-note'));
 });
 
-test('초대 링크: 링크 줄 안 오른쪽에 복사·공유 아이콘 버튼을 두고, 새 링크 만들기는 아래 글자 버튼으로 낮춘다', () => {
-  globalThis.location ??= { origin: 'http://localhost:4562', pathname: '/room.html' };
+test('친구 초대는 방 본문(환율·지출 사이)에 두지 않고, 참여자 줄 끝의 + 버튼으로 연다', () => {
   const me = { uid: 'me', name: '재윤' };
   const room = { members: [me], policy: 'actual', policyAgreedBy: ['me'], status: 'ready' };
+  const body = setupHtml({ room, me, avatar: () => '', invite: { token: 'AbCdEfGhIjKlMnOpQrStUv_-', expiresAt: '2026-11-11T03:00:00Z' } });
+  assert.ok(!body.includes('copy-invite') && !body.includes('친구 초대'), '본문에는 초대 칸이 없다');
+  assert.match(inviteButtonHtml(), /<button[^>]*data-action="open-invite"[^>]*aria-label="친구 초대"/);
+});
+
+test('초대 시트: 링크 줄(복사·공유 아이콘), 친구에게 보일 초대 화면, 참가하면 바로 보일 참여자 목록', () => {
+  globalThis.location ??= { origin: 'http://localhost:4562', pathname: '/room.html' };
+  const me = { uid: 'me', name: '재윤' };
+  const room = { name: '오사카 2박 3일', dates: '11월 7일 – 9일', members: [me], policy: 'actual', policyAgreedBy: ['me'], status: 'ready' };
   const invite = { token: 'AbCdEfGhIjKlMnOpQrStUv_-', expiresAt: '2026-11-11T03:00:00Z' };
-  const html = setupHtml({ room, me, avatar: () => '', invite, canShare: true });
+  const sheet = inviteSheetHtml({ room, me, avatar: () => '<i></i>', invite, canShare: true });
+  assert.match(sheet, /친구에게 이렇게 보여요/);
+  assert.match(sheet, /오사카 2박 3일/);
+  assert.match(sheet, /실제 낸 원화/, '친구가 참가 전에 볼 환율 정책');
+  assert.match(sheet, /지금 1명/);
+  assert.match(sheet, /참가하면 여기에 바로 보여요/);
+  assert.match(inviteSheetHtml({ room, me, avatar: () => '', invite: null }), /링크를 만드는 중/, '링크가 없으면 여는 순간 만든다');
+  const html = sheet;
   assert.match(html, /<button[^>]*class="icon-btn"[^>]*data-action="copy-invite"[^>]*aria-label="링크 복사"/);
   assert.match(html, /<button[^>]*class="icon-btn"[^>]*data-action="share-invite"[^>]*aria-label="공유하기"/);
   assert.ok(!html.includes('>링크 복사<') && !html.includes('>공유하기<'), '글자 버튼은 없다');
   assert.match(html, /<input[^>]*readonly[^>]*data-select-all/, '링크는 눌러서 통째로 고를 수 있다');
   assert.match(html, /11월 11일까지 열 수 있어요/);
   assert.match(html, /class="text-btn"[^>]*data-action="make-invite"[^>]*>새 링크 만들기/);
-  const copied = setupHtml({ room, me, avatar: () => '', invite, copied: true, canShare: false });
+  const copied = inviteSheetHtml({ room, me, avatar: () => '', invite, copied: true, canShare: false });
   assert.match(copied, /class="icon-btn done"[^>]*data-action="copy-invite"[^>]*aria-label="복사했어요"/, '복사하면 그 버튼이 체크로 바뀌고 읽어 주기도 바뀐다');
   assert.ok(!copied.includes('share-invite'), '공유를 못 하는 브라우저에는 공유 버튼이 없다');
 });
