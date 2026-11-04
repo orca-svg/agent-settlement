@@ -79,16 +79,38 @@ test('한도를 넘으면 주인에게 묻고, 본인만 답할 수 있다', asy
   await assert.rejects(orch.answerInvoice('demo-t', mine.id, 'cs', { decision: 'accept' }), (e) => e.status === 409);
 });
 
-test('사람이 이의를 고르면 지출과 이유가 있어야 하고 이의가 열린다', async () => {
+test('사람이 이의를 고르면 지출은 있어야 하고 이의가 열린다', async () => {
   const { store, orch } = await setup();
   const cs = await store.get('agents', 'cs');
   await store.put('agents', { ...cs, rules: { ...cs.rules, autoAccept: 0 } });
   await orch.sendInvoices('demo-t', 'me');
   const id = 'demo-t:v1:cs';
-  await assert.rejects(orch.answerInvoice('demo-t', id, 'cs', { decision: 'dispute', expenseId: 'demo-t-limo' }), (e) => e.status === 400);
+  await assert.rejects(orch.answerInvoice('demo-t', id, 'cs', { decision: 'dispute' }), (e) => e.status === 400);
   await orch.answerInvoice('demo-t', id, 'cs', { decision: 'dispute', expenseId: 'demo-t-limo', claim: '리무진은 내가 안 탔어요' });
   const mine = (await store.list('disputes', { roomId: 'demo-t' })).find((d) => d.by === 'cs');
   assert.deepEqual([mine.expenseId, mine.claim, mine.status], ['demo-t-limo', '리무진은 내가 안 탔어요', 'open']);
+});
+
+test('이의는 여러 지출에 한 번에 내고, 맞지 않는 점을 비우면 기본 문구로 채운다', async () => {
+  const { store, orch } = await setup();
+  const cs = await store.get('agents', 'cs');
+  await store.put('agents', { ...cs, rules: { ...cs.rules, autoAccept: 0 } });
+  await orch.sendInvoices('demo-t', 'me');
+  const id = 'demo-t:v1:cs';
+  const byCs = async () => (await store.list('disputes', { roomId: 'demo-t' })).filter((d) => d.by === 'cs');
+  // 하나라도 맞지 않으면 아무 이의도 만들지 않고 청구서도 그대로 둔다
+  await assert.rejects(orch.answerInvoice('demo-t', id, 'cs', { decision: 'dispute', disputes: [{ expenseId: 'demo-t-limo', claim: '' }, { expenseId: 'nope', claim: '' }] }), (e) => e.status === 400);
+  assert.equal((await byCs()).length, 0);
+  assert.equal((await store.get('invoices', id)).status, 'asked');
+
+  const { invoice } = await orch.answerInvoice('demo-t', id, 'cs', { decision: 'dispute', disputes: [
+    { expenseId: 'demo-t-bar', claim: '23:10에 자리를 떠났어요.' }, { expenseId: 'demo-t-limo', claim: '  ' }, { expenseId: 'demo-t-bar', claim: '두 번' },
+  ] });
+  assert.equal(invoice.status, 'disputed');
+  const mine = await byCs();
+  assert.deepEqual(mine.map((d) => d.expenseId).sort(), ['demo-t-bar', 'demo-t-limo'], '같은 지출은 한 번만');
+  assert.equal(mine.find((d) => d.expenseId === 'demo-t-bar').claim, '23:10에 자리를 떠났어요.');
+  assert.match(mine.find((d) => d.expenseId === 'demo-t-limo').claim, /공항 리무진 버스/, '비운 이유는 지출 이름을 넣은 기본 문구');
 });
 
 test('라우트: 청구서 보내기와 남의 청구서 답하기(403)', async () => {

@@ -736,6 +736,28 @@ button.row:active { background: var(--fill); }
 .guide-actions { display: grid; gap: 10px; margin-top: 20px; }
 .guide-actions .btn svg { margin-left: 6px; }
 @media (prefers-reduced-motion: reduce) { #sheet { scale: none; } }
+/* 이의 쓰기(#7): 맞지 않는 지출은 눌러서 고르고 빼는 줄. 고른 줄은 끝에 체크가 붙고, 바로 아래에 맞지 않는 점을 적는 칸이
+   제목 들여쓰기에 맞춰 붙는다(같은 지출이라 사이 구분선은 없다) */
+.row.choice .choice-mark { width: 22px; height: 22px; flex: none; display: grid; place-items: center; color: var(--tint); }
+.row.choice .found { color: var(--tint); }
+.row.claim-row { min-height: 0; padding: 0 16px 12px 58px; }
+.row.choice + .row.claim-row::before { display: none; }
+.claim-row textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.9em;
+  field-sizing: content;
+  resize: none;
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--fill);
+  color: var(--label);
+  font: inherit;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+}
+.claim-row textarea::placeholder { color: var(--label-3); }
 .big { padding: 6px 4px 18px; }
 .big .amt { font-size: 2.125rem; font-weight: 700; letter-spacing: -0.025em; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .big .sub { color: var(--label-2); font-size: 0.9375rem; margin-top: 4px; letter-spacing: 0; }
