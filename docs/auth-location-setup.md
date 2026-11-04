@@ -44,7 +44,7 @@ npm test
 npm start
 ```
 
-- `http://localhost:4500/` — 기존 데모.
+- `http://localhost:4500/` — 첫 화면과 체험 데모.
 - `/account.html` — 프로젝트 미설정 안내. 로그인 성공을 가짜로 표시하지 않음.
 - 개발용 방이 필요하면 `.env`에 `DEV_SEED=1` 후 재시작하여 `/room.html` 사용. 개발용 신원은 로컬 개발 서버 전용. Firebase 설정 또는 운영 모드에서는 비활성화.
 - 로그인·권한 테스트는 Firebase 검증기를 주입하고 HTTP API를 실제 호출함. 실제 Google OAuth 테스트를 대체하지 않음.
@@ -56,7 +56,7 @@ npm start
 3. Authentication → Sign-in method → Google 활성화 및 지원 이메일 선택.
 4. Authentication → Settings → Authorized domains에 로컬 테스트의 `localhost`와 배포 화면의 `orca-svg.github.io` 추가. 다른 배포 도메인은 실제 도메인으로 등록.
 5. 로컬 서버 자격 증명은 `gcloud auth application-default login`. 해당 프로젝트의 Firebase Auth 사용자 조회·삭제 권한 필요. Cloud Run은 서비스 계정과 Application Default Credentials 사용. 비밀키 JSON을 public 폴더·저장소에 넣지 않음.
-6. 서버 환경변수에 네 Firebase 설정을 주입하고 재시작. `/account.html`에서 Google 팝업 로그인 → 이름·색 저장 → 로그아웃 후 데모 복귀 확인.
+6. 서버 환경변수에 네 Firebase 설정을 주입하고 재시작. `/account.html`에서 Google 팝업 로그인 → 이름·색 저장 → 로그아웃하면 '내 계정' 로그인 화면으로 돌아오는지 확인.
 7. 팀의 #3/#4 데이터에 Firebase UID를 사용하여 멤버십 연결. 기존 데모 UID(`me`, `ms` 등)는 실제 계정으로 자동 변환하지 않음.
 
 ## 비용·프로젝트 없이 Auth Emulator로 통합 확인
