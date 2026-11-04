@@ -209,11 +209,11 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
     const last = ui.step === step.length - 1;
     return {
       title: '내 비서 설정',
-      html: `<p class="group-note" style="margin-top:0">한 번 정하면 모든 방에 적용돼요. 방마다 빼고 싶은 것은 나중에 그 방에서 고를 수 있어요.</p><p class="eyebrow agent-step">${ui.step + 1}/${step.length}단계</p><h3 class="agent-q">${esc(step[ui.step][0])}</h3>
+      html: `<div class="agent-setup"><p class="group-note" style="margin-top:0">한 번 정하면 모든 방에 적용돼요. 방마다 빼고 싶은 것은 나중에 그 방에서 고를 수 있어요.</p><p class="eyebrow agent-step">${ui.step + 1}/${step.length}단계</p><h3 class="agent-q">${esc(step[ui.step][0])}</h3>
         ${step[ui.step][1]}${errorHtml('setup')}
         <div class="agent-nav">${ui.step ? '<button type="button" class="btn plain" data-action="setup-back">이전</button>' : ''}
           <button type="button" class="btn" style="flex:1" data-action="${last ? 'setup-done' : 'setup-next'}" ${ui.busy ? 'disabled' : ''}>${last ? '시작하기' : '다음'}</button></div>
-        ${ui.step ? '' : '<p class="group-note" style="text-align:center"><button type="button" class="text-btn" data-action="setup-skip">기본값으로 시작</button></p>'}`,
+        ${ui.step ? '' : '<p class="group-note" style="text-align:center"><button type="button" class="text-btn" data-action="setup-skip">기본값으로 시작</button></p>'}</div>`,
     };
   }
 

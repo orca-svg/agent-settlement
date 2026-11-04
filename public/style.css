@@ -340,6 +340,7 @@ a.row:active { background: var(--fill); }
   font: inherit;
   font-size: 1.0625rem;
   color: var(--tint);
+  text-decoration: none;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -972,6 +973,9 @@ body.pop-open { overflow: hidden; }
 }
 .danger-text { color: var(--orange); }
 .agent-step { font-size: 0.8125rem; font-weight: 600; color: var(--tint); letter-spacing: 0; }
+/* 처음 설정은 묶음 카드 없이 한 줄로 쌓으므로, 안내 글도 질문·선택지와 같은 왼쪽 선에 둔다 */
+.agent-setup .group-note { padding-left: 0; padding-right: 0; }
+.agent-setup > .group-note:first-child { margin-bottom: 16px; }
 .agent-q { font-size: 1.375rem; line-height: 1.25; font-weight: 700; letter-spacing: -0.02em; margin: 4px 0 16px; }
 .agent-nav { display: flex; gap: 8px; margin: 20px 0 8px; }
 .agent-save { margin-bottom: 22px; }
