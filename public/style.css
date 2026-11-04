@@ -745,6 +745,8 @@ button.row:active { background: var(--fill); }
   letter-spacing: 0;
 }
 .pick:active { transform: scale(0.95); }
+/* 기본 여백(왼쪽 3px)은 왼쪽에 얼굴이 붙는 사람 고르기용이다. 글자만 있는 캡슐(공유 중·금액 버튼)은 좌우를 같게 해 글자가 가운데 오게 한다 */
+.pick:not(:has(.avatar)) { padding: 3px 12px; justify-content: center; }
 .pick .avatar { width: 20px; height: 20px; font-size: 0.6875rem; opacity: 0.35; }
 .pick[aria-pressed="true"] { background: var(--tint-soft); color: var(--tint); }
 .pick[aria-pressed="true"] .avatar { opacity: 1; }
