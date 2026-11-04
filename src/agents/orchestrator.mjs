@@ -113,15 +113,23 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return { version: room.version, invoices };
   }
 
-  // 한도를 넘어 주인에게 물은 청구서에 본인이 답한다
-  async function answerInvoice(roomId, invoiceId, actorUid, { decision, expenseId, claim } = {}) {
+  // 한도를 넘어 주인에게 물은 청구서에 본인이 답한다. 이의는 여러 지출에 한 번에 낼 수 있다(disputes: [{ expenseId, claim }]).
+  // 예전 화면이 보내는 expenseId·claim 하나도 그대로 받는다
+  async function answerInvoice(roomId, invoiceId, actorUid, { decision, expenseId, claim, disputes } = {}) {
     const invoice = await store.get('invoices', invoiceId);
     if (!invoice || invoice.roomId !== roomId) throw new HttpError(404, '청구서를 찾을 수 없어요');
     if (invoice.to !== actorUid) throw new HttpError(403, '내 청구서에만 답할 수 있어요');
     if (invoice.status !== 'asked') throw new HttpError(409, '이미 답했거나 바뀐 청구서예요');
     if (invoice.version !== (await store.get('rooms', roomId)).version) throw new HttpError(409, STALE);
     if (!['accept', 'dispute'].includes(decision)) throw new HttpError(400, '수락하거나 이의를 제기해 주세요');
-    if (decision === 'dispute') await raiseDispute(roomId, { by: actorUid, expenseId, claim, evidence: [] });
+    if (decision === 'dispute') {
+      // 같은 지출은 처음 것만. 하나라도 이 방에 없는 지출이면 아무 이의도 만들지 않는다
+      const seen = new Set();
+      const list = (Array.isArray(disputes) ? disputes : [{ expenseId, claim }]).filter((d) => d && !seen.has(d.expenseId) && seen.add(d.expenseId));
+      const { expenses } = await load(roomId);
+      if (!list.length || list.some((d) => !expenses.some((e) => e.id === d.expenseId))) throw new HttpError(400, '이의를 제기할 지출을 골라 주세요');
+      for (const d of list) await raiseDispute(roomId, { by: actorUid, expenseId: d.expenseId, claim: d.claim, evidence: [] });
+    }
     const saved = { ...invoice, status: decision === 'accept' ? 'accepted' : 'disputed', decidedBy: 'human' };
     await store.put('invoices', saved);
     if (decision === 'accept') await say(roomId, { from: actorUid, to: 'all', kind: 'invoice_accepted', text: acceptedText(invoice.net), meta: '사람이 직접 확인했어요' });
@@ -135,10 +143,11 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     const exp = expenses.find((e) => e.id === expenseId);
     if (!exp) throw new HttpError(400, '이의를 제기할 지출을 골라 주세요');
     if (!evidence.length) evidence = await evidenceFor(by, exp, room);
-    if (!String(claim ?? '').trim()) throw new HttpError(400, '무엇이 맞지 않는지 적어 주세요');
+    // 맞지 않는 점은 비워도 된다. 그러면 어느 지출인지만 적은 기본 문구로 중재 비서와 상대에게 간다
+    const text = String(claim ?? '').trim() || `‘${exp.title}’의 내 몫이 맞지 않아요.`;
     const existing = (await store.list('disputes', { roomId })).find((d) => d.by === by && d.expenseId === expenseId && OPEN.includes(d.status));
     if (existing) return existing;
-    const dispute = { id: `${roomId}:d-${randomUUID().slice(0, 8)}`, roomId, expenseId, by, claim: String(claim).trim().slice(0, 300), evidence, status: 'open', agreedBy: [] };
+    const dispute = { id: `${roomId}:d-${randomUUID().slice(0, 8)}`, roomId, expenseId, by, claim: text.slice(0, 300), evidence, status: 'open', agreedBy: [] };
     await store.put('disputes', dispute);
     await say(roomId, {
       from: by, to: exp.payer, kind: 'dispute_raised', text: `${obj(`‘${exp.title}’`)} 다시 나누자고 이의를 제기했어요`,

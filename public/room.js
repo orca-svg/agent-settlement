@@ -1,7 +1,7 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle } from './core.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, CROSS, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, flaggedLines, blockedNotice, askedBy, nudge, COMPUTER_QUERY, disputeWaiting, disputeChoices, disputeNote, disputeRejected, disputeLive, disputeStatus } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, CROSS, ICON_DONE, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, flaggedLines, blockedNotice, askedBy, nudge, COMPUTER_QUERY, disputeWaiting, disputeChoices, disputeNote, disputeRejected, disputeLive, disputeStatus } from './ui.js';
 import { reduceMotion } from './motion.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
@@ -9,7 +9,8 @@ import { API_BASE } from './api.js';
 import { initAuth, authOptions, onSessionChange, login } from './auth.js';
 import { createAgentPanel, personChipHtml } from './agent-panel.js';
 import { notifies } from './agent-rules.js';
-import { readVisits, departure, timelineSummary, expenseWindow, kstTime, keepForSettlement } from './timeline.js';
+import { readVisits, expenseWindow, keepForSettlement, findMismatches } from './timeline.js';
+import { guessOs, guideHtml } from './timeline-guide.js';
 import { createRoomHtml, joinHtml, setupHtml, notAgreed, inviteUrl, datesLabel, inviteSheetHtml, inviteButtonHtml } from './room-setup.js';
 import { pickDay, presetRange, nextFocus, shiftMonth, todayIso } from './date-range.js';
 import { payoutFieldsHtml, payoutDraftFrom } from './payout-form.js';
@@ -983,22 +984,16 @@ function alertBlocked() {
 const formError = () => (state.formError ?`<p class="form-error" role="alert">${esc(state.formError)}</p>` : '');
 const notFound = (title) => ({ title, html: '<p class="empty">찾을 수 없어요. 지출이 바뀌어 대체됐을 수 있어요.</p>' });
 
-// 한도를 넘어 비서가 물은 청구서: 이대로 받거나, 지출 하나를 골라 이의를 낸다
+// 이의를 낼 수 있는 지출: 그 청구서를 받은 사람이 함께 있던 지출
+const disputable = (inv) => state.data.expenses.filter((e) => e.present.includes(inv.to));
+
+// 한도를 넘어 비서가 물은 청구서: 이대로 받거나, 맞지 않는 지출을 골라 이의를 낸다
 function invoiceSheet() {
   const inv = byId('invoices', state.ref);
   if (!inv) return notFound('청구서');
   const dd = state.disputeDraft;
   const answering = inv.status === 'asked' && inv.to === state.data.me.uid;
-  const choices = state.data.expenses.filter((e) => e.present.includes(inv.to));
-  const form = dd ? `<section class="group"><h3 class="group-label"><span>어느 지출이 맞지 않나요?</span></h3>
-      <div class="list">${choices.map((e) => `<button type="button" class="row" data-action="dispute-pick" data-id="${esc(e.id)}" aria-pressed="${dd.expenseId === e.id}">
-        ${tile(e.kind)}<span class="grow"><span class="title">${esc(e.title)}</span><span class="meta" style="display:block">${esc(nameOf(e.payer))} · ${money(amountOf(e), e.currency)}</span></span>
-        ${dd.expenseId === e.id ? chip('고름', 'ok') : ''}</button>`).join('')}</div></section>
-    <section class="group"><div class="list"><label class="row field"><span class="grow">맞지 않는 점</span>
-      <input data-dd="claim" value="${esc(dd.claim)}" maxlength="200" placeholder="예: 리무진은 타지 않았어요"></label></div></section>
-    ${dd.expenseId ? timelineSection(byId('expenses', dd.expenseId), dd.timeline) : ''}
-    ${formError()}
-    <button class="btn" style="width:100%" id="dispute-send" data-action="answer-invoice" data-decision="dispute" ${dd.expenseId && dd.claim.trim() ? '' : 'disabled'}>이의 보내기</button>` : '';
+  const form = dd ? disputeForm(inv, dd) : '';
   return {
     title: '청구서',
     html: `<div class="big"><div class="amt">${won(Math.max(0, -inv.net))}</div>
@@ -1045,38 +1040,64 @@ function locationSection() {
     : visits
     ? `<div class="list"><div class="row">${tile('pin')}${rowText('Google 지도 타임라인을 올렸어요', visits.length ? `이 정산 기간 방문 ${visits.length}곳 · 이의를 낼 때 자동으로 찾아요` : '이 정산 기간의 기록이 없어요')}
         <button type="button" class="text-btn" data-action="timeline-forget">지우기</button></div></div>`
-    : `<div class="list"><button type="button" class="row" data-action="timeline-pick">${tile('pin')}${rowText('Google 지도 타임라인 올리기', '여행이 끝난 뒤 한 번만 올리면 돼요', CHEVRON)}</button></div>`;
+    : `<div class="list"><button type="button" class="row" data-action="timeline-guide" aria-haspopup="dialog">${tile('pin')}${rowText('Google 지도 타임라인 올리기', '여행이 끝난 뒤 한 번만 올리면 돼요', CHEVRON)}</button></div>`;
   return `<section class="group"><h2 class="group-label"><span>내 위치 기록</span><span>선택</span></h2>${body}
     ${state.timelineError ? `<p class="form-error" role="alert">${esc(state.timelineError)}</p>` : ''}
     <p class="group-note">파일은 이 기기에서만 읽어요. 이 정산 기간의 방문 시각만 이 브라우저에 ${TIMELINE_DAYS}일 두고, 이의를 낼 때 내가 켠 한 줄만 상대에게 가요.</p></section>`;
 }
 
-// 이의를 낼 때 고른 지출의 시간대(첫 주문~결제). 올려 둔 타임라인이 있으면 바로 찾아 채우고, 없으면 여기서 올린다.
-// 찾은 결과는 사용자가 스위치를 켜야만 이의 상대와 중재 비서에게 간다(public/timeline.js)
-function timelineSection(exp, tl) {
-  const { from, until } = expenseWindow(exp);
-  const r = tl?.result;
-  const found = r && (r.stayedUntil
-    ? rowText(`결제(${r.stayedUntil})까지 머물렀어요`, `첫 주문 ${kstTime(from)}부터 같은 곳`)
-    : rowText(`${r.leftAt}에 떠났어요`, `첫 주문 ${kstTime(from)} 때 있던 곳 · ${r.nextAt ? `${r.nextAt} ${r.nextHome ? '집' : '다른 장소'} 도착` : '도착 기록 없음'}`));
-  const body = !tl
-    ? `<div class="list"><button type="button" class="row" data-action="timeline-pick">${tile('pin')}${rowText('Google 지도 타임라인 올리기', `이 지출 시간대(${kstTime(from)}~${kstTime(until)})를 찾아요`, CHEVRON)}</button></div>
-      <p class="group-note">휴대폰 Google 지도에서 내보낸 타임라인 파일(JSON)을 골라요. 한 번 올리면 이 정산의 다른 이의에도 다시 고르지 않고 써요.</p>`
-    : tl.state === 'reading' ? `<div class="list" aria-busy="true"><div class="row">${tile('pin')}${rowText('이 시간대만 찾는 중…')}</div></div>`
-    : tl.state === 'none' ? `<div class="list"><div class="row">${tile('pin')}${rowText('이 시간대 기록이 없어요', '위치 요약 없이 이의를 보내요')}</div></div>`
-    : tl.state === 'error' ? `<p class="form-error" role="alert">${esc(tl.message)}</p>`
-    : `<div class="list"><div class="row">${tile('pin')}${found}</div>
-        <label class="row" style="--inset:16px;cursor:pointer">${rowText('이의에 붙이기', '이의 상대와 중재 비서만 봐요')}<input type="checkbox" role="switch" class="switch" data-timeline-agree ${tl.agree ? 'checked' : ''}></label></div>
-      <p class="group-note">${tl.saved ? '올려 둔 타임라인에서 찾았어요. ' : ''}시각만 보내고 파일·좌표·장소 이름은 보내지 않아요. 7일 뒤 지워지고, 그 전에도 지울 수 있어요.</p>`;
-  const again = tl && tl.state !== 'reading' ? '<button type="button" class="text-btn" data-action="timeline-pick">다른 파일 고르기</button>' : '';
-  const sample = authOptions().dev && tl?.state !== 'reading' ? '<button type="button" class="text-btn" data-action="timeline-sample">개발용 가짜 기록</button>' : '';
-  return `<section class="group"><h3 class="group-label"><span>위치 기록</span><span>선택</span></h3>${body}
-    ${again || sample ? `<div class="group-actions">${again}${sample}</div>` : ''}</section>`;
+// 이의 쓰기(#7). 타임라인을 올리면 결제 전에 자리를 떠난 지출을 골라 두고 '맞지 않는 점'을 채운다(public/timeline.js의 findMismatches).
+// 골라 둔 지출은 눌러서 빼고, 다른 지출은 눌러서 더한다. 맞지 않는 점은 고치거나 비워도 된다(서버가 기본 문구로 채운다).
+// 타임라인은 이의에 쓰려고 올린 것이라 따로 묻지 않고, 보낼 때 찾은 지출에 위치 요약(떠난 시각 한 줄)을 함께 붙인다.
+// dd: { picks: { [지출 id]: 맞지 않는 점 }, found: { [지출 id]: { result, summary, claim } } | null, scan: null | 'reading' | { error } }
+function disputeForm(inv, dd) {
+  const choices = disputable(inv);
+  const found = dd.found;
+  const foundCount = found ? Object.keys(found).length : 0;
+  const picked = choices.filter((e) => e.id in dd.picks);
+  const located = picked.filter((e) => found?.[e.id]).length;
+  const scan = dd.scan === 'reading'
+    ? `<div class="list" aria-busy="true"><div class="row">${tile('pin')}${rowText('타임라인에서 찾는 중…')}</div></div>`
+    : found
+    ? `<div class="list"><div class="row">${tile('pin')}${rowText(foundCount ? `자리를 떠난 지출 ${foundCount}건을 골라 뒀어요` : '타임라인과 맞지 않는 지출이 없어요', foundCount ? '아니면 아래에서 눌러 빼요' : '맞지 않는 지출을 직접 골라요')}
+        <button type="button" class="text-btn" data-action="timeline-pick">다른 파일 고르기</button></div></div>`
+    : `<div class="list"><button type="button" class="row" data-action="timeline-guide" aria-haspopup="dialog">${tile('pin')}${rowText('Google 지도 타임라인 올리기', '자리를 떠난 지출을 찾아 골라 둬요', CHEVRON)}</button></div>`;
+  const sample = authOptions().dev && dd.scan !== 'reading' ? '<div class="group-actions"><button type="button" class="text-btn" data-action="timeline-sample">개발용 가짜 기록</button></div>' : '';
+  const rows = choices.map((e) => {
+    const on = e.id in dd.picks;
+    const f = found?.[e.id];
+    const claim = on ? `<div class="row claim-row"><textarea data-claim="${esc(e.id)}" rows="2" maxlength="200" aria-label="‘${esc(e.title)}’에서 맞지 않는 점" placeholder="맞지 않는 점(비워도 보낼 수 있어요)">${esc(dd.picks[e.id])}</textarea></div>` : '';
+    return `<button type="button" class="row choice" data-action="dispute-toggle" data-id="${esc(e.id)}" aria-pressed="${on}">
+        ${tile(e.kind)}<span class="grow"><span class="title">${esc(e.title)}</span><span class="meta" style="display:block">${esc(nameOf(e.payer))} · ${money(amountOf(e), e.currency)}${f ? ` · <span class="found">${esc(f.result.leftAt)}에 떠남</span>` : ''}</span></span>
+        <span class="choice-mark" aria-hidden="true">${on ? ICON_DONE : ''}</span></button>${claim}`;
+  }).join('');
+  const note = located ? `<p class="group-note">고른 지출 중 ${located}건에는 타임라인에서 찾은 떠난 시각 한 줄이 이의 상대와 중재 비서에게 가요. 파일·좌표·장소 이름은 보내지 않고, 7일 뒤 지워요.</p>` : '';
+  return `<section class="group"><h3 class="group-label"><span>위치 기록으로 찾기</span><span>선택</span></h3>${scan}
+      ${dd.scan?.error ? `<p class="form-error" role="alert">${esc(dd.scan.error)}</p>` : ''}${sample}</section>
+    <section class="group"><h3 class="group-label"><span>맞지 않는 지출</span><span>${picked.length ? `${picked.length}건 고름` : '눌러서 골라요'}</span></h3>
+      <div class="list">${rows}</div>${note}</section>
+    ${formError()}
+    <button class="btn" style="width:100%" id="dispute-send" data-action="answer-invoice" data-decision="dispute" ${picked.length ? '' : 'disabled'}>${picked.length > 1 ? `이의 ${picked.length}건 보내기` : '이의 보내기'}</button>`;
 }
 
-function applyTimeline(visits, exp, saved = false) {
-  const result = departure(visits, exp);
-  state.disputeDraft.timeline = result ? { state: 'found', result, summary: timelineSummary(result, exp), agree: false, saved } : { state: 'none', saved };
+// 타임라인 방문에서 이 청구서의 맞지 않는 지출을 찾아 골라 둔다. 사람이 이미 고르거나 고쳐 쓴 지출은 그대로 둔다
+function scanDispute(visits) {
+  const dd = state.disputeDraft;
+  const inv = byId('invoices', state.ref);
+  if (!dd || !inv) return;
+  const found = findMismatches(visits, disputable(inv));
+  dd.found = Object.fromEntries(found.map((f) => [f.expenseId, f]));
+  for (const f of found) if (!(f.expenseId in dd.picks)) dd.picks[f.expenseId] = f.claim;
+}
+
+// 타임라인 올리기 안내(#7). 처음 올릴 때는 바로 파일을 고르게 하지 않고, 이 기기에 맞는 내보내기 단계와
+// 'Google 지도 열기'·'내보낸 파일 고르기'를 보여 준다. 컴퓨터에는 타임라인이 없어서 지도 링크 없이 파일만 고른다
+const deviceOs = guessOs(navigator.userAgent, navigator.maxTouchPoints);
+let guideOs = deviceOs === 'android' ? 'android' : 'ios';
+function renderGuide() {
+  const body = $('#guide-body');
+  body.innerHTML = guideHtml({ os: guideOs, phone: deviceOs !== 'computer' });
+  mountSegs(body);
 }
 
 // 파일 고르기. 문서에 붙인 입력은 다시 그릴 때 사라지므로 고를 때마다 만든다
@@ -1090,23 +1111,25 @@ function pickTimeline() {
   input.click();
 }
 
-// 파일은 여기서만 읽는다. 이 정산 지출 시간대의 방문만 남기고, 이의를 쓰는 중이면 고른 지출 시간대를 바로 찾는다
+// 파일은 여기서만 읽는다. 이 정산 지출 시간대의 방문만 남기고, 이의를 쓰는 중이면 맞지 않는 지출을 바로 찾아 골라 둔다
 async function readTimeline(file) {
   const dd = state.disputeDraft;
-  const exp = dd?.expenseId && byId('expenses', dd.expenseId);
   const redraw = () => { render(); if (dd) renderSheet(); };
   state.timelineReading = true;
   state.timelineError = '';
-  if (exp) dd.timeline = { state: 'reading' };
+  if (dd) dd.scan = 'reading';
   redraw();
   try {
     const mine = state.data.expenses.filter((e) => e.present.includes(state.data.me.uid));
     const visits = keepForSettlement(readVisits(JSON.parse(await file.text())), mine);
     saveVisits(visits);
-    if (exp && state.disputeDraft === dd && dd.expenseId === exp.id) applyTimeline(visits, exp, true); // 읽는 사이 다른 지출을 골랐으면 그 지출은 dispute-pick이 찾는다
+    if (dd && state.disputeDraft === dd) {
+      scanDispute(visits);
+      dd.scan = null;
+    }
   } catch (e) {
     const message = e instanceof SyntaxError ? 'JSON 파일이 아니에요. 휴대폰 Google 지도에서 내보낸 타임라인 파일을 골라 주세요.' : e.message;
-    if (exp) dd.timeline = { state: 'error', message };
+    if (dd) dd.scan = { error: message };
     else state.timelineError = message;
   }
   state.timelineReading = false;
@@ -1353,7 +1376,7 @@ function followUp(event) {
 }
 document.addEventListener('visibilitychange', () => followUp(document.hidden ? 'hidden' : 'visible'));
 
-const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-pick', 'timeline-pick', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'reject-ask', 'reject-cancel', 'reject', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
+const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-toggle', 'timeline-pick', 'timeline-guide', 'tl-os', 'timeline-file', 'close-guide', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'reject-ask', 'reject-cancel', 'reject', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
 
 
 async function agentAct(name, d) {
@@ -1397,31 +1420,57 @@ async function agentAct(name, d) {
     state.disputeDraft = null;
     openAgentSheet('invoice', d.id);
   } else if (name === 'start-dispute') {
-    state.disputeDraft = { expenseId: null, claim: '' };
+    state.disputeDraft = { picks: {}, found: null, scan: null };
+    const visits = savedVisits(); // 이 정산에 이미 올려 둔 타임라인이 있으면 바로 찾아 골라 둔다
+    if (visits) scanDispute(visits);
     renderSheet();
-  } else if (name === 'dispute-pick') {
-    state.disputeDraft.expenseId = d.id;
-    state.disputeDraft.timeline = null; // 다른 지출이면 시간대가 달라서 다시 찾는다
-    const visits = savedVisits();
-    if (visits) applyTimeline(visits, byId('expenses', d.id), true);
+  } else if (name === 'dispute-toggle') {
+    // 누를 때마다 고르고 뺀다. 다시 고르면 타임라인에서 찾은 글을 다시 채운다. 다시 그린 뒤에도 그 줄에 초점을 둔다
+    const dd = state.disputeDraft;
+    if (d.id in dd.picks) delete dd.picks[d.id];
+    else dd.picks[d.id] = dd.found?.[d.id]?.claim ?? '';
     renderSheet();
+    $(`[data-action="dispute-toggle"][data-id="${CSS.escape(d.id)}"]`)?.focus({ preventScroll: true });
   } else if (name === 'timeline-pick') {
     pickTimeline();
+  } else if (name === 'timeline-guide') {
+    guide.open(renderGuide);
+  } else if (name === 'tl-os') {
+    guideOs = d.id;
+    renderGuide();
+  } else if (name === 'timeline-file') {
+    pickTimeline(); // 파일 선택 창은 이 누름 안에서 바로 열어야 한다. 안내는 그 뒤에 내린다
+    guide.close();
+  } else if (name === 'close-guide') {
+    guide.close();
   } else if (name === 'timeline-forget') {
     forgetVisits();
     render();
   } else if (name === 'timeline-sample') {
-    const exp = byId('expenses', state.disputeDraft?.expenseId);
-    if (exp) applyTimeline(readVisits(sampleTimeline(exp)), exp);
+    const inv = byId('invoices', state.ref);
+    const exp = inv && disputable(inv)[0];
+    if (exp) scanDispute(readVisits(sampleTimeline(exp)));
     renderSheet();
   } else if (name === 'revoke-location') {
     await post('/location/revoke');
   } else if (name === 'answer-invoice') {
     const dd = state.disputeDraft;
-    // 사용자가 체크한 타임라인 요약을 먼저 붙인다. 그러면 이의에 근거로 함께 들어간다
-    if (d.decision === 'dispute' && dd.timeline?.state === 'found' && dd.timeline.agree
-      && !(await post('/location/timeline', { agree: true, expenseId: dd.expenseId, ...dd.timeline.result }))) return;
-    const body = d.decision === 'dispute' ? { decision: 'dispute', expenseId: dd.expenseId, claim: dd.claim } : { decision: 'accept' };
+    let body = { decision: 'accept' };
+    if (d.decision === 'dispute') {
+      const ids = disputable(byId('invoices', state.ref)).map((e) => e.id).filter((id) => id in dd.picks);
+      if (!ids.length) return;
+      // 타임라인으로 찾은 지출에는 위치 요약을 먼저 붙인다. 그러면 이의에 근거로 함께 들어간다. 이미 붙어 있으면(409) 그것을 쓴다
+      for (const id of ids.filter((i) => dd.found?.[i])) {
+        try {
+          await api(`/api/rooms/${enc(roomId)}/location/timeline`, { method: 'POST', body: { agree: true, expenseId: id, ...dd.found[id].result } });
+        } catch (e) {
+          if (e.status === 409) continue;
+          state.formError = e.message;
+          return renderSheet();
+        }
+      }
+      body = { decision: 'dispute', disputes: ids.map((id) => ({ expenseId: id, claim: dd.picks[id] })) };
+    }
     if (await post(`/invoices/${enc(state.ref)}/answer`, body)) {
       state.disputeDraft = null;
       sheet.close();
@@ -1559,6 +1608,7 @@ document.addEventListener('keydown', (e) => {
     else if (logPop.isOpen) logPop.close();
     else if (!$('#photo-modal').hidden) closePhoto();
     else if (setup.picker.open && !roomId) rangeAct('range-toggle', {});
+    else if (guide.visible) guide.close(); // 겹친 안내부터 내린다
     else sheet.close();
   }
   else if (e.key === 'Enter' && e.target.dataset?.rd !== undefined && !e.isComposing) act('reject', { id: state.ref }); // 한글 조합 중의 Enter는 글자를 확정하는 키라 제외
@@ -1567,11 +1617,7 @@ document.addEventListener('keydown', (e) => {
 // 입력칸은 다시 그리지 않고 값만 기억한다(타이핑 중 초점을 잃지 않게)
 document.addEventListener('input', (e) => {
   if (e.target.dataset?.cf) setup.create[e.target.dataset.cf] = e.target.value;
-  if (e.target.dataset?.dd && state.disputeDraft) {
-    state.disputeDraft[e.target.dataset.dd] = e.target.value;
-    const send = $('#dispute-send');
-    if (send) send.disabled = !(state.disputeDraft.expenseId && state.disputeDraft.claim.trim());
-  }
+  if (e.target.dataset?.claim !== undefined && state.disputeDraft?.picks) state.disputeDraft.picks[e.target.dataset.claim] = e.target.value;
   if (e.target.dataset?.rd !== undefined && state.rejectDraft) state.rejectDraft.reason = e.target.value;
   if (e.target.dataset?.pf && state.payoutDraft) state.payoutDraft[e.target.dataset.pf] = e.target.value;
   agentPanel.onInput(e.target);
@@ -1587,8 +1633,6 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', (e) => {
   if (e.target.matches?.('input[data-receipt]') && e.target.files?.[0]) readReceipt(e.target.files[0]);
-  // 체크만 기억한다(다시 그리면 초점을 잃는다)
-  if (e.target.matches?.('input[data-timeline-agree]') && state.disputeDraft?.timeline) state.disputeDraft.timeline.agree = e.target.checked;
 });
 document.addEventListener('change', (e) => {
   agentPanel.onChange(e.target);
@@ -1618,6 +1662,8 @@ const sheet = createSheet($('#sheet-root'), {
     qrAsked = { id: null, at: 0 };
   },
 });
+// 안내가 올라오는 만큼 아래 시트가 작아지며 물러난다(style.css의 --behind)
+const guide = createSheet($('#guide-root'), { onTravel: (p) => $('#sheet').style.setProperty('--behind', p.toFixed(3)) });
 const nav = $('#nav');
 addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 56), { passive: true });
 addEventListener('resize', () => {

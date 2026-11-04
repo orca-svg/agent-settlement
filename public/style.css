@@ -710,6 +710,54 @@ button.row:active { background: var(--fill); }
   padding: 8px 16px calc(24px + env(safe-area-inset-bottom));
 }
 .sheet-body .group { margin-bottom: 20px; }
+/* 타임라인 안내(#7): 이의 시트 위에 겹쳐 올라오는 시트. 안내가 올라온 만큼(--behind 0~1) 아래 시트가 위를 축으로 작아지며 물러나고,
+   어두운 배경은 안내의 scrim이 한 겹 더 깐다. 움직임 줄이기면 물러나지 않고 어두워지기만 한다 */
+#guide-root { z-index: 60; }
+#sheet { scale: calc(1 - 0.06 * var(--behind, 0)); transform-origin: 50% 0; }
+.guide-lead { color: var(--label-2); font-size: 0.9375rem; line-height: 1.5; margin: 2px 0 14px; }
+.steps { list-style: none; counter-reset: step; margin: 16px 0 0; padding: 0; display: grid; gap: 12px; }
+.steps li { counter-increment: step; display: grid; grid-template-columns: 24px 1fr; gap: 10px; align-items: start; line-height: 1.5; }
+.steps li::before {
+  content: counter(step);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--tint-soft);
+  color: var(--tint);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  display: grid;
+  place-items: center;
+}
+.steps b { font-weight: 600; }
+.steps .file { white-space: nowrap; } /* 파일 이름은 하이픈에서 끊지 않는다(저장된 이름과 한눈에 맞춰 보게) */
+.guide-note { color: var(--label-2); font-size: 0.8125rem; line-height: 1.5; margin: 14px 0 0; }
+.guide-actions { display: grid; gap: 10px; margin-top: 20px; }
+.guide-actions .btn svg { margin-left: 6px; }
+@media (prefers-reduced-motion: reduce) { #sheet { scale: none; } }
+/* 이의 쓰기(#7): 맞지 않는 지출은 눌러서 고르고 빼는 줄. 고른 줄은 끝에 체크가 붙고, 바로 아래에 맞지 않는 점을 적는 칸이
+   제목 들여쓰기에 맞춰 붙는다(같은 지출이라 사이 구분선은 없다) */
+.row.choice .choice-mark { width: 22px; height: 22px; flex: none; display: grid; place-items: center; color: var(--tint); }
+.row.choice .found { color: var(--tint); }
+.row.claim-row { min-height: 0; padding: 0 16px 12px 58px; }
+.row.choice + .row.claim-row::before { display: none; }
+.claim-row textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.9em;
+  field-sizing: content;
+  resize: none;
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--fill);
+  color: var(--label);
+  font: inherit;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+}
+.claim-row textarea::placeholder { color: var(--label-3); }
 .big { padding: 6px 4px 18px; }
 .big .amt { font-size: 2.125rem; font-weight: 700; letter-spacing: -0.025em; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .big .sub { color: var(--label-2); font-size: 0.9375rem; margin-top: 4px; letter-spacing: 0; }
