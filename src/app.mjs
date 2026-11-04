@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { send, allowCors, HttpError } from './http.mjs';
 import { createApi } from './api.mjs';
 
-export { cleanMemory, redactTransfer, redactDispute } from './api.mjs';
+export { redactTransfer, redactDispute } from './api.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, '..', 'public');

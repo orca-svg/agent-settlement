@@ -30,7 +30,7 @@ async function setup(t, options = {}) {
   return { store, request, verified, deleted, exp, auth, advance: ms => { now = new Date(+now + ms); }, now: () => now };
 }
 
-test('real APIs reject missing, forged and revoked credentials; demo remains public', async t => {
+test('real APIs reject missing, forged and revoked credentials', async t => {
   const { request, verified } = await setup(t);
   assert.equal((await request('/api/rooms', { uid: null, headers: { 'x-demo-user': 'me' } })).status, 401);
   assert.equal((await request('/api/rooms', { uid: 'expired' })).status, 401);
@@ -40,7 +40,6 @@ test('real APIs reject missing, forged and revoked credentials; demo remains pub
   assert.equal(res.status, 200);
   assert.equal((await res.json()).rooms.length, 1);
   assert.ok(verified.every(([, revocation]) => revocation === true));
-  assert.equal((await request('/api/allocate', { uid: null, body: { memory: {} } })).status, 200);
 });
 
 test('DEV_SEED cannot enable identity spoofing in production', async t => {

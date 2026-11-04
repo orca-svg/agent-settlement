@@ -1,9 +1,8 @@
 // 라우트 조립. 의존성(store, gemini, clock, evidenceFor, env)을 주입받아 API 라우트와 상태 잠금을 만든다.
 // node:http·fs를 쓰지 않아서 서버(src/app.mjs)와 브라우저 데모(public/demo/server.js)가 같은 라우트를 돌린다.
 import { randomUUID } from 'node:crypto';
-import { DEMO_ROOM, DEMO_EXPENSES, DEMO_DISPUTE, MEMORY_LIMIT } from '../public/data.js';
 import { ledger, active } from '../public/core.js';
-import { router, readJson, readBody, createRateLimiter, clientIp, HttpError, MAX_RECEIPT } from './http.mjs';
+import { router, readBody, createRateLimiter, HttpError, MAX_RECEIPT } from './http.mjs';
 import { createStateLocks } from './state-locks.mjs';
 import { createIdentity } from './identity.mjs';
 import { firebaseConfig } from './firebase.mjs';
@@ -17,34 +16,10 @@ import { pendingActions } from './actions.mjs';
 import { createOrchestrator } from './agents/orchestrator.mjs';
 import { createAgentSettings, registerAgentSettingsRoutes } from './agents/settings.mjs';
 import { registerAgentRoutes } from './agents/routes.mjs';
-import { allocateWithGemini } from './agents/allocate.mjs';
 import { createCache } from './agents/cache.mjs';
 import { createEvidenceProvider, counterFor } from './agents/evidence.mjs';
 import { agentsOf, memoryOf, memoryKey } from './agents/memory.mjs';
-import { mediateWithGemini } from './agents/mediate.mjs';
 import { verifyQrToken } from './payments/qr.mjs';
-
-// 화면에서 고친 기억만 받는다. 이름(uid)은 방 멤버만, 사람당 limit개, 한 줄 60자까지.
-export function cleanMemory(input, members, limit = MEMORY_LIMIT) {
-  const out = {};
-  for (const { uid } of members) {
-    const list = Array.isArray(input?.[uid]) ? input[uid] : [];
-    out[uid] = list.slice(0, limit).map((s) => String(s).replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean);
-  }
-  return out;
-}
-
-// 데모 화면의 이의 제기를 도메인 Dispute 모양으로 바꾼다
-const demoIzakaya = DEMO_EXPENSES.find((e) => e.id === 'izakaya');
-const demoBar = DEMO_EXPENSES.find((e) => e.id === DEMO_DISPUTE.expense);
-const demoDispute = {
-  by: DEMO_DISPUTE.by,
-  claim: DEMO_DISPUTE.claim,
-  evidence: [
-    { kind: 'left_at', time: DEMO_DISPUTE.leftAt, summary: DEMO_DISPUTE.evidence[0] },
-    ...DEMO_DISPUTE.evidence.slice(1).map((summary) => ({ kind: 'text', summary })),
-  ],
-};
 
 // 계좌·송금 링크는 송금 당사자에게만 보여 준다
 export const redactTransfer = (t, uid) => (t.from === uid || t.to === uid ? t : { ...t, link: null, fallback: null });
@@ -74,10 +49,6 @@ export function createApi({ store, gemini = null, clock = () => new Date(), evid
   const ctx = { store, gemini, clock, evidenceFor, env, overLimit, allocCache, fx: fxRates }; // fx: 외화 방의 환율(#55, src/rooms/fx.mjs)
   const routes = router();
 
-  const limitGemini = (key) => {
-    if (overLimit(key)) throw new HttpError(429, '요청이 너무 많아요. 10분 뒤에 다시 시도해 주세요.');
-  };
-
   routes.get('/api/config', async () => ({ mode: gemini ? 'gemini' : 'rules', model: gemini?.model ?? null, auth: { firebase: auth ? firebaseConfig(env) : null, dev, emulator: env.NODE_ENV !== 'production' ? env.FIREBASE_AUTH_EMULATOR_HOST || null : null },
     // #3: 저장소가 Firestore이고 로그인이 켜져 있으면 화면이 비서 기록을 onSnapshot으로 받는다(아니면 2초 폴링)
     ...(env.STORE === 'firestore' && auth ? { realtime: { firestore: true, emulator: env.NODE_ENV !== 'production' ? env.FIRESTORE_EMULATOR_HOST || null : null } } : {}) }));
@@ -94,27 +65,6 @@ export function createApi({ store, gemini = null, clock = () => new Date(), evid
     if (!link) throw new HttpError(404, '만료되었거나 잘못된 QR이에요');
     res.writeHead(302, { Location: link });
     res.end();
-  });
-
-  // 데모 화면용: 응답 모양은 { lines, source, latencyMs }로 유지한다
-  routes.post('/api/allocate', async ({ req }) => {
-    limitGemini(clientIp(req));
-    const memory = cleanMemory((await readJson(req)).memory, DEMO_ROOM.members);
-    const started = Date.now();
-    const out = await allocateWithGemini(gemini, demoIzakaya, DEMO_ROOM, memory, { cache: allocCache });
-    const latencyMs = Date.now() - started;
-    console.log(`[/api/allocate] ${out.how} ${out.source} ${latencyMs}ms`);
-    return { lines: out.alloc, source: out.source, how: out.how, latencyMs };
-  });
-
-  routes.post('/api/mediate', async ({ req }) => {
-    limitGemini(clientIp(req));
-    const memory = cleanMemory((await readJson(req)).memory, DEMO_ROOM.members);
-    const started = Date.now();
-    const out = await mediateWithGemini(gemini, { exp: demoBar, room: DEMO_ROOM, dispute: demoDispute, counter: DEMO_DISPUTE.counter, memoryByUid: memory });
-    const latencyMs = Date.now() - started;
-    console.log(`[/api/mediate] ${out.source} ${latencyMs}ms`);
-    return { summary: out.summary, lines: out.alloc, source: out.source, latencyMs };
   });
 
   // 방 멤버인지 확인한다. 방이 없으면 404, 누구인지 모르면 401, 멤버가 아니면 403
@@ -186,7 +136,7 @@ export function createApi({ store, gemini = null, clock = () => new Date(), evid
     return orchestrator.tick();
   });
 
-  // 방·계정 API만 줄에 선다(데모 화면 API는 저장소를 쓰지 않는다). 그중 읽기만 하는 요청은 줄에 서지 않는다.
+  // 방·계정 API만 줄에 선다. 그중 읽기만 하는 요청은 줄에 서지 않는다.
   // 위치 화면(GET …/location)은 읽다가 끝난 동의를 지우므로 쓰기처럼 줄에 선다
   const WRITE_FREE = /\/receipts\/extract$/; // POST지만 저장하지 않는다(사진 → 초안)
   // 방 주소지만 사람마다 하나인 비서 문서를 고치고, 계좌는 다른 방의 송금까지 고치므로 모든 방의 줄에 선다(#5)
