@@ -1,7 +1,8 @@
 // #4 방 만들기·참가 화면(public/room-setup.js)과 로그인 뒤 돌아갈 곳. 로그인(#2)한 계정의 프로필로 들어가고, 이름은 따로 받지 않는다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRoomHtml, joinHtml, setupHtml, datesLabel, inviteSheetHtml, inviteButtonHtml, leaveSheetHtml } from '../public/room-setup.js';
+import { readFileSync } from 'node:fs';
+import { createRoomHtml, joinHtml, setupHtml, datesLabel, inviteSheetHtml, inviteButtonHtml, leaveSheetHtml, doneCardHtml } from '../public/room-setup.js';
 import { roomTabs, roomRowsHtml } from '../public/room-list.js';
 import { toastMs } from '../public/toast.js';
 import { nextAfterLogin } from '../public/ui.js';
@@ -223,4 +224,13 @@ test('위쪽 알림은 글이 길수록 오래 두되 2.5~8초 사이', () => {
   const why = '정산이 끝나지 않아 나갈 수 없어요. 남은 일: 재윤에게 보낼 ₩20,387';
   assert.equal(toastMs(why), 2500 + [...why].length * 60);
   assert.equal(toastMs('가'.repeat(500)), 8000);
+});
+
+test('정산이 끝난 방의 카드에서 바로 나가기 시트를 연다(메뉴에 숨기지 않는다)', () => {
+  const html = doneCardHtml();
+  assert.match(html, /<p class="eyebrow">정산 완료<\/p><h2>정산이 끝났어요<\/h2>/);
+  assert.match(html, /<button type="button" class="btn secondary" data-action="open-leave" aria-haspopup="dialog">이 방에서 나가기<\/button>/, '메뉴와 같은 이름으로, 시트가 열린다는 걸 알린다');
+  assert.match(html, /내 방 목록에서도 빠져요/, '누르면 무엇이 달라지는지 버튼 가까이에 적는다');
+  const src = readFileSync(new URL('../public/room.js', import.meta.url), 'utf8');
+  assert.match(src, /room\.status === 'done'\) return doneCardHtml\(\)/, '방 화면의 다음 할 일 카드가 이 카드를 쓴다');
 });

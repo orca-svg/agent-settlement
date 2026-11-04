@@ -13,7 +13,7 @@ import { createAgentPanel, personChipHtml } from './agent-panel.js';
 import { notifies } from './agent-rules.js';
 import { readVisits, expenseWindow, keepForSettlement, findMismatches } from './timeline.js';
 import { guessOs, guideHtml } from './timeline-guide.js';
-import { createRoomHtml, joinHtml, setupHtml, notAgreed, hasStarted, inviteUrl, datesLabel, inviteSheetHtml, inviteButtonHtml, leaveSheetHtml } from './room-setup.js';
+import { createRoomHtml, joinHtml, setupHtml, notAgreed, hasStarted, inviteUrl, datesLabel, inviteSheetHtml, inviteButtonHtml, leaveSheetHtml, doneCardHtml } from './room-setup.js';
 import { pickDay, presetRange, nextFocus, shiftMonth, todayIso } from './date-range.js';
 import { payoutFieldsHtml, payoutDraftFrom } from './payout-form.js';
 
@@ -746,7 +746,7 @@ function hero() {
 
 function nextCard() {
   const mine = state.data.actions ?? [];
-  if (state.data.room.status === 'done') return settlingCard(''); // 끝난 방은 지출을 더 받지 않는다(#55)
+  if (state.data.room.status === 'done') return doneCardHtml(); // 끝난 방은 지출을 더 받지 않고, 남은 일은 나가기뿐이다(#55)
   if (!mine.length) {
     const add = `<button class="btn" data-action="add-expense">지출 남기기</button>${state.aiReady ? '<button class="btn secondary" data-action="add-expense" data-mode="photo">영수증 사진으로</button>' : ''}`;
     // 아직 메뉴별로 나누지 않은 영수증이 있으면 그걸 먼저 권한다. 합계만 알아 1/N로 나누기로 한 지출(split: 'equal')은 빼고
@@ -1023,11 +1023,6 @@ function settlingCard(addButtons) {
   if (manual) {
     return `<section class="next"><p class="eyebrow">편할 때 보내기</p><h2>${esc(nameOf(manual.to))}에게 ${won(manual.amount)}을 보내면 돼요</h2>
       <p>편할 때 보내기로 정해서 비서가 바로 알리지 않아요. 준비되면 보내 주세요.${manual.remindAt ? ` ${esc(whenText(manual.remindAt))}까지 받았다는 확인이 없으면 한 번 알려 드려요.` : ''}</p><div class="actions"><button class="btn" data-action="open-transfer" data-id="${esc(manual.id)}">보내러 가기</button>${addButtons}</div></section>`;
-  }
-  // 서버가 모든 송금이 '받았어요'로 끝나면 방을 완료로 바꾼다(#55). 끝난 방은 기록으로만 남아 지출을 더 받지 않는다
-  if (room.status === 'done') {
-    return `<section class="next done"><p class="eyebrow">정산 완료</p><h2>정산이 끝났어요</h2>
-      <p>아무도 단톡방에서 돈 얘기를 꺼내지 않았어요. 이 방은 기록으로 남고, 지출을 더 남기거나 고칠 수 없어요.</p></section>`;
   }
   return `<section class="next"><p class="eyebrow">기다리는 중</p><h2>다른 사람의 확인을 기다리고 있어요</h2>
     <p>누가 무엇을 하고 있는지는 아래 '누가 누구에게'와 비서끼리 기록에서 볼 수 있어요. 내 차례가 되면 여기에 올려요.</p><div class="actions">${addButtons}</div></section>`;

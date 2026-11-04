@@ -170,6 +170,14 @@ export function inviteSheetHtml({ room, me, avatar, invite, copied = false, copy
     ${invite ? '<p class="group-note">새 링크를 만들면 지금 링크는 더 이상 열리지 않아요. <button type="button" class="text-btn" data-action="make-invite">새 링크 만들기</button></p>' : ''}`;
 }
 
+// 정산이 끝난 방의 다음 할 일 카드. 끝난 방에서 남은 일은 나가기뿐이라 메뉴에 숨기지 않고 여기 둔다.
+// 누르면 바로 나가지 않고 나가기 시트(무엇을 잃는지 + 확인)를 연다
+export function doneCardHtml() {
+  return `<section class="next done"><p class="eyebrow">정산 완료</p><h2>정산이 끝났어요</h2>
+      <p>아무도 단톡방에서 돈 얘기를 꺼내지 않았어요. 이 방은 기록으로 남고, 지출을 더 남기거나 고칠 수 없어요. 더 볼 일이 없으면 나가도 돼요. 나가면 내 방 목록에서도 빠져요.</p>
+      <div class="actions"><button type="button" class="btn secondary" data-action="open-leave" aria-haspopup="dialog">이 방에서 나가기</button></div></section>`;
+}
+
 // '내 계정' 메뉴의 '이 방에서 나가기' 시트(#55). 돈이 남아 있으면 나가기 버튼 대신 까닭을 보인다(누르기 전에 막는다).
 // 나갈 수 있으면 무엇을 잃는지 버튼 바로 위에 적는다
 export function leaveSheetHtml({ room, why, busy = false, error = '' }) {
