@@ -94,7 +94,11 @@ export function findMismatches(visits, expenses) {
   });
 }
 
-/** '맞지 않는 점'에 미리 채울 내 말. 떠난 뒤에 시킨 줄이 있으면 그 이름을(셋까지), 없으면 결제 시각을 적는다. 사람이 고칠 수 있다 */
+/**
+ * '맞지 않는 점'에 미리 채울 내 말. 떠난 뒤에 시킨 줄이 있으면 그 이름을(셋까지) 적는다. 사람이 고칠 수 있다.
+ * 이의 내용은 방 사람 모두가 보고 위치 요약처럼 암호화·7일 삭제를 하지 않으므로, 떠난 시각·도착한 곳은 넣지 않는다
+ * (그건 당사자만 보는 위치 요약에 있다. PRIVACY.md)
+ */
 export function timelineClaim(result, expense) {
   const { from, until } = expenseWindow(expense);
   // 자정을 넘긴 지출이면 떠난 시각·주문 시각이 결제일의 전날일 수 있다(expenseWindow와 같은 규칙)
@@ -106,8 +110,8 @@ export function timelineClaim(result, expense) {
   const names = [...new Set(after.map((it) => it.name))];
   const list = names.length > 3 ? `${names.slice(0, 3).join('·')} 외 ${names.length - 3}개` : names.join('·');
   const text = names.length
-    ? `${result.leftAt}에 자리를 떠났어요. 그 뒤에 시킨 것(${list})은 제 몫이 아니에요.`
-    : `${result.leftAt}에 자리를 떠났어요. 결제(${hhmm(until)})까지 함께 있지 않았는데 똑같이 나누는 건 맞지 않아요.`;
+    ? `제가 자리를 뜬 뒤에 시킨 것(${list})은 제 몫이 아니에요.`
+    : '결제 전에 자리를 떴어요. 끝까지 함께 있지 않았는데 똑같이 나누는 건 맞지 않아요.';
   return text.slice(0, 200);
 }
 

@@ -22,18 +22,22 @@ test('결제 전에 자리를 떠난 지출만 찾고, 끝까지 있었거나 �
   assert.equal(f.claim, timelineClaim(f.result, dinner));
 });
 
-test('맞지 않는 점: 떠난 시각과 그 뒤에 시킨 줄을 내 말로 채운다', () => {
+// 이의 내용은 방 사람 모두가 보고 암호화·7일 삭제 대상이 아니다. 그래서 떠난 시각은 위치 요약(당사자만, 암호화, 7일)에만 두고
+// 미리 채우는 글에는 시각을 넣지 않는다(PRIVACY.md 제2조·제6조)
+test('맞지 않는 점: 떠난 뒤에 시킨 줄을 내 말로 채우되, 떠난 시각은 넣지 않는다', () => {
   const claim = timelineClaim({ leftAt: '19:05', nextAt: '19:20', nextHome: true }, dinner);
-  assert.match(claim, /19:05에 자리를 떠났어요/);
+  assert.match(claim, /자리를 뜬 뒤에 시킨 것/);
   assert.ok(claim.includes('하이볼') && claim.includes('디저트'), '떠난 뒤에 시킨 줄');
   assert.ok(!claim.includes('닭꼬치'), '떠나기 전에 시킨 줄은 내 몫이 맞다');
+  assert.ok(!/\d{1,2}:\d{2}/.test(claim), '시각은 이의 내용에 남기지 않는다');
+  assert.ok(!claim.includes('집'), '도착한 곳도 남기지 않는다');
   assert.ok(claim.length <= 200);
 });
 
-test('주문 시각이 없는 지출은 결제 시각과 견주어 쓴다', () => {
+test('주문 시각이 없는 지출은 결제 전에 자리를 떴다고만 쓴다', () => {
   const claim = timelineClaim({ leftAt: '19:05', nextAt: null, nextHome: false }, { ...dinner, items: [] });
-  assert.match(claim, /19:05에 자리를 떠났어요/);
-  assert.match(claim, /20:30/);
+  assert.match(claim, /결제 전에 자리를 떴어요/);
+  assert.ok(!/\d{1,2}:\d{2}/.test(claim));
 });
 
 test('떠난 뒤 시킨 줄이 많으면 몇 개만 적고 나머지는 수로 줄인다', () => {
