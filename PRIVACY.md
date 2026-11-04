@@ -1,6 +1,6 @@
 # 개인정보 처리방침 (초안)
 
-> **법률 전문가의 검토를 받지 않은 초안입니다.** 개인정보보호위원회 「개인정보 처리방침 작성지침」(2026.4.)의 작성 예시를 바탕으로, 2026년 11월 3일 기준으로, `main`의 기능에 Google 로그인(#2)과 위치 근거(#7)가 더해진 판을 적었습니다.
+> **법률 전문가의 검토를 받지 않은 초안입니다.** 개인정보보호위원회 「개인정보 처리방침 작성지침」(2026.4.)의 작성 예시를 바탕으로, 2026년 11월 4일 기준으로, `main`의 기능에 Google 로그인(#2)·위치 근거(#7)·방 만들기와 초대 링크(#4)·Firestore 저장소(#3)가 더해진 판을 적었습니다.
 >
 > 출처: 개인정보보호위원회 「개인정보 처리방침 작성지침」 2026.4.
 
@@ -12,8 +12,8 @@ Money is Our Life 팀(GDGoC DevFest 2026 Team 06, 서비스 「정산은 비서�
 |---|---|
 | 받는 정보 | Google 계정 정보(로그인할 때), 지출 기록, 영수증 사진, 받을 계좌(은행·계좌번호·예금주), 이의 내용, 위치 요약(이의에 붙이기로 한 경우의 시각만), 비서 기억 문장, 비서 규칙과 변경 기록, 접속 기록(IP 등) |
 | 받지 않는 정보 | 전화번호, 주민등록번호, 위치 좌표·이동 경로·장소 이름. 타임라인 파일은 이용자의 브라우저 안에서만 읽습니다 |
-| 보관하는 곳 | 서비스 서버의 메모리. 서버가 다시 시작되면 모두 사라지고 백업은 없습니다 |
-| 정보가 가는 곳 | Google(서버, 로그인, Gemini AI), GitHub(화면), Foundata GmbH(QR 이미지) |
+| 보관하는 곳 | Google Cloud의 데이터베이스(Firestore)와 파일 저장소(Cloud Storage), 일본 도쿄. 서버를 다시 시작해도 남으며, 팀은 따로 백업을 두지 않습니다 |
+| 정보가 가는 곳 | Google(서버, 데이터베이스, 로그인, Gemini AI), GitHub(화면), Foundata GmbH(QR 이미지) |
 | 이용 대상 | 만 18세 이상 |
 
 ### 시연판에서 꼭 알아 두세요
@@ -73,17 +73,20 @@ Money is Our Life 팀(GDGoC DevFest 2026 Team 06, 서비스 「정산은 비서�
 
 팀은 처리 목적에 필요한 기간 동안만 개인정보를 처리·보유합니다. 법령에 따라 따로 보존해야 하는 정보는 없습니다.
 
+<!-- 검토 필요: 방·지출 기록의 보관 기한(예: 시연이 끝난 뒤 일괄 삭제)을 아직 정하지 않았다 -->
+
 | 정보 | 보관하는 곳 | 기간 |
 |---|---|---|
-| 지출·영수증 사진·받을 계좌·비서 기억·비서 규칙과 변경 기록·이의·청구서·송금 기록 | 서비스 서버의 메모리(Google Cloud Run, 일본 도쿄) | 서버가 종료될 때까지. 서버를 다시 시작하거나 새로 배포하거나 Cloud Run이 서버를 교체하면 모두 지워집니다. 지출을 지우면 그 영수증 사진도 함께 지워집니다 |
+| 지출·영수증 사진·받을 계좌·비서 기억·비서 규칙과 변경 기록·이의·청구서·송금 기록 | Google Cloud Firestore(일본 도쿄). 영수증 사진은 Google Cloud Storage(일본 도쿄) | 지우거나 탈퇴할 때까지. 서버를 다시 시작하거나 새로 배포해도 남습니다. 지출을 지우면 그 영수증 사진도 함께 지워지고, 탈퇴하면 [제5조](#제5조-개인정보의-파기-절차-및-방법) ③에 따라 지우거나 익명으로 바꿉니다 |
 | AI 배분 결과 | 서비스 서버의 메모리 | 최대 24시간 |
 | 휴대폰으로 넘기는 QR의 토큰 | 서비스 서버의 메모리 | 15분 |
-| 계정 ID·표시 이름·프로필 색 | 서비스 서버의 메모리 | 탈퇴할 때까지 |
-| 초대 링크 | 서비스 서버의 메모리 | 만료(7일)되면 열리지 않고, 다시 만들면 덮어씁니다. 만든 사람이 탈퇴하면 계정 연결을 끊고, 링크는 남은 멤버를 위해 둡니다 |
+| 계정 ID·표시 이름·프로필 색 | Google Cloud Firestore | 탈퇴할 때까지 |
+| 초대 링크 | Google Cloud Firestore | 만료(7일)되면 열리지 않고, 다시 만들면 덮어씁니다. 만든 사람이 탈퇴하면 계정 연결을 끊고, 링크는 남은 멤버를 위해 둡니다 |
 | Google 로그인 계정(이메일·이름·사진) | Google(Firebase Authentication) | 탈퇴할 때 삭제합니다 |
-| 위치 요약 | 서비스 서버의 메모리 | 붙인 뒤 7일. 이의 화면에서 지우거나 탈퇴하면 바로 지웁니다 |
-| 탈퇴 표식(계정 ID) | 서비스 서버의 메모리 | 탈퇴 뒤 다시 들어오지 못하게 막고 삭제를 다시 시도하는 데에만 씁니다 |
+| 위치 요약 | Google Cloud Firestore(암호화) | 붙인 뒤 7일. 이의 화면에서 지우거나 탈퇴하면 바로 지웁니다 |
+| 탈퇴 표식(계정 ID) | Google Cloud Firestore | 탈퇴 뒤 다시 들어오지 못하게 막고 삭제를 다시 시도하는 데에만 씁니다 |
 | 호출 횟수 제한용 IP·호출 시각 | 서비스 서버의 메모리 | 판단에는 최근 10분만 쓰고, 기록은 서버가 종료될 때 지워집니다 |
+| 서버가 자주 읽는 정보의 사본 | 서비스 서버의 메모리 | 최대 60초. 계좌·위치 요약은 암호화된 채로 둡니다 |
 | 서버 요청 기록(IP, 요청 주소, 시각) | Google Cloud Logging | 30일 |
 | Gemini에 보낸 내용과 응답 | Google | [제8조](#제8조-생성형-aigemini-이용) 참고 |
 | 화면 접속 기록(IP) | GitHub | GitHub 정책에 따릅니다. GitHub는 기간을 밝히지 않습니다 |
@@ -93,7 +96,7 @@ Money is Our Life 팀(GDGoC DevFest 2026 Team 06, 서비스 「정산은 비서�
 
 ① 팀은 개인정보 보유기간의 경과, 처리목적 달성 등 개인정보가 불필요하게 되었을 때에는 지체없이 해당 개인정보를 파기합니다.
 
-② 서비스 서버의 메모리에 있는 정보는 서버가 종료되면 함께 사라지며, 다시 살릴 수 있는 사본(백업)을 두지 않습니다. 이용자가 지운 지출과 그 영수증 사진은 그 자리에서 지워집니다.
+② Firestore와 Cloud Storage에 있는 정보는 지우면 그 자리에서 지워지고, 팀은 다시 살릴 수 있는 사본(백업)을 따로 두지 않습니다. 다만 Google 내부 시스템에서 완전히 지워지기까지는 Google Cloud의 데이터 삭제 절차에 따라 시간이 걸릴 수 있습니다. 서비스 서버의 메모리에 있는 정보(AI 배분 결과, QR 토큰, 호출 제한 기록, 읽기 사본)는 [제4조](#제4조-개인정보의-처리-및-보유-기간)의 기간이 지나거나 서버가 종료되면 사라집니다. 이용자가 지운 지출과 그 영수증 사진은 그 자리에서 지워집니다.
 
 ③ 탈퇴는 로그인한 상태에서 내 계정 → 프로필 → 계정 탈퇴로 할 수 있고, 되돌릴 수 없어 한 번 더 확인을 받습니다. 탈퇴하면 프로필·비서 설정·위치 요약·본인이 올린 영수증 사진을 지우고, 함께 정산한 금액은 방마다 다른 익명 ID로 바꿔 남깁니다. 원래 계정과 익명 ID를 잇는 정보는 남기지 않습니다. 이미 만든 QR과 계좌 사본도 지웁니다.
 
@@ -117,7 +120,7 @@ Money is Our Life 팀(GDGoC DevFest 2026 Team 06, 서비스 「정산은 비서�
 
 | 수탁자 | 위탁하는 업무 |
 |---|---|
-| Google LLC | 서비스 서버 운영(Cloud Run), 서버 요청 기록 보관(Cloud Logging), 암호화 열쇠·API 키 보관(Secret Manager) |
+| Google LLC | 서비스 서버 운영(Cloud Run), 데이터 보관(Firestore·Cloud Storage), 서버 요청 기록 보관(Cloud Logging), 암호화 열쇠·API 키 보관(Secret Manager) |
 | Google LLC | 영수증 읽기, 메뉴 배분, 이의 중재안 만들기(Gemini API) |
 | Google LLC | Google 로그인과 로그인 계정 보관(Firebase Authentication) |
 | GitHub, Inc. | 화면 파일 제공(GitHub Pages) |
@@ -131,7 +134,7 @@ Money is Our Life 팀(GDGoC DevFest 2026 Team 06, 서비스 「정산은 비서�
 
 | 이전받는 자(연락처) | 국가 | 이전하는 항목 | 이전 시기·방법 | 이용 목적 | 보유·이용 기간 |
 |---|---|---|---|---|---|
-| Google LLC (Cloud Run·Cloud Logging·Secret Manager) · [Google Cloud 개인정보 보호팀](https://support.google.com/cloud/contact/dpo) | 일본(도쿄) | 제2조의 모든 항목 | 서비스를 쓸 때마다 인터넷(HTTPS)으로 전송 | 서비스 서버 운영과 요청 기록 | 제4조와 같음 |
+| Google LLC (Cloud Run·Firestore·Cloud Storage·Cloud Logging·Secret Manager) · [Google Cloud 개인정보 보호팀](https://support.google.com/cloud/contact/dpo) | 일본(도쿄) | 제2조의 모든 항목 | 서비스를 쓸 때마다 인터넷(HTTPS)으로 전송 | 서비스 서버 운영, 데이터 보관, 요청 기록 | 제4조와 같음 |
 | Google LLC (Gemini API) · [Google Cloud 개인정보 보호팀](https://support.google.com/cloud/contact/dpo) | Google 또는 그 대리인이 시설을 운영하는 국가 | 영수증 사진, 메뉴 줄, 방 사람의 표시 이름, 비서 기억 문장, 이의 내용과 근거 요약 | 영수증 읽기·배분·중재를 요청할 때 서버에서 HTTPS로 전송 | AI 처리 결과 받기 | [제8조](#제8조-생성형-aigemini-이용) 참고 |
 | Google LLC (Firebase Authentication) · [Google Cloud 개인정보 보호팀](https://support.google.com/cloud/contact/dpo) | 미국 등 Google이 시설을 운영하는 국가 | 이메일, 이름, 프로필 사진, 계정 ID, 로그인 기록 | 로그인할 때 HTTPS로 전송 | 로그인과 계정 확인 | 탈퇴할 때까지 |
 | GitHub, Inc. · 88 Colin P. Kelly Jr. St., San Francisco, CA 94107, USA · dpo[at]github[dot]com | 미국 등 | 화면을 연 기기의 IP 주소 등 접속 기록 | 화면을 열 때 HTTPS로 전송 | 화면 파일 제공, 보안 | GitHub 정책에 따름 |
@@ -178,6 +181,7 @@ Money is Our Life 팀(GDGoC DevFest 2026 Team 06, 서비스 「정산은 비서�
 
 7. **로그인 확인:** 요청마다 Google 로그인 토큰을 확인하고, 토큰이 폐기됐는지는 같은 사람에게 5분에 한 번 Google에 확인합니다(이 서비스에서 탈퇴하면 바로 막힙니다). 그 방의 멤버에게만 방 정보를 보냅니다.
 8. **위치 파일은 브라우저 밖으로 보내지 않음:** 타임라인 파일은 이용자의 브라우저 안에서만 읽고, 서버는 받은 시각이 그 지출 시간대 안인지 다시 확인합니다.
+9. **데이터베이스 접근 제한:** 데이터베이스와 파일 저장소에 쓰는 것은 서버만 할 수 있습니다. 화면이 데이터베이스를 직접 읽는 것은 보안 규칙으로 그 방의 멤버에게만(송금은 보내는 사람과 받는 사람에게만, 프로필은 본인에게만) 허용하고, 영수증 사진·이의·비서 설정은 서버를 거쳐서만 볼 수 있습니다.
 
 ## 제10조 개인정보 자동 수집 장치의 설치·운영 및 거부
 
@@ -242,7 +246,7 @@ Money is Our Life 팀(GDGoC DevFest 2026 Team 06, 서비스 「정산은 비서�
 
 ## 제15조 개인정보 처리방침의 변경
 
-① 이 개인정보 처리방침은 2026년 11월 3일부터 적용됩니다.
+① 이 개인정보 처리방침은 2026년 11월 4일부터 적용됩니다.
 
 ② 이전 개인정보 처리방침은 이 저장소의 변경 이력에서 확인하실 수 있습니다.
 
@@ -255,6 +259,6 @@ Money is Our Life 팀(GDGoC DevFest 2026 Team 06, 서비스 「정산은 비서�
 - 개인정보보호위원회, [「개인정보 처리방침 작성지침」(2026.4. 개정)](https://www.pipc.go.kr/np/cop/bbs/selectBoardArticle.do?bbsId=BS217&mCode=D010030000&nttId=12018)
 - 「개인정보 보호법」 [제30조](https://www.law.go.kr/법령/개인정보보호법/제30조)(처리방침), [제26조](https://www.law.go.kr/법령/개인정보보호법/제26조)(위탁), [제28조의8](https://www.law.go.kr/법령/개인정보보호법/제28조의8)(국외 이전), [시행령 제31조](https://www.law.go.kr/법령/개인정보보호법시행령/제31조)
 - Google, [Gemini API 추가 약관](https://ai.google.dev/gemini-api/terms)(유료 서비스의 데이터 이용, 이용 연령), [Gemini API 사용 정책](https://ai.google.dev/gemini-api/docs/usage-policies)
-- Google Cloud, [Cloud 데이터 처리 부속서](https://cloud.google.com/terms/data-processing-addendum), [Cloud Run 로그](https://cloud.google.com/run/docs/logging), [Cloud Logging 보관 기간](https://cloud.google.com/logging/quotas)
+- Google Cloud, [Cloud 데이터 처리 부속서](https://cloud.google.com/terms/data-processing-addendum), [Cloud Run 로그](https://cloud.google.com/run/docs/logging), [Cloud Logging 보관 기간](https://cloud.google.com/logging/quotas), [Google Cloud의 데이터 삭제](https://cloud.google.com/docs/security/deletion)
 - GitHub, [GitHub Pages의 데이터 수집](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages), [GitHub 개인정보 처리방침](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement)
 - goQR.me, [개인정보·보안](https://goqr.me/privacy-safety-security/), [사업자 정보](https://goqr.me/de/rechtliches/impressum.html)
