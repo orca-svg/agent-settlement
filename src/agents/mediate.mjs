@@ -1,6 +1,6 @@
 // 이의 제기를 중립 비서가 중재한다. 'left_at' 증거가 있으면 그 시각 뒤 주문에서 그 사람을 코드가 다시 뺀다.
 import { ruleAllocate, presentAfter } from '../../public/core.js';
-import { memoryText, receiptTable, presentNames, lineSchema, cleanLines, inline, DATA_NOT_INSTRUCTIONS } from './lines.mjs';
+import { memoryText, receiptTable, presentNames, lineSchema, cleanLines, inline, labelOf, DATA_NOT_INSTRUCTIONS } from './lines.mjs';
 
 const COUNT = { 2: '둘', 3: '셋', 4: '넷', 5: '다섯', 6: '여섯' };
 
@@ -10,7 +10,7 @@ export function presentAtFor(exp, dispute) {
 }
 
 export function mediatePrompt({ exp, room, dispute, counter = [], memoryByUid }) {
-  const name = (uid) => room.members.find((m) => m.uid === uid)?.name ?? uid;
+  const name = (uid) => labelOf(room.members, uid);
   const system = [
     '너는 정산 분쟁을 맡은 중립적인 중재 비서다. 어느 한쪽 편을 들지 않는다.',
     '양쪽 비서가 낸 주장과 근거, 주문 시각이 적힌 영수증, 각자의 비서가 공유한 기억을 보고 영수증 각 줄을 누가 부담할지 제안한다.',
