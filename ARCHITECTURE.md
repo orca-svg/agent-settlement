@@ -1,4 +1,4 @@
-# 아키텍처: 정산은 비서끼리
+# 아키텍처: Bill:ION
 
 > #2/#7 확장: 실제 API는 Firebase Bearer ID 토큰을 검증하고, 폐기 여부는 같은 사람에게 5분에 한 번 Auth 서버에 물어요. `x-demo-user`는 Firebase가 설정되지 않은 비운영 `DEV_SEED=1`에서만 사용해요. 설정은 [연결 안내](docs/auth-location-setup.md), 계약 변경은 아래 표를 참고해 주세요.
 

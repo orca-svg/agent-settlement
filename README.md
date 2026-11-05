@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src=".github/assets/logo.png" width="112" alt="정산은 비서끼리 로고">
+<img src=".github/assets/logo.png" width="112" alt="Bill:ION 로고">
 
 <sub><a href="https://gdgoc-devfest-2026.vercel.app"><b>GDGoC DevFest 2026 「Tell the Vision」</b></a> - Team 6</sub>
 
-# 정산은 비서끼리
+# Bill:ION
 
 **돈 얘기는 각자의 AI 비서끼리, 사람은 확인만 해요.**
 

@@ -56,7 +56,7 @@ test('GET /api/qr/:token → 302로 원래 링크를 풀어준다. 틀린 토큰
 test('정적 파일: / 는 첫 화면, 경로 탈출은 404', async () => {
   const res = await fetch(base + '/');
   assert.equal(res.status, 200);
-  assert.match(await res.text(), /정산은 비서끼리/);
+  assert.match(await res.text(), /Bill:ION/);
   assert.equal((await fetch(base + '/%2e%2e/server.mjs')).status, 404);
 });
 
