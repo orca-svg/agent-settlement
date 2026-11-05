@@ -26,8 +26,9 @@ test('근거가 있어도 규칙이 ask면 한도대로 판단한다', () => {
   assert.equal(evaluateInvoice({ invoice: { net: -90000 }, settings: settings(50000, 'ask'), evidence: leftAt }).decision, 'ask');
 });
 
-test('nextSendAt: 바로면 지금', () => {
-  assert.equal(nextSendAt(new Date('2026-11-01T03:00:00Z'), 'now'), '2026-11-01T03:00:00.000Z');
+test("nextSendAt: 편할 때(예전 '바로'도)면 다음 날 09:00 KST", () => {
+  assert.equal(nextSendAt(new Date('2026-11-01T03:00:00Z'), 'manual'), '2026-11-02T00:00:00.000Z');
+  assert.equal(nextSendAt(new Date('2026-11-01T03:00:00Z'), 'now'), '2026-11-02T00:00:00.000Z');
 });
 
 test('nextSendAt: 월급날이면 다음 그날 09:00 KST', () => {

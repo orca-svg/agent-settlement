@@ -1,24 +1,26 @@
 // 개인 비서 설정(#5): 기억, 규칙, 규칙 변경 기록, 처음 설정. agents 문서를 읽고 쓰는 곳은 여기와 orchestrator.setPayout뿐이다.
 // 판단은 rules.mjs가 맡는다. 바꾼 규칙은 다음 청구서부터 적용되고, 이미 만들어진 청구서·송금은 그대로 둔다.
 import { HttpError, readJson } from '../http.mjs';
-import { DEFAULT_RULES, MEMORY_LIMITS, MEMORY_MAX_CHARS, AUTO_ACCEPT_MAX, ON_DISPUTE, NOTIFY, RULE_FIELDS, ruleChangeText } from '../../public/agent-rules.js';
+import { DEFAULT_RULES, MEMORY_LIMITS, MEMORY_MAX_CHARS, AUTO_ACCEPT_MAX, ON_DISPUTE, NOTIFY, RULE_FIELDS, ruleChangeText, sendWhenOf } from '../../public/agent-rules.js';
 
 const HISTORY_MAX = 50;
 // 방마다 그 방에만 쓸 값을 따로 정할 수 있는 규칙. 알림 수준은 화면 설정이라 방마다 나누지 않는다
 export const ROOM_RULES = ['autoAccept', 'sendWhen', 'onDispute'];
 
 const validAutoAccept = (v) => Number.isSafeInteger(v) && v >= 0 && v <= AUTO_ACCEPT_MAX;
+// 예전 화면이 보내는 '바로'('now')도 받되 '편할 때'로 저장한다(sendWhenOf)
 const validSendWhen = (v) => v === 'now' || v === 'manual' || (Number.isInteger(v?.payday) && v.payday >= 1 && v.payday <= 31);
+const cleanValue = (field, v) => (field === 'sendWhen' ? (v.payday ? { payday: v.payday } : sendWhenOf(v)) : v);
 const CHECKS = {
   autoAccept: [validAutoAccept, `자동 수락 한도는 0원에서 ${AUTO_ACCEPT_MAX.toLocaleString('ko-KR')}원 사이의 정수로 정해 주세요`],
-  sendWhen: [validSendWhen, '보낼 시기는 바로, 매달 1~31일, 편할 때 중에서 골라 주세요'],
+  sendWhen: [validSendWhen, '보낼 시기는 편할 때나 매달 1~31일 중에서 골라 주세요'],
   onDispute: [(v) => Object.hasOwn(ON_DISPUTE, v), '이의 처리 방법을 골라 주세요'],
   notify: [(v) => Object.hasOwn(NOTIFY, v), '알림 수준을 골라 주세요'],
 };
 
 // 저장된 값이 망가졌으면 비서가 더 조심하는 쪽(기본값)으로 읽는다. 한도가 이상하면 0이라 모든 청구서를 묻는다
 export function normalizeRules(rules) {
-  return Object.fromEntries(RULE_FIELDS.map((f) => [f, CHECKS[f][0](rules?.[f]) ? rules[f] : DEFAULT_RULES[f]]));
+  return Object.fromEntries(RULE_FIELDS.map((f) => [f, CHECKS[f][0](rules?.[f]) ? cleanValue(f, rules[f]) : DEFAULT_RULES[f]]));
 }
 
 // 예전에 방에서 끈 규칙(rulesOff: 그 방에서는 안전한 기본값)은 그 방 전용 값으로 옮겨 읽는다
@@ -47,7 +49,7 @@ export function normalizeSettings(doc, uid) {
 // 저장된 방 값이 망가졌으면 그 칸은 기본 설정을 따른다
 export function rulesIn(settings, roomId) {
   const own = settings.roomRules?.[roomId] ?? {};
-  return { ...settings.rules, ...Object.fromEntries(ROOM_RULES.filter((f) => own[f] !== undefined && CHECKS[f][0](own[f])).map((f) => [f, own[f]])) };
+  return { ...settings.rules, ...Object.fromEntries(ROOM_RULES.filter((f) => own[f] !== undefined && CHECKS[f][0](own[f])).map((f) => [f, cleanValue(f, own[f])])) };
 }
 
 export const memoryLimit = (doc) => MEMORY_LIMITS[doc.plan] ?? MEMORY_LIMITS.free;
@@ -81,7 +83,7 @@ export function createAgentSettings({ store, clock = () => new Date() }) {
     for (const field of RULE_FIELDS.filter((f) => input?.[f] !== undefined)) {
       const [valid, message] = CHECKS[field];
       if (!valid(input[field])) throw new HttpError(400, message);
-      const to = field === 'sendWhen' && input[field].payday ? { payday: input[field].payday } : input[field];
+      const to = cleanValue(field, input[field]);
       if (JSON.stringify(to) === JSON.stringify(rules[field])) continue;
       history.push({ at, field, from: rules[field], to, text: ruleChangeText(field, rules[field], to) });
       rules[field] = to;
@@ -166,7 +168,7 @@ export function createAgentSettings({ store, clock = () => new Date() }) {
         }
         const [valid, message] = CHECKS[f];
         if (!valid(v)) throw new HttpError(400, message);
-        own[f] = f === 'sendWhen' && v.payday ? { payday: v.payday } : v;
+        own[f] = cleanValue(f, v);
       }
       const { [roomId]: _, ...others } = doc.roomRules;
       return saved({ ...doc, roomRules: Object.keys(own).length ? { ...others, [roomId]: own } : others });

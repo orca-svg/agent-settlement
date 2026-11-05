@@ -107,32 +107,34 @@ test('완료 기준: 지정일로 정하면 그날 09:00 KST 전에는 알리지
   assert.equal((await ctx.store.get('transfers', t.id)).status, 'due');
 });
 
-test('완료 기준: 바로로 정하면 다음 확인 때 바로 알린다', async () => {
-  const ctx = await setup();
+test("예전에 '바로'로 정해 둔 사람도 편할 때 보내기로 다룬다(사용자 테스트 11/5에 '바로'를 뺐다)", async () => {
+  const ctx = await setup(); // 모두 예전 값 'now'로 저장돼 있다
   await ctx.orch.sendInvoices(ROOM, 'me');
   await ctx.orch.tick();
-  assert.equal(pair(await ctx.transfers(), 'cs', 'me').status, 'due');
+  const t = pair(await ctx.transfers(), 'cs', 'me');
+  assert.equal(t.manual, true);
+  assert.equal(t.status, 'scheduled', '다음 날 오전 9시 전에는 알리지 않는다');
 });
 
-// 편할 때 보내기는 바로 알리지 않는다. 다만 3일 뒤 09:00(KST)까지 받는 사람이 받았다고 하지 않았으면 그때 한 번 알린다
+// 편할 때 보내기는 바로 알리지 않는다. 다만 다음 날 09:00(KST)까지 받는 사람이 받았다고 하지 않았으면 그때 한 번 알린다
 // 철수는 송금이 여러 건일 수 있어 그 송금 하나(t)만 본다
 const dueFor = async (ctx, t) => (await ctx.store.listEvents(ROOM)).filter((e) => e.kind === 'transfer_due' && e.action?.ref === t.id);
 const asksToSend = async (ctx, t) => pendingActions({ room: await ctx.store.get('rooms', ROOM), transfers: await ctx.transfers() }).some((a) => a.type === 'approve_transfer' && a.ref === t.id);
 
-test('편할 때 보내기: 바로 알리지 않고, 3일 뒤 09:00(KST)까지 받았다는 확인이 없으면 그때 한 번 알린다', async () => {
+test('편할 때 보내기: 바로 알리지 않고, 다음 날 09:00(KST)까지 받았다는 확인이 없으면 그때 한 번 알린다', async () => {
   const ctx = await setup(); // 11/10 12:00 KST
   await ctx.settings.updateRules('cs', { sendWhen: 'manual' });
   await ctx.orch.sendInvoices(ROOM, 'me');
   const t = pair(await ctx.transfers(), 'cs', 'me');
   assert.equal(t.manual, true);
-  assert.equal(t.remindAt, '2026-11-13T00:00:00.000Z', '11/13 09:00 KST');
-  ctx.clock.now = new Date('2026-11-12T23:59:00Z');
+  assert.equal(t.remindAt, '2026-11-11T00:00:00.000Z', '11/11 09:00 KST');
+  ctx.clock.now = new Date('2026-11-10T23:59:00Z');
   await ctx.orch.tick();
   assert.equal((await ctx.store.get('transfers', t.id)).status, 'scheduled');
   assert.equal((await dueFor(ctx, t)).length, 0, '그 전에는 알리지 않는다');
   assert.equal(await asksToSend(ctx, t), false);
 
-  ctx.clock.now = new Date('2026-11-13T00:00:00Z');
+  ctx.clock.now = new Date('2026-11-11T00:00:00Z');
   await ctx.orch.tick();
   await ctx.orch.tick();
   assert.equal((await ctx.store.get('transfers', t.id)).status, 'due');
@@ -182,14 +184,14 @@ test('규칙 검증: 잘못된 값은 400이고 아무것도 저장하지 않는
 
 test('규칙 변경 기록: 바뀐 칸만, 전후 값과 시각을 남긴다', async () => {
   const ctx = await setup();
-  await ctx.settings.updateRules('yh', { autoAccept: 1_000_000, sendWhen: 'now' }); // 그대로면 남기지 않는다
+  await ctx.settings.updateRules('yh', { autoAccept: 1_000_000, sendWhen: 'now' }); // 그대로면 남기지 않는다(예전 '바로'는 편할 때와 같다)
   assert.deepEqual((await ctx.settings.get('yh')).ruleHistory, []);
   await ctx.settings.updateRules('yh', { autoAccept: 30_000, sendWhen: { payday: 25, junk: 1 } });
   const v = await ctx.settings.get('yh');
   assert.deepEqual(v.rules.sendWhen, { payday: 25 }, '모르는 칸은 저장하지 않는다');
   assert.deepEqual(v.ruleHistory.map((h) => [h.field, h.text, h.at]), [
     ['autoAccept', '자동 수락 한도: ₩1,000,000 → ₩30,000', '2026-11-10T03:00:00.000Z'],
-    ['sendWhen', '보낼 시기: 바로 보내기 → 매달 25일에 보내기', '2026-11-10T03:00:00.000Z'],
+    ['sendWhen', '보낼 시기: 편할 때 보내기 → 매달 25일에 보내기', '2026-11-10T03:00:00.000Z'],
   ]);
 });
 
@@ -212,7 +214,7 @@ test('규칙 적용 근거가 비서 기록에 남는다: 자동 수락, 묻기,
   await ctx.orch.answerInvoice(ROOM, (await ctx.invoiceOf('ms')).id, 'ms', { decision: 'accept' });
   const scheduled = await ctx.metas('transfer_scheduled');
   assert.ok(scheduled.includes('정해 둔 규칙: 매달 25일에 보내기'));
-  assert.ok(scheduled.includes('정해 둔 규칙: 바로 보내기'));
+  assert.ok(scheduled.includes('정해 둔 규칙: 편할 때 보내기'));
 });
 
 test('규칙 적용 근거: 편할 때 보내기, 이의 처리(근거 이의·중재 맡기기·묻기)', async () => {
@@ -521,7 +523,7 @@ test('알림 수준: 확인할 일만이면 내 할 일만 알리고, 모든 진
 });
 
 test('설정 화면: 초안과 규칙이 서로 바뀌어도 값이 같다', () => {
-  for (const sendWhen of ['now', 'manual', { payday: 25 }]) {
+  for (const sendWhen of ['manual', { payday: 25 }]) {
     const rules = { autoAccept: 30_000, sendWhen, onDispute: 'evidence', notify: 'all' };
     assert.deepEqual(rulesFromDraft(draftFromRules(rules)), rules);
   }
@@ -625,9 +627,9 @@ test('서버의 주기 작업(server.tick)이 돌아 때가 된 송금을 알린
   await seedDemoRoom(store, { id: ROOM });
   for (const uid of ['me', 'cs', 'yh', 'ms']) {
     const a = await store.get('agents', uid);
-    await store.put('agents', { ...a, rules: { autoAccept: 1_000_000, sendWhen: 'now', onDispute: 'ask' } });
+    await store.put('agents', { ...a, rules: { autoAccept: 1_000_000, sendWhen: 'manual', onDispute: 'ask' } });
   }
-  const server = createApp({ store, env: {} });
+  const server = createApp({ store, env: {}, clock: () => new Date(Date.now() + 2 * 86_400_000) }); // 알림 때(다음 날 오전 9시)가 지난 뒤
   const orch = createOrchestrator({ store });
   await orch.sendInvoices(ROOM, 'me');
   const { due } = await server.tick();

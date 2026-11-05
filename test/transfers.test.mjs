@@ -120,15 +120,18 @@ test('받는 계좌를 알려 주면 열린 송금에 링크가 채워진다', a
   assert.deepEqual((await actions()).filter((a) => a.type === 'set_payout'), []);
 });
 
-test('월급날 규칙이면 remindAt이 다음 25일 09:00', async () => {
+test('월급날 규칙이면 remindAt이 다음 25일 09:00, 편할 때면 다음 날 09:00', async () => {
   const { transfers } = await setup();
   assert.equal(pair(await transfers(), 'cs', 'me').remindAt, '2026-11-25T00:00:00.000Z');
-  assert.equal(pair(await transfers(), 'ms', 'me').remindAt, '2026-11-10T03:00:00.000Z');
+  assert.equal(pair(await transfers(), 'ms', 'me').remindAt, '2026-11-11T00:00:00.000Z');
 });
 
-test('tick 전에는 due 아님, 뒤에는 due + approve_transfer 액션', async () => {
-  const { orch, transfers, actions } = await setup();
+test('알림 때 전에는 due 아님, 지나서 tick이 돌면 due + approve_transfer 액션', async () => {
+  const { orch, clock, transfers, actions } = await setup();
   assert.deepEqual((await actions()).filter((a) => a.type === 'approve_transfer'), []);
+  await orch.tick();
+  assert.equal(pair(await transfers(), 'ms', 'me').status, 'scheduled');
+  clock.now = new Date('2026-11-11T00:00:00Z');
   await orch.tick();
   assert.equal(pair(await transfers(), 'ms', 'me').status, 'due');
   assert.equal(pair(await transfers(), 'cs', 'me').status, 'scheduled');

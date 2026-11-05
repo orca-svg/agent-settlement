@@ -18,7 +18,7 @@ async function twoRooms() {
   await seedDemoRoom(store, { id: B });
   for (const uid of ['me', 'cs', 'yh', 'ms']) {
     const a = await store.get('agents', uid);
-    await store.put('agents', { ...a, rules: { autoAccept: 1_000_000, sendWhen: 'now', onDispute: 'ask', notify: 'actions' } });
+    await store.put('agents', { ...a, rules: { autoAccept: 1_000_000, sendWhen: { payday: 25 }, onDispute: 'ask', notify: 'actions' } });
   }
   const clock = () => new Date('2026-11-10T03:00:00Z');
   return { store, orch: createOrchestrator({ store, clock }), settings: createAgentSettings({ store, clock }) };
@@ -32,7 +32,7 @@ test('rulesIn: 이 방에서 정한 값만 기본 설정을 덮고, 알림 수�
   assert.deepEqual(rulesIn({ rules: s.rules, roomRules: { r1: { autoAccept: -5, notify: 'none' } } }, 'r1'), s.rules, '이상한 값·방마다 나누지 않는 칸은 무시한다');
 });
 
-test('예전에 방에서 끈 규칙(rulesOff)은 그 방 전용 안전값(모두 묻기·바로·나에게 묻기)으로 옮겨 읽는다', () => {
+test('예전에 방에서 끈 규칙(rulesOff)은 그 방 전용 안전값(모두 묻기·편할 때·나에게 묻기)으로 옮겨 읽는다', () => {
   const doc = normalizeSettings({ rules: { autoAccept: 50_000 }, rulesOff: { r1: ['autoAccept', 'onDispute'] } }, 'u');
   assert.deepEqual(doc.roomRules, { r1: { autoAccept: 0, onDispute: 'ask' } });
   assert.equal(doc.rulesOff, undefined);

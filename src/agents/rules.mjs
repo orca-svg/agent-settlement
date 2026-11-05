@@ -1,5 +1,5 @@
 // 각자의 비서가 주인이 맡긴 규칙(#5의 agents.rules)대로 판단한다. LLM을 쓰지 않는 결정적인 코드다.
-import { MANUAL_WAIT_DAYS } from '../../public/agent-rules.js';
+import { MANUAL_WAIT_DAYS, sendWhenOf } from '../../public/agent-rules.js';
 
 // 위에서부터 차례로 판단한다. 받을 돈 → 근거가 있는 이의 → 자동 수락 한도 → 주인에게 묻기.
 // 이유는 청구서와 비서 기록에 남아 방 사람 모두가 보므로 한도 금액은 넣지 않는다. 금액은 본인의 '내 비서'에만 있다(#5)
@@ -14,11 +14,11 @@ export function evaluateInvoice({ invoice, settings, evidence = [] }) {
 const KST = 9 * 3600_000;
 const daysIn = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
 
-// 언제 송금을 알려 줄지. 'now'면 지금, { payday: d }면 다음 d일 09:00 KST(그달에 d일이 없으면 마지막 날),
-// 'manual'이면 MANUAL_WAIT_DAYS일 뒤 09:00 KST. 그때까지 받는 사람이 받았다고 하면(confirmed) 알리지 않는다
+// 언제 송금을 알려 줄지. { payday: d }면 다음 d일 09:00 KST(그달에 d일이 없으면 마지막 날),
+// 'manual'(예전 'now'도)이면 MANUAL_WAIT_DAYS일 뒤 09:00 KST. 그때까지 받는 사람이 받았다고 하면(confirmed) 알리지 않는다
 export function nextSendAt(now, sendWhen) {
   const kst = new Date(now.getTime() + KST);
-  if (sendWhen === 'manual') return new Date(Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate() + MANUAL_WAIT_DAYS)).toISOString(); // 그날 00:00 UTC = 09:00 KST
+  if (sendWhenOf(sendWhen) === 'manual') return new Date(Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate() + MANUAL_WAIT_DAYS)).toISOString(); // 그날 00:00 UTC = 09:00 KST
   if (!sendWhen?.payday) return now.toISOString();
   let y = kst.getUTCFullYear();
   let m = kst.getUTCMonth();
