@@ -658,7 +658,7 @@ async function act(name, d) {
     state.editing = null;
     state.lastImage = null;
     state.draft = newDraft();
-    state.addMode = 'manual';
+    state.addMode = state.aiReady ? 'photo' : 'manual'; // 영수증이 첫 입력 수단(사용자 테스트 11/5). AI가 없으면 직접 입력
     state.readNotes = [];
     state.formError = '';
     state.sheet = 'add';
