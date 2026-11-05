@@ -29,5 +29,8 @@ test('화면 제목과 상단 서비스 이름은 Bill:ION', () => {
   }
   assert.match(read('public/account.js'), /class="nav-brand" href="\.\/">Bill:ION<\/a>/);
   assert.match(read('README.md'), /^# Bill:ION$/m);
+  // ION은 Intelligent Orchestration Network의 머리글자다. README는 이름 바로 아래에서 두 부분의 뜻을 풀어 준다
+  assert.match(read('README.md'), /^# Bill:ION\n\n<sub><b>Bill<\/b>\(청구서\) \+ <b>ION<\/b>\(<b>I<\/b>ntelligent <b>O<\/b>rchestration <b>N<\/b>etwork\)/m);
+  assert.doesNotMatch(read('README.md'), /Operations Network/, '정정 전 뜻(Operations)은 쓰지 않는다');
   assert.match(read('PRIVACY.md'), /서비스 「Bill:ION」 운영/);
 });

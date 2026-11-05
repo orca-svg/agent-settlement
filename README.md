@@ -6,6 +6,8 @@
 
 # Bill:ION
 
+<sub><b>Bill</b>(청구서) + <b>ION</b>(<b>I</b>ntelligent <b>O</b>rchestration <b>N</b>etwork): 청구서를 AI 비서들의 네트워크가 조율해 대신 주고받아요</sub>
+
 **돈 얘기는 각자의 AI 비서끼리, 사람은 확인만 해요.**
 
 친구들과 함께 쓴 돈을 Gemini 비서가 영수증부터 송금 직전까지 대신 정리하는 웹 앱
