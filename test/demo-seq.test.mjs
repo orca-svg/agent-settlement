@@ -4,7 +4,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.mjs';
 import { MemoryStore } from '../src/store/memory.mjs';
-import { SEQ_TASKS, seqSummary } from '../src/demo-seq.mjs';
+import { SEQ_TASKS, SEQ_TITLES, seqSummary, seqSvg } from '../src/demo-seq.mjs';
 import { readFileSync } from 'node:fs';
 import { createSeq, seqCardHtml, seqRowHtml, seqTotalHtml } from '../public/demo/seq.js';
 import { tasks } from '../public/demo/guide.js';
@@ -68,6 +68,55 @@ test('SEQ 평균: 모르는 task 이름표는 세지 않는다', () => {
   const out = seqSummary([{ task: 'room', score: 6 }, { task: 'old-task', score: 1 }]);
   assert.deepEqual(out.tasks.room, { n: 1, avg: 6 });
   assert.deepEqual(out.overall, { n: 1, avg: 6 });
+});
+
+// README에 띄우는 표 이미지(팀 요청 11/5): 서버가 그때그때 그리는 SVG. GitHub 테마에 맞춰 밝은·어두운 판을 따로 낸다
+const summary5 = { tasks: { room: { n: 5, avg: 6 }, agent: { n: 4, avg: 3.75 }, expense: { n: 4, avg: 5.25 }, dispute: { n: 3, avg: 3 }, send: { n: 3, avg: 7 } }, overall: { n: 19, avg: 97 / 19 } };
+const NOW_KST = new Date('2026-11-06T05:05:00Z'); // 11월 6일 14:05(KST)
+
+test('SEQ 표 이미지: task 순서대로 이름·막대·평균·사람 수, 맨 아래 전체 평균과 응답 수', () => {
+  const svg = seqSvg(summary5, { now: NOW_KST });
+  assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="560" height="\d+" viewBox="0 0 560 \d+" role="img" aria-labelledby="seq-t seq-d">/);
+  const order = SEQ_TITLES.map((t) => svg.indexOf(t));
+  assert.ok(order.every((i, k) => i > 0 && (k === 0 || i > order[k - 1])), '다섯 task가 순서대로 있다');
+  for (const v of ['6.0', '3.8', '5.3', '3.0', '7.0']) assert.match(svg, new RegExp(`>${v.replace('.', '\\.')}</text>`));
+  assert.match(svg, />5명</);
+  assert.match(svg, />전체</);
+  assert.match(svg, />5\.1</);
+  assert.match(svg, />19개</);
+  assert.match(svg, /1 매우 어려움 ~ 7 매우 쉬움 · 11월 6일 14:05 기준/);
+  assert.match(svg, /<desc id="seq-d">[^<]*여행 방 만들고 친구 초대하기 6\.0점\(5명\)/, '화면 읽기에도 숫자를 알린다');
+});
+
+test('SEQ 표 이미지: 막대 길이는 1~7 눈금(1이면 0, 7이면 꽉 참), 아무도 답하지 않은 task는 막대 없이 –', () => {
+  const svg = seqSvg({ tasks: { room: { n: 1, avg: 7 }, agent: { n: 1, avg: 1 }, expense: { n: 1, avg: 4 }, dispute: { n: 0, avg: null }, send: { n: 0, avg: null } }, overall: { n: 3, avg: 4 } }, { now: NOW_KST });
+  const bars = [...svg.matchAll(/<rect class="bar" x="330" y="\d+" width="(\d+(?:\.\d+)?)"/g)].map((m) => Number(m[1]));
+  assert.deepEqual(bars, [130, 0, 65]);
+  assert.equal((svg.match(/>–<\/text>/g) ?? []).length, 2);
+  assert.match(svg, />0명</);
+});
+
+test('SEQ 표 이미지: 밝은·어두운 테마 색을 따로 쓰고, 모르는 테마는 밝은 판', () => {
+  assert.match(seqSvg(summary5, { now: NOW_KST, theme: 'dark' }), /fill="#151b23"/);
+  assert.match(seqSvg(summary5, { now: NOW_KST, theme: 'light' }), /fill="#ffffff"/);
+  assert.match(seqSvg(summary5, { now: NOW_KST, theme: '<x>' }), /fill="#ffffff"/);
+});
+
+test('SEQ 표 이미지 주소: 이미지로 돌려주고 캐시하지 말라고 알린다', async () => {
+  const res = await fetch(`${base}/api/demo/seq.svg?theme=dark`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /^image\/svg\+xml/);
+  assert.match(res.headers.get('cache-control'), /no-cache/);
+  assert.match(await res.text(), /^<svg [\s\S]*fill="#151b23"[\s\S]*<\/svg>$/);
+});
+
+test('README는 GitHub 테마에 맞는 SEQ 표 이미지를 띄우고, 이름은 체험 데모의 task 이름과 같다', () => {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const cloudRun = readFileSync(new URL('../public/api.js', import.meta.url), 'utf8').match(/CLOUD_RUN_URL = '([^']+)'/)[1];
+  assert.match(readme, new RegExp(`<source media="\\(prefers-color-scheme: dark\\)" srcset="${cloudRun.replaceAll('.', '\\.')}/api/demo/seq\\.svg\\?theme=dark">`));
+  assert.match(readme, new RegExp(`<img src="${cloudRun.replaceAll('.', '\\.')}/api/demo/seq\\.svg\\?theme=light" width="560" alt="[^"]+">`));
+  const s = { room: null, invite: null, expenses: [], invoices: [], disputes: [], transfers: [], location: [], agent: null };
+  assert.deepEqual(SEQ_TITLES, tasks(s).map((t) => t.title));
 });
 
 // ---------------------------------------------------------------- 화면

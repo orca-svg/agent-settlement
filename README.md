@@ -46,6 +46,15 @@
 > [!NOTE]
 > [데모 화면](https://orca-svg.github.io/agent-settlement/)은 로그인 없이 ‘나’가 되어 오사카 여행 정산을 다섯 task로 따라가는 체험 데모예요. 실제 방·내 계정 화면을 그대로 쓰고, 친구 셋은 데모가 대신 움직여요. 그래서 금액·환율·계좌·위치는 모두 가상의 값이고 돈이 움직이지 않아요. 영수증·계좌·타임라인은 샘플로 한 번에 채울 수 있어요. [실제 방](https://orca-svg.github.io/agent-settlement/room.html)은 Google로 로그인한 뒤 직접 방을 만들어 써요. 어느 쪽이든 우리 서비스는 돈을 보관하거나 옮기지 않고, 금액이 채워진 송금 앱을 열어 줄 뿐이에요.
 
+<p align="center">
+<a href="https://orca-svg.github.io/agent-settlement/"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://agent-settlement-1081397156656.asia-northeast1.run.app/api/demo/seq.svg?theme=dark">
+  <img src="https://agent-settlement-1081397156656.asia-northeast1.run.app/api/demo/seq.svg?theme=light" width="560" alt="체험 데모 SEQ: task마다 '얼마나 쉬웠나'(1 매우 어려움 ~ 7 매우 쉬움)의 평균과 응답 수">
+</picture></a>
+</p>
+
+체험 데모를 해 본 사람들이 task를 끝낼 때마다 남긴 SEQ(얼마나 쉬웠나, 1 매우 어려움 ~ 7 매우 쉬움)의 평균이에요. 서버가 볼 때마다 새로 그리지만, GitHub의 이미지 캐시 때문에 몇 분 늦을 수 있어요.
+
 ## 무엇을 해결하나
 
 정산에서 가장 피곤한 건 계산이 아니라 **돈 얘기를 꺼내는 일**이에요. 요청을 올리면 관계가 어색해질까 걱정되고, 늦게 보내는 친구에게 다시 말하기는 더 어려워요. 게다가 현실의 정산은 1/N로 끝나지 않아요.
