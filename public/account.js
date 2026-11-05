@@ -3,7 +3,7 @@
 // 화면 아래에 저장 막대가 뜬다. 저장하지 않고 떠나려 하면(왼쪽 위 '내 방', 브라우저 뒤로, 탭 닫기) 버릴지 묻는다
 import { initAuth, currentUser, login, logout, authOptions } from './auth.js';
 import { api } from './room-api.js';
-import { esc, avatarHtml, CHEVRON, GOOGLE_G, ICON_LINK, nextAfterLogin, mountSegs, segArrowKeys } from './ui.js';
+import { esc, avatarHtml, CHEVRON, GOOGLE_G, ICON_LINK, nextAfterLogin, backToRoom, mountSegs, segArrowKeys } from './ui.js';
 import { roomTabs, roomRowsHtml } from './room-list.js';
 import { leaveBlock } from './leave.js';
 import { toast } from './toast.js';
@@ -67,6 +67,12 @@ function toRooms() {
     run(render);
   }
 }
+// 방에서 왔으면(account.html?from=…) 그 방으로 돌아간다. 내 비서 시트에서 왔으면 방이 그 시트를 다시 연다
+function toRoom() {
+  if (!mayLeave()) return;
+  settings = null;
+  location.assign(backRoom.href);
+}
 addEventListener('popstate', () => {
   if (settings && onProfile()) return; // 목차·#으로 같은 화면 안에서 옮긴 것: 다시 그리지 않아 쓰던 값이 남는다
   if (!mayLeave()) return void history.go(1); // 버리지 않기로 했으면 내 계정에 머문다
@@ -110,6 +116,9 @@ new ResizeObserver(() => { if (settings) mountSegs(panel); }).observe(panel);
 
 // 방·초대 링크로 왔다가 로그인하러 온 경우 돌아갈 곳(room.html?room=… 또는 ?invite=…)
 const next = nextAfterLogin(location.search);
+// 방의 '기본 설정 바꾸기'·'내 계정'으로 왔을 때 돌아갈 방. 내 방 목록에 있는 방일 때만 { href, name }
+const back = backToRoom(location.search);
+let backRoom = null;
 
 async function render() {
   const config = await initAuth();
@@ -142,6 +151,8 @@ async function render() {
   }
   if (next) return void location.replace(next); // 로그인했으면 보던 방·초대로 돌아간다
   const [{ profile }, { rooms }] = await Promise.all([api('/api/me'), api('/api/rooms')]);
+  const from = back && rooms.find((r) => r.id === back.id);
+  backRoom = from ? { href: back.href, name: from.name } : null;
   panel.onclick = panel.oninput = panel.onchange = null; // 비서 기본 설정 화면이 단 처리기를 다른 화면에 남기지 않는다
   if (onProfile()) profileView(profile, await api('/api/me/agent'));
   else roomsView(profile, rooms, config);
@@ -283,7 +294,9 @@ function accountRow(profile) {
 // status: 방금 저장한 결과(다시 그린 뒤 막대에 잠깐 띄운다)
 function profileView(profile, agent, status = '') {
   setView('settings');
-  setNav(`<button type="button" class="nav-text" id="back">${BACK}<span>내 방</span></button>`, '내 계정');
+  // 왼쪽 위 뒤로는 온 곳으로 간다: 방에서 왔으면 그 방 이름, 아니면 내 방(목록)
+  const backLabel = backRoom ? `<span class="nav-back-label">${esc(backRoom.name)}</span>` : '<span>내 방</span>';
+  setNav(`<button type="button" class="nav-text" id="back"${backRoom ? ` aria-label="돌아가기: ${esc(backRoom.name)}"` : ''}>${BACK}${backLabel}</button>`, '내 계정');
   panel.innerHTML = `<div class="settings">${tocHtml()}<div class="settings-body">
       ${settingsSection({ id: 'profile', level: 2, title: '프로필', desc: '방 사람들에게 이 이름과 색으로 보여요. 바꾸면 모든 방에서 함께 바뀌어요.', body: profileFormHtml(profile) })}
       <div id="agent-box"></div>
@@ -391,7 +404,7 @@ function profileView(profile, agent, status = '') {
     if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
   }
   settings = { pending, save };
-  nav.querySelector('#back').onclick = toRooms;
+  nav.querySelector('#back').onclick = backRoom ? toRoom : toRooms;
   saveButton.onclick = save;
   panel.querySelector('#logout').onclick = () => {
     if (!mayLeave()) return;

@@ -61,18 +61,28 @@ test('기간 글자: 달력에서 고른 두 날짜를 짧게 쓴다', () => {
   assert.equal(datesLabel('', ''), '');
 });
 
-test('방 화면: 모두 동의한 정책은 한 줄과 바꾸기만, 안내는 경고색이 아니다', () => {
+test('방 화면: 모두 동의한 정책은 한 줄로 접히고(눌러서 펼침), 안내는 경고색이 아니다', () => {
   const me = { uid: 'me', name: '재윤' };
   const avatar = () => '';
   const fx = { currency: 'JPY' }; // 환율 정책은 외화 방에만 있다(#55)
-  const alone = setupHtml({ room: { members: [me], fx, policy: 'actual', policyAgreedBy: ['me'], status: 'ready' }, me, avatar });
-  assert.ok(!alone.includes('preview-note'), '주황 안내 상자를 쓰지 않는다');
-  assert.ok(!alone.includes('동의함'), '모두 동의했으면 멤버별 동의 목록을 펼치지 않는다');
-  assert.match(alone, /data-action="edit-policy"/);
-  assert.match(alone, /실제 낸 원화/);
+  const room = { members: [me, { uid: 'cs', name: '철수' }], fx, policy: 'actual', policyAgreedBy: ['me', 'cs'], status: 'ready' };
+  const folded = setupHtml({ room, me, avatar });
+  assert.ok(!folded.includes('preview-note'), '주황 안내 상자를 쓰지 않는다');
+  assert.match(folded, /<button type="button" class="row disclosure" data-action="toggle-policy" aria-expanded="false" aria-controls="policy-detail">/, '줄 전체가 누르는 자리다');
+  assert.match(folded, /실제 낸 원화/);
+  assert.match(folded, /모두 동의함/, '끝난 일은 한 줄로 알린다(사용자 테스트)');
+  assert.match(folded, /<div class="collapsible" id="policy-detail" inert>/, '접힌 내용은 초점·읽기에서 빠진다');
+  assert.match(folded, /data-action="edit-policy"/, '바꾸기는 펼친 안에 있다');
 
-  const waiting = setupHtml({ room: { members: [me, { uid: 'cs', name: '철수' }], fx, policy: 'actual', policyAgreedBy: ['me'], status: 'ready' }, me, avatar });
-  assert.match(waiting, /동의 전/, '아직 동의하지 않은 사람이 있으면 누가 남았는지 보여 준다');
+  const open = setupHtml({ room, me, avatar, policyOpen: true });
+  assert.match(open, /aria-expanded="true"/);
+  assert.match(open, /<div class="collapsible open" id="policy-detail">/);
+
+  assert.match(setupHtml({ room, me, avatar, policyEdit: true }), /aria-expanded="true"/, '바꾸는 중에는 펼쳐 둔다');
+
+  const waiting = setupHtml({ room: { ...room, policyAgreedBy: ['me'] }, me, avatar });
+  assert.match(waiting, /동의 전/, '아직 동의하지 않은 사람이 있으면 누가 남았는지 펼쳐 보여 준다');
+  assert.ok(!waiting.includes('toggle-policy'), '할 일이 남았으면 접지 않는다');
   assert.ok(!waiting.includes('preview-note'));
 });
 
