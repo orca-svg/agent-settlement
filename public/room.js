@@ -883,9 +883,11 @@ function photoPickHtml() {
   }
   // 터치가 주 입력인 기기(휴대폰·태블릿)면 찍기와 앨범에서 고르기를 따로 둔다(receiptPickers)
   const touch = matchMedia('(pointer: coarse)').matches;
+  // 체험 데모의 샘플 영수증은 위 한 줄을 다 쓰고, 찍기·앨범에서 고르기는 그 아래 한 줄을 나눠 쓴다(셋이 한 줄이면 앞의 둘이 좁아져 글자가 세로로 꺾였다)
+  const sample = authOptions().demo ? `<div class="actions"><button type="button" class="btn plain"${touch ? ' style="flex:1"' : ''} data-action="receipt-sample">샘플 영수증으로 해 보기</button></div>` : '';
   return `<section class="next" style="margin:0"><h2>${touch ? '영수증을 찍거나 골라 주세요' : '영수증 사진을 골라 주세요'}</h2>
     <p>AI가 읽은 내용은 저장 전에 직접 확인하고 고칠 수 있어요. 사진 원본은 저장하지 않아요.</p>
-    <div class="actions">${receiptPickers(touch)}${authOptions().demo ? '<button type="button" class="btn plain" data-action="receipt-sample">샘플 영수증으로 해 보기</button>' : ''}</div></section>`;
+    <div class="receipt-picks">${sample}<div class="actions">${receiptPickers(touch)}</div></div></section>`;
 }
 
 // 읽은 줄을 고칠 수 있는 목록. 합계와 줄 합을 나란히 보여 준다.
