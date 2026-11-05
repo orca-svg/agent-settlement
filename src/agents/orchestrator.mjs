@@ -155,13 +155,15 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
       from: by, to: exp.payer, kind: 'dispute_raised', text: `${obj(`‘${exp.title}’`)} 다시 나누자고 이의를 제기했어요`,
       ...(evidence.length ? { meta: evidence.some(e => e.locationId) ? '위치 요약 첨부 · 이의 내용에서 확인' : `근거: ${evidence.map((e) => e.summary).join(' · ')}` } : {}),
     });
-    // 지출을 낸 사람이 이의를 중재 비서에게 맡겨 두었으면 바로 중재한다. 아니면 낸 사람에게 묻는다(pendingActions)
-    if ((await settingsIn(exp.payer, roomId)).rules.onDispute === 'mediator') {
+    // 지출을 낸 사람이 이의를 중재 비서에게 맡겨 두었으면 바로 중재한다. 아니면 낸 사람에게 묻는다(pendingActions).
+    // 영수증 줄이 없으면 중재 비서가 나눌 수 없어, 맡겨 두었어도 낸 사람에게 묻는다(지출을 고치면 이의가 닫힌다)
+    const itemless = !exp.items?.length;
+    if ((await settingsIn(exp.payer, roomId)).rules.onDispute === 'mediator' && !itemless) {
       await say(roomId, { from: exp.payer, to: exp.payer, kind: 'rule_applied', text: '이의가 와서 중재 비서에게 맡겼어요', meta: `정해 둔 규칙: ${ON_DISPUTE.mediator}` });
       return mediate(roomId, dispute.id, exp.payer);
     }
     await say(roomId, {
-      from: exp.payer, to: exp.payer, kind: 'dispute_asked', text: `${obj(`‘${exp.title}’`)} 어떻게 할지 주인에게 물어요`, meta: '정해 둔 규칙: 이의가 오면 주인에게 묻기',
+      from: exp.payer, to: exp.payer, kind: 'dispute_asked', text: `${obj(`‘${exp.title}’`)} 어떻게 할지 주인에게 물어요`, meta: itemless ? '영수증 줄이 없어 중재 대신 주인에게 물어요' : '정해 둔 규칙: 이의가 오면 주인에게 묻기',
       action: { type: 'agree_dispute', ref: dispute.id, for: exp.payer },
     });
     return dispute;
