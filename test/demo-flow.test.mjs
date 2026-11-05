@@ -84,6 +84,7 @@ test('task 1~5: 방 만들기부터 이의·중재, 송금, 정산 완료와 나
   assert.ok(view.expenses.every((e) => e.date >= '2026-11-07' && e.date <= '2026-11-09'));
   list = tasks(await snapshot(server));
   assert.deepEqual(list.map((t) => t.done), [true, false, false, false, false], 'task 1이 끝났다');
+  assert.equal(list[2].steps[0].go.href, `account.html?from=${room.id}&sheet=agent#agent`, 'task 3의 내 계정 버튼은 돌아올 방을 싣는다(저장하고 뒤로를 누르면 방의 내 비서로)');
 
   // task 2. 영수증 사진을 읽으면 샘플 영수증 초안이 오고, 그대로 남긴 뒤 비서에게 나누기를 맡긴다
   const { draft } = await ok('POST', `${base(room.id)}/receipts/extract`, { image: { mimeType: 'image/jpeg', data: 'AAAA' } });

@@ -1,7 +1,7 @@
 // 내 비서 설정 화면(#5): 규칙, 기억, 받을 계좌, 규칙 변경 기록, 처음 설정 흐름. 방 화면의 시트로 열린다.
 // 판단과 저장은 서버(src/agents/settings.mjs)가 하고, 여기서는 그리고 고른 값만 보낸다. import할 때 DOM을 건드리지 않는다.
 // 화면 원칙: 항상 보이는 버튼은 꼭 필요한 것만 둔다. 저장은 바꿨을 때만, 기억 고치기·지우기는 기억을 눌렀을 때만 나온다.
-import { esc, CHEVRON } from './ui.js';
+import { esc, CHEVRON, accountHref } from './ui.js';
 import { won } from './core.js';
 import { AUTO_ACCEPT_PRESETS, AUTO_ACCEPT_MAX, MEMORY_MAX_CHARS, MANUAL_WAIT_DAYS, NOTIFY, DEFAULT_RULES, sendWhenLabel, autoAcceptLabel } from './agent-rules.js';
 
@@ -196,7 +196,7 @@ export function createAgentPanel({ api, roomId, summary, meName, rerender, openS
       ${roomRuleHtml(field, { custom: ui.custom.has(field), defaultText: DEFAULT_TEXT[field](v.rules), body })}</section>`;
     return {
       title: `${meName()}의 비서`,
-      html: `<p class="group-note" style="margin:0 0 16px">모든 방에는 내 계정의 기본 설정이 쓰여요. 이 방에만 다르게 하고 싶은 규칙은 ‘이 방에서만’을 골라요. <a href="account.html#agent">기본 설정 바꾸기</a></p>
+      html: `<p class="group-note" style="margin:0 0 16px">모든 방에는 내 계정의 기본 설정이 쓰여요. 이 방에만 다르게 하고 싶은 규칙은 ‘이 방에서만’을 골라요. <a href="${esc(accountHref(roomId, 'agent', 'agent'))}">기본 설정 바꾸기</a></p>
         ${rule('autoAccept', '자동 수락 한도', limitInputHtml(d))}
         ${rule('sendWhen', '보낼 시기', sendHtml(d))}
         ${rule('onDispute', '이의 처리', disputeHtml(d))}

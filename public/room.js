@@ -9,6 +9,7 @@ import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
 import { initAuth, authOptions, onSessionChange, login } from './auth.js';
+import { accountHref } from './ui.js';
 import { createAgentPanel, personChipHtml } from './agent-panel.js';
 import { notifies } from './agent-rules.js';
 import { readVisits, expenseWindow, keepForSettlement, findMismatches } from './timeline.js';
@@ -20,6 +21,9 @@ import { payoutFieldsHtml, payoutDraftFrom } from './payout-form.js';
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
 const inviteToken = roomId ? null : new URLSearchParams(location.search).get('invite');
+// 내 계정의 뒤로로 돌아왔으면(sheet=agent) 떠날 때 보던 내 비서를 다시 연다. 새로 고쳐도 또 열리지 않게 주소에서 바로 지운다
+const reopenAgent = Boolean(roomId) && new URLSearchParams(location.search).get('sheet') === 'agent';
+if (reopenAgent) history.replaceState(null, '', `room.html?room=${encodeURIComponent(roomId)}`);
 // #4 방 만들기·참가하기·정책 동의·초대 링크 화면 상태. 방에 보일 이름·색은 입력받지 않고 내 프로필(profile)을 쓴다
 // foreign: 외화도 쓰는 방인지(#55). 그때만 fxCurrency·policy를 보낸다. armed·removeError: 초대 시트의 내보내기, leaving·leaveError: 나가기 시트
 const setup = { create: { name: '', start: '', end: '', foreign: false, fxCurrency: 'JPY', policy: 'actual' }, picker: { open: false, month: '', focus: '', entering: false }, join: {}, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, copied: false, busy: false, error: '', armed: null, removeError: null, leaving: false, leaveError: '' };
@@ -99,6 +103,8 @@ const meMenu = {
     $('#nav-me-avatar').innerHTML = me ? avatar(me.uid) : '';
     $('#me-menu-agent').hidden = !state.data?.myAgent;
     $('#me-menu-leave').hidden = !state.data; // 방 안에서만
+    // 방 안에서 내 계정으로 가면 내 계정의 뒤로가 이 방으로 돌아온다
+    if (roomId) $('#me-menu a[role="menuitem"]').setAttribute('href', accountHref(roomId, 'profile'));
   },
 };
 
@@ -1836,7 +1842,11 @@ try {
   if (roomId) {
     // 로그인하지 않았으면 계정 화면에서 로그인한 뒤 이 방으로 돌아온다(next)
     if (!authOptions().dev && !currentUid()) location.replace(`account.html?next=${encodeURIComponent(`room.html${location.search}`)}`);
-    else { await load(); if (currentUid()) watch(); }
+    else {
+      await load();
+      if (currentUid()) watch();
+      if (reopenAgent && state.data?.myAgent) agentPanel.open();
+    }
   } else {
     // 방 만들기·초대 화면은 이 자리에서 로그인한다. 로그인하면 내 프로필(이름·색)을 불러와 다시 그린다
     await loadProfile();
