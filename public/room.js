@@ -1089,6 +1089,24 @@ function disputable(inv) {
 // 따로 된 '맞지 않는 지출' 목록이 같은 지출을 두 번 보여 줬다). iOS 목록의 '선택'처럼 줄 앞에 동그라미가 밀고 들어오고,
 // 고른 줄 바로 아래에 맞지 않는 점을 적는 칸이 열린다. motion: 'enter'·'leave'는 동그라미가 들어오고 나가는 한 번의 그림
 const LEAVE_MS = 220; // 그만둘 때 동그라미가 나가는 시간(style.css의 pick-out과 같게)
+// 줄 없는 지출의 노란 한 줄은 누른 줄 아래에서 높이가 열리며 나오고, 잠깐 뒤 같은 길로 접혀 사라진다.
+// 읽거나 누르려는 중(포인터·손가락이 올라가 있거나 '지출 고치기'에 초점)이면 사라지지 않고 기다린다
+const HINT_MS = 3500;
+let hintTimer = 0;
+function openHint() {
+  const hint = $('#sheet-body .lines-hint');
+  if (!hint || reduceMotion.matches || !hint.animate) return;
+  hint.animate([{ height: '0px', paddingTop: '0px', paddingBottom: '0px', opacity: 0 }, { height: `${hint.offsetHeight}px`, opacity: 1 }], { duration: 260, easing: 'cubic-bezier(0.2, 0.9, 0.25, 1)' });
+}
+function hideHint() {
+  const hint = $('#sheet-body .lines-hint');
+  if (hint?.matches(':hover, :focus-within')) return void (hintTimer = setTimeout(hideHint, 1500));
+  state.noLinesHint = null;
+  if (!hint) return;
+  if (reduceMotion.matches || !hint.animate) return hint.remove();
+  hint.animate([{ height: `${hint.offsetHeight}px`, opacity: 1 }, { height: '0px', paddingTop: '0px', paddingBottom: '0px', opacity: 0 }], { duration: 220, easing: 'cubic-bezier(0.75, 0, 0.8, 0.1)', fill: 'forwards' })
+    .finished.then(() => hint.remove(), () => hint.remove());
+}
 function invoiceLinesHtml(inv, dd, motion = '') {
   const rows = currentRows(inv);
   const items = rows.length ? rows : dd ? disputable(inv).map((exp) => ({ exp, mine: null })) : [];
@@ -1103,10 +1121,9 @@ function invoiceLinesHtml(inv, dd, motion = '') {
         ${mine == null ? '' : `<span class="end"><span class="amount">${won(mine)}</span></span>`}`;
     if (!dd) return `<div class="row">${body}</div>`;
     // 영수증 줄이 없는 지출(11/5 데모에서 이의가 '중재 전'에 멈췄다): 흐리게 두고 누르면 고르지 않는다. 대신 그 줄을 흔들고
-    // 바로 아래 노란 안내로 이의 대신 '지출 고치기'를 권한다(지출은 방 사람 누구나 고치고, 고치면 청구서를 다시 보낸다)
+    // 바로 아래 노란 한 줄로 이의 대신 '지출 고치기'를 권한다(지출은 방 사람 누구나 고치고, 고치면 청구서를 다시 보낸다)
     if (!mediatable(exp)) {
-      const hint = state.noLinesHint === exp.id ? `<div class="row lines-hint" role="alert">${ALERT}<span class="grow"><span class="title">영수증 줄이 없어 중재할 수 없어요</span>
-          <span class="meta" style="display:block">이의 대신 지출을 고쳐 주세요. 함께한 사람이나 금액을 고치면 청구서를 다시 보내요.</span></span>
+      const hint = state.noLinesHint === exp.id ? `<div class="row lines-hint" role="alert">${ALERT}<span class="grow hint-text">줄이 없어 중재할 수 없어요</span>
           <button type="button" class="btn sm secondary" data-action="edit-exp" data-id="${esc(exp.id)}">지출 고치기</button></div>` : '';
       const off = body.replace('</span></span>', ' · 영수증 줄 없음</span></span>');
       return `<button type="button" class="row pickable" aria-disabled="true" data-action="dispute-no-lines" data-id="${esc(exp.id)}"><span class="sel-mark off" aria-hidden="true"><span class="choice-empty"></span></span>${off}</button>${hint}`;
@@ -1602,13 +1619,18 @@ async function agentAct(name, d) {
     list.classList.add('leave');
     setTimeout(renderSheet, LEAVE_MS);
   } else if (name === 'dispute-no-lines') {
-    // 줄 없는 지출은 고르지 않는다. 그 줄 바로 아래에 까닭과 '지출 고치기'를 펴고, 누른 줄을 흔들어 어느 줄인지 알린다
+    // 줄 없는 지출은 고르지 않는다. 누른 줄을 흔들어 어느 줄인지 알리고, 바로 아래에 까닭 한 줄과 '지출 고치기'를 잠깐 편다.
+    // 같은 줄을 다시 누르면 한 줄은 그대로 두고 흔들기와 시간만 새로 한다
     if (!state.disputeDraft) return;
+    const again = state.noLinesHint === d.id && Boolean($('#sheet-body .lines-hint'));
     state.noLinesHint = d.id;
-    renderSheet();
+    if (!again) renderSheet();
     const row = $(`[data-action="dispute-no-lines"][data-id="${CSS.escape(d.id)}"]`);
     row?.focus({ preventScroll: true });
     if (row) nudge(row);
+    if (!again) openHint();
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(hideHint, HINT_MS);
   } else if (name === 'dispute-toggle') {
     // 누를 때마다 고르고 뺀다. 다시 고르면 타임라인에서 찾은 글을 다시 채운다. 다시 그린 뒤에도 그 줄에 초점을 둔다
     const dd = state.disputeDraft;

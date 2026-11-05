@@ -21,10 +21,19 @@ test('줄 없는 지출은 흐리게 두고 누를 수 없다고 알리며, 누�
   assert.match(lines, /영수증 줄이 있는 지출을 골라 중재를 맡겨요\./, '무엇을 고르면 되는지 목록 바로 아래에서 알린다');
 });
 
-test("누른 줄 바로 아래의 노란 안내는 이의 대신 '지출 고치기'를 권하고, 그 버튼은 지출 고치기 화면을 연다", () => {
+test("누른 줄 바로 아래의 노란 안내는 한 줄이고, 그 옆 '지출 고치기'가 지출 고치기 화면을 연다", () => {
   assert.match(lines, /class="row lines-hint" role="alert"/);
-  assert.match(lines, /영수증 줄이 없어 중재할 수 없어요/);
+  assert.match(lines, /<span class="grow hint-text">줄이 없어 중재할 수 없어요<\/span>/, '설명 없이 한 줄');
   assert.match(lines, /data-action="edit-exp" data-id="\$\{esc\(exp\.id\)\}">지출 고치기<\/button>/);
+  assert.match(read('style.css'), /\.lines-hint \.hint-text \{[^}]*white-space: nowrap;/, '좁은 화면에서도 두 줄로 넘어가지 않는다');
+});
+
+test('안내는 잠깐 보였다가 같은 길로 접혀 사라진다. 손가락·포인터가 올라가 있거나 버튼에 초점이 있으면 기다린다', () => {
+  const handler = src.slice(src.indexOf("name === 'dispute-no-lines'"), src.indexOf("name === 'dispute-no-lines'") + 1400);
+  assert.match(src, /const HINT_MS = \d{4};/);
+  assert.match(handler, /setTimeout\(hideHint, HINT_MS\)/);
+  assert.match(src, /hint\??\.matches\(':hover, :focus-within'\)/);
+  assert.match(src, /reduceMotion\.matches/);
 });
 
 test('줄 없는 지출을 누르면 그 줄을 흔든다(움직임 줄이기면 흔들지 않고 표시만)', () => {
