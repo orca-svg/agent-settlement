@@ -12,6 +12,7 @@ import { initAuth, authOptions, onSessionChange, login } from './auth.js';
 import { createAgentPanel, personChipHtml } from './agent-panel.js';
 import { notifies } from './agent-rules.js';
 import { readVisits, expenseWindow, keepForSettlement, findMismatches } from './timeline.js';
+import { currentConsumers, sharesDiffHtml } from './ui.js';
 import { guessOs, guideHtml } from './timeline-guide.js';
 import { createRoomHtml, joinHtml, setupHtml, notAgreed, hasStarted, inviteUrl, datesLabel, inviteSheetHtml, inviteButtonHtml, leaveSheetHtml, doneCardHtml } from './room-setup.js';
 import { pickDay, presetRange, nextFocus, shiftMonth, todayIso } from './date-range.js';
@@ -1239,6 +1240,12 @@ function disputeSheet() {
   let body = '';
   if (d.status === 'superseded') {
     body = `<p class="group-note">${esc(disputeNote(d, exp, nameOf))}</p>`;
+  } else if (d.status === 'open' && !exp.items?.length) {
+    // 영수증 줄이 없으면 중재 비서가 줄마다 나눌 수 없다. 막다른 '중재 맡기기' 대신 낸 사람이 지출을 고치는 길을 보인다(고치면 이의가 닫힌다)
+    body = exp.payer === me.uid
+      ? `<p class="group-note">영수증 줄이 없는 지출이라 중재 비서가 나눌 수 없어요. 함께한 사람이나 금액을 직접 고치면 이 이의는 닫히고 청구서를 다시 보내요.</p>
+        <button class="btn" style="width:100%" data-action="open-exp" data-id="${esc(exp.id)}">지출 고치기</button>`
+      : `<p class="group-note">영수증 줄이 없는 지출이라 중재 비서가 나눌 수 없어요. ${esc(subj(nameOf(exp.payer)))} 함께한 사람이나 금액을 고치면 다시 나눠요.</p>`;
   } else if (d.status === 'open') {
     body = party
       ? `${formError()}<button class="btn" style="width:100%" data-action="mediate" data-id="${esc(d.id)}" ${state.busy === 'mediate' ? 'disabled' : ''}>${state.busy === 'mediate' ? '중재 비서가 보는 중…' : '중재 비서에게 맡기기'}</button>`
@@ -1255,23 +1262,28 @@ function disputeSheet() {
     const alloc = Object.fromEntries(Object.entries(d.proposal.alloc).map(([id, a]) => [id, draft[id] ? { ...a, consumers: draft[id] } : a]));
     const now = shares(exp, room, room.policy).krwShare;
     const after = shares({ ...exp, split: 'items' }, room, room.policy, alloc).krwShare;
-    const lines = proposalLinesHtml(exp, d.proposal.alloc, { draft, editable: choose.revise && !state.rejectDraft && state.busy !== 'revise', nameOf, avatar });
-    const people = exp.present.map((u) => `<div class="row" style="--inset:52px">${avatar(u)}<span class="grow">${esc(nameOf(u))}</span>
-        <span class="amount num">${won(now[u] ?? 0)} → ${won(after[u] ?? 0)}</span></div>`).join('');
+    // 지금 배분과 견줘 바뀐 줄을 먼저, 누가 빠지고 더해졌는지 글로 보인다. 사람별 몫은 지금·중재안·차이 세 칸(사용자 테스트 11/5)
+    const lines = proposalLinesHtml(exp, d.proposal.alloc, { draft, editable: choose.revise && !state.rejectDraft && state.busy !== 'revise', nameOf, avatar, before: currentConsumers(exp) });
+    const role = (u) => (u === d.by ? '이의 낸 사람' : u === exp.payer ? '낸 사람' : '');
+    const people = sharesDiffHtml(exp.present.map((u) => ({ uid: u, now: now[u] ?? 0, after: after[u] ?? 0, role: role(u) })), { nameOf, avatar, label: edited ? '고친 배분' : '중재안' });
     body = `<section class="group"><h3 class="group-label"><span>중재안</span><span>${esc(allocLabel({ source: d.proposal.source }))}</span></h3>
         <p class="how">${esc(d.proposal.summary)}</p>
         ${stale ? `<p class="group-note" role="status">그사이 ${esc(subj(nameOf(d.proposal.revisedBy)))} 중재안을 고쳐서 내가 고른 것은 거뒀어요. 바뀐 배분을 보고 다시 골라 주세요.</p>` : ''}
         <div class="list">${lines}</div>
-        ${choose.revise && !edited && !state.rejectDraft ? '<p class="group-note">맞지 않는 줄은 이름을 눌러 고친 뒤 다시 제안할 수 있어요.</p>' : ''}</section>
-      <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>지금 → ${edited ? '고친 배분' : '중재안'}</span></h3><div class="list">${people}</div></section>
+        ${choose.revise && !edited && !state.rejectDraft ? '<p class="group-note">맞지 않는 줄은 이름을 눌러 고쳐요. 중재 비서에게 맡겨 둔 이의도 고친 배분으로 다시 제안할 수 있어요.</p>' : ''}</section>
+      <section class="group"><h3 class="group-label"><span>사람별 몫</span><span>${edited ? '고친 배분' : '중재안'}이면</span></h3><div class="list shares">${people}</div></section>
       ${formError()}
       ${d.status === 'resolved' ? '<p class="group-note">양쪽이 동의해서 이 지출을 다시 나눴어요.</p>'
         : disputeRejected(d) ? `<p class="group-note">${esc(disputeNote(d, exp, nameOf))}</p>${d.rejectReason ? `<p class="group-note">까닭: ${esc(d.rejectReason)}</p>` : ''}`
         : proposalChoices(d, exp, me.uid, edited)}`;
   }
+  // 맨 위에는 무엇이 맞지 않는지: 누가 어느 지출의 무엇을 문제 삼았는지와 그 지출(사용자 테스트 11/5: 이의 내용을 알기 어려웠다)
+  const issue = `<section class="group"><h3 class="group-label"><span>무엇이 맞지 않나요</span><span>${esc(nameOf(d.by))}의 이의</span></h3>
+      <div class="list"><div class="row">${avatar(d.by)}<span class="grow"><span class="title">${esc(d.claim)}</span>
+        <span class="meta" style="display:block">${esc(exp.title)} · ${esc(nameOf(exp.payer))} 냄 · ${money(amountOf(exp), exp.currency)}</span></span></div></div></section>`;
   return {
     title: `‘${exp.title}’ 이의`,
-    html: `<p class="how"><b>${esc(nameOf(d.by))}의 비서</b> · ${esc(d.claim)}</p>
+    html: `${issue}
       ${evidence ? `<section class="group"><h3 class="group-label"><span>근거</span></h3>${evidence}</section>` : ''}${body}`,
   };
 }

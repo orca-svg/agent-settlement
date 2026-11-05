@@ -8,7 +8,7 @@ import { AUTO_ACCEPT_PRESETS, AUTO_ACCEPT_MAX, MEMORY_MAX_CHARS, MANUAL_WAIT_DAY
 const DISPUTE_NOTES = {
   ask: '내가 낸 지출에 이의가 오면 나에게 물어봐요.',
   evidence: '내 몫을 줄일 근거가 있으면 비서가 대신 이의를 내요.',
-  mediator: '내가 낸 지출에 이의가 오면 중재 비서에게 맡겨요. 결과에는 내가 동의해야 해요.',
+  mediator: '내가 낸 지출에 이의가 오면 중재 비서에게 맡겨요. 중재안은 내가 고치거나 거부할 수 있어요. 내가 동의해야 정해져요.',
 };
 const SEND_MODES = [['now', '바로'], ['payday', '지정일'], ['manual', '편할 때']];
 const SEND_NOTES = {

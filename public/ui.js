@@ -79,16 +79,44 @@ export const changedLines = (alloc, draft = {}) => Object.keys(draft).filter((id
 
 // 중재안의 줄마다 누구 몫인지. 지출 시트의 줄 고르기(.line·.pick)와 같은 모양·같은 조작으로 그린다.
 // editable이면(살아 있는 중재안의 당사자) 칩을 눌러 고치고, 아니면 같은 칩을 누를 수 없게 보인다
-export function proposalLinesHtml(exp, alloc, { draft = {}, editable = false, nameOf, avatar }) {
+// 지금 배분: 줄로 나눈 지출은 그 배분, 아니면 함께한 사람 모두(1/N). 중재안이 무엇을 바꾸는지 견줄 기준이다
+export const currentConsumers = (exp) => Object.fromEntries((exp.items ?? []).map((it) => [it.id, exp.split === 'items' && exp.alloc?.[it.id] ? exp.alloc[it.id].consumers : exp.present]));
+
+// before(지금 배분)를 주면 사용자 테스트(11/5: "무엇이 바뀌었는지 모르겠다")대로 바뀐 줄을 먼저 보이고, 줄마다 누가 빠지고 더해졌는지
+// 글로 적는다(칩에는 data-diff로 표시해 색에만 기대지 않는다). 그대로인 줄은 '그대로인 줄 N개' 아래로 모은다
+export function proposalLinesHtml(exp, alloc, { draft = {}, editable = false, nameOf, avatar, before = null }) {
   const changed = new Set(changedLines(alloc, draft));
-  return (exp.items ?? []).map((it) => {
+  const lines = (exp.items ?? []).map((it) => {
     const chosen = changed.has(it.id) ? draft[it.id] : alloc[it.id]?.consumers ?? [];
+    const was = before?.[it.id] ?? chosen;
+    const added = chosen.filter((u) => !was.includes(u));
+    const removed = was.filter((u) => !chosen.includes(u));
+    const moved = added.length + removed.length > 0;
+    const diffOf = (u) => (added.includes(u) ? ' data-diff="in"' : removed.includes(u) ? ' data-diff="out"' : '');
     const picks = exp.present.map((u) => `<button type="button" class="pick" aria-pressed="${chosen.includes(u)}"${editable ? '' : ' disabled'}
-        data-action="revise-pick" data-line="${esc(it.id)}" data-p="${esc(u)}">${avatar(u)}${esc(nameOf(u))}</button>`).join('');
+        data-action="revise-pick" data-line="${esc(it.id)}" data-p="${esc(u)}"${diffOf(u)}>${avatar(u)}${esc(nameOf(u))}</button>`).join('');
+    const diff = moved ? `<p class="diff">${[...removed.map((u) => `${esc(nameOf(u))} 빠짐`), ...added.map((u) => `${esc(nameOf(u))} 더함`)].join(' · ')}</p>` : '';
     const reason = changed.has(it.id) ? '내가 고친 줄' : alloc[it.id]?.reason ?? '';
-    return `<div class="line" data-line-id="${esc(it.id)}">
+    return { moved, html: `<div class="line${moved ? ' moved' : ''}" data-line-id="${esc(it.id)}">
       <div class="line-top"><span class="line-name">${it.time ? `<small style="margin:0 6px 0 0">${esc(it.time)}</small>` : ''}${esc(it.name)}<small>×${it.qty}</small></span><span class="num">${money(it.qty * it.unit, exp.currency)}</span></div>
-      <div class="picks">${picks}</div>${reason ? `<p class="reason">${esc(reason)}</p>` : ''}</div>`;
+      ${diff}<div class="picks">${picks}</div>${reason ? `<p class="reason">${esc(reason)}</p>` : ''}</div>` };
+  });
+  if (!before) return lines.map((l) => l.html).join('');
+  const same = lines.filter((l) => !l.moved);
+  return [...lines.filter((l) => l.moved).map((l) => l.html), same.length ? `<p class="line-group">그대로인 줄 ${same.length}개</p>` : '', ...same.map((l) => l.html)].join('');
+}
+
+// 사람별 몫을 지금·중재안·차이 세 칸으로 적는다(사용자 테스트 11/5: '₩50,605 → ₩101,210' 화살표의 뜻을 몰랐다).
+// 차이는 부호와 '더 내요·덜 내요'로 말해 색에 기대지 않는다. rows: [{ uid, now, after, role? }], label: 둘째 칸 이름
+export function sharesDiffHtml(rows, { nameOf, avatar, label = '중재안' }) {
+  const head = `<div class="share-row share-head" aria-hidden="true"><span class="grow"></span><span>지금</span><span>${esc(label)}</span><span>차이</span></div>`;
+  return head + rows.map(({ uid, now, after, role = '' }) => {
+    const d = after - now;
+    const say = d === 0 ? '그대로' : `${won(Math.abs(d))} ${d > 0 ? '더 내요' : '덜 내요'}`;
+    const delta = d === 0 ? '<span class="delta same">그대로</span>'
+      : `<span class="delta ${d > 0 ? 'up' : 'down'}"><b>${d > 0 ? '+' : '−'}${won(Math.abs(d))}</b><small>${d > 0 ? '더 내요' : '덜 내요'}</small></span>`;
+    return `<div class="share-row" role="group" aria-label="${esc(`${nameOf(uid)}: 지금 ${won(now)}, ${label} ${won(after)}, ${say}`)}">${avatar(uid)}<span class="grow">${esc(nameOf(uid))}${role ? `<small>${esc(role)}</small>` : ''}</span>
+      <span class="num">${won(now)}</span><span class="num next">${won(after)}</span>${delta}</div>`;
   }).join('');
 }
 
