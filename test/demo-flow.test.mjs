@@ -90,6 +90,17 @@ test('task 순서와 안내: 계좌·비서 범위가 지출 남기기보다 먼
   assert.match(list[3].steps.find((st) => st.skipped).note, new RegExp(`task ${nOf(/맡길 범위/)}에서 한도를 낮추면`));
 });
 
+// 첫 화면(public/index.html)의 다섯 task 목록은 체크리스트와 같은 순서·같은 이름이어야 한다(같은 개념은 같은 단어로)
+test('첫 화면의 다섯 task 목록은 체크리스트와 같은 순서·이름이다', () => {
+  const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  const list = html.match(/<ol class="list intro-tasks">([\s\S]*?)<\/ol>/)[1];
+  const titles = [...list.matchAll(/<span class="title">([^<]+)<\/span>/g)].map((m) => m[1]);
+  const s = { room: null, invite: null, expenses: [], invoices: [], disputes: [], transfers: [], location: [], agent: null };
+  assert.deepEqual(titles, tasks(s).map((t) => t.title));
+  assert.match(list, /미리 채운 방 이름·기간/);
+  assert.match(list, /＋만 누르면/);
+});
+
 test('task 1~5: 방 만들기부터 이의·중재, 송금, 정산 완료와 나가기까지', async () => {
   const { ok, call, server, storage } = demo();
   const base = (id) => `/api/rooms/${encodeURIComponent(id)}`;
