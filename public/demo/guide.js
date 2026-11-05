@@ -32,7 +32,7 @@ export function tasks(s) {
           ? { text: '원화만 쓰는 방이라 환율 정책은 건너뛰었어요', note: '엔화처럼 외화를 쓰는 방에만 환율 정책이 나와요.', skipped: true }
           : { text: '‘외화도 있어요’를 골라 엔화와 환율 정책을 정해요', note: '외화를 쓰는 방에만 환율 정책이 나와요. 정산은 늘 원화로 해요.', done: Boolean(room?.fx), show: '[data-action="cf-foreign"][data-id="yes"]' },
         // ＋를 누르고 '이걸 어떻게 보내지' 하고 나가지 않게, 누르기만 하면 된다는 것을 이 단계에서 바로 알린다(팀 점검 11/5)
-        { text: '참여자 줄 끝 ＋를 누르면 그때부터 친구 셋이 알아서 들어와요', note: '데모라서 초대 링크를 보내지 않아도 돼요. 철수·영희·민수가 몇 초 간격으로 들어오고, 각자의 비서가 쓴 돈을 남겨요.', done: Boolean(s.invite) || friendsIn > 0, show: '[data-action="open-invite"]', go: inRoom },
+        { text: '참여자 줄 끝 ＋를 누르면 친구를 초대할 수 있어요. 데모에서는 임의로 들어와요', note: '데모라서 초대 링크를 보내지 않아도 돼요. 철수·영희·민수가 몇 초 간격으로 들어오고, 각자의 비서가 쓴 돈을 남겨요.', done: Boolean(s.invite) || friendsIn > 0, show: '[data-action="open-invite"]', go: inRoom },
         { text: '친구 셋이 들어와요', note: '초대 시트를 닫거나 다른 화면에 가도 이어서 들어와요.', done: friendsIn === FRIENDS.length },
       ],
     },

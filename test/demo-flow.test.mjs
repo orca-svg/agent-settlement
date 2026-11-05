@@ -82,7 +82,7 @@ test('task 순서와 안내: 계좌·비서 범위가 지출 남기기보다 먼
   assert.match(list[0].steps[0].note, /미리 채워/);
   const plus = list[0].steps.find((st) => st.show === '[data-action="open-invite"]');
   assert.match(plus.text, /＋/);
-  assert.match(`${plus.text} ${plus.note}`, /알아서 들어와요/);
+  assert.match(plus.text, /데모에서는 임의로 들어와요/, '접힌 머리에는 단계 본문만 굵게 보이므로 핵심을 본문에 둔다(리뷰 11/5)');
   assert.match(plus.note, /보내지 않아도/);
   // 다른 task를 번호로 가리키는 안내는 바뀐 순서를 따른다
   const nOf = (re) => list.find((t) => re.test(t.title)).n;
