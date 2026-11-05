@@ -1,6 +1,6 @@
 // 데모 화면과 실제 방 화면이 함께 쓰는 UI 부품. import할 때 DOM을 건드리지 않는다(테스트에서 불러올 수 있게).
 import { Spring, VelocityTracker, project, rubberband, reduceMotion } from './motion.js';
-import { won, money } from './core.js';
+import { won, money, shares } from './core.js';
 
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export const chip = (text, cls = '') => `<span class="chip ${cls}">${esc(text)}</span>`;
@@ -477,4 +477,10 @@ export const GOOGLE_G = `<svg viewBox="0 0 48 48" aria-hidden="true"><path fill=
 export function nextAfterLogin(search) {
   const next = new URLSearchParams(search).get('next') ?? '';
   return /^room\.html\?(room|invite)=[A-Za-z0-9_-]{1,64}$/.test(next) ? next : null;
+}
+
+// 청구서의 지출별 내 몫(사용자 테스트 11/5: "청구서가 무엇을 포함하는지 몰라 맞는지 모르겠다").
+// 청구서에는 합계만 있으므로, 서버와 같은 계산(core.js shares)으로 방의 지출을 나눠 내 몫이 있는 지출만 고른다. 합은 청구서의 내 몫과 같다
+export function invoiceRows(inv, room, expenses) {
+  return expenses.map((exp) => ({ exp, mine: shares(exp, room, room.policy).krwShare[inv.to] ?? 0 })).filter((r) => r.mine > 0);
 }
