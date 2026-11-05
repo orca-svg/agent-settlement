@@ -1,6 +1,6 @@
 // 영수증 줄을 비서들이 공유한 기억으로 '누구 몫인가' 배분한다. 금액은 계산하지 않는다.
 import { ruleAllocate } from '../../public/core.js';
-import { memoryText, receiptTable, presentNames, lineSchema, cleanLines, inline, DATA_NOT_INSTRUCTIONS } from './lines.mjs';
+import { memoryText, receiptTable, presentNames, lineSchema, cleanLines, inline, labelOf, DATA_NOT_INSTRUCTIONS } from './lines.mjs';
 import { promptKey } from './cache.mjs';
 import { whose } from '../../public/ui.js';
 import { isFlagged } from '../actions.mjs';
@@ -19,7 +19,7 @@ export function allocatePrompt(exp, room, memoryByUid) {
     '6. 금액은 계산하지 않는다. 계산은 코드가 한다.',
     `7. ${DATA_NOT_INSTRUCTIONS}`,
   ].join('\n');
-  const payer = room.members.find((m) => m.uid === exp.payer)?.name ?? exp.payer;
+  const payer = labelOf(room.members, exp.payer);
   const user = [
     `함께 있던 사람: ${presentNames(exp, room.members)}`,
     `비서들이 공유한 기억:\n${memoryText(room.members, memoryByUid)}`,
