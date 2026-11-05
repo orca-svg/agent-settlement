@@ -57,7 +57,7 @@ export function tasks(s) {
         { text: '‘비서들에게 청구서 보내기’를 눌러요', note: '각자의 비서가 맡긴 규칙대로 받거나, 한도를 넘으면 주인에게 물어요.', done: s.invoices.length > 0, show: '[data-action="send-invoices"]', go: inRoom },
         autoAccepted
           ? { text: '자동 수락 한도 안이라 비서가 청구서를 바로 받았어요', note: '‘처음부터 다시’ 한 뒤 task 3에서 한도를 낮추면 비서가 먼저 물어봐요.', skipped: true }
-          : { text: '내 청구서를 열고 ‘맞지 않는 지출이 있어요’를 눌러요', done: myDisputes.length > 0 || s.location.length > 0, show: '[data-action="open-invoice"]' },
+          : { text: '내 청구서를 열고 ‘맞지 않는 지출이 있어요’를 눌러요', note: '영수증 줄이 있는 지출만 골라 중재를 맡길 수 있어요. 줄이 없는 1/N 지출은 이의 대신 ‘지출 고치기’로 바꿔요.', done: myDisputes.length > 0 || s.location.length > 0, show: '[data-action="open-invoice"]' },
         { text: '‘Google 지도 타임라인 올리기’ › ‘샘플 타임라인으로 해 보기’를 누르고, 골라 둔 ‘2차 바’를 그대로 ‘이의 보내기’', note: '타임라인에서 22:55쯤 자리를 떠난 걸 찾아 지출을 골라 두고, 맞지 않는 점도 채워 둬요.', done: myDisputes.length > 0, show: '[data-action="start-dispute"], [data-action="timeline-guide"]' },
         { text: '중재안을 보고 ‘중재안에 동의’를 눌러요', note: '철수의 비서는 이의를 중재 비서에게 맡기도록 정해 두었어요. 철수도 곧 동의해요.', done: myDisputes.some((d) => d.agreedBy.includes(ME) || !OPEN.includes(d.status)), show: '[data-action="open-dispute"]' },
       ],
