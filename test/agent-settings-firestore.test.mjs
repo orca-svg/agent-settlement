@@ -30,7 +30,7 @@ test('Firestore: 규칙·기억·방별 공유·변경 기록이 저장되고 �
   assert.deepEqual((await settings.get('u1')).memory, []);
 });
 
-test('Firestore: 편할 때 보내기 송금은 3일 전에는 알리지 않고, 계좌를 바꾸면 두 방의 대기 송금이 바뀌며 저장본은 잠겨 있다', { skip }, async () => {
+test('Firestore: 편할 때 보내기 송금은 다음 날 오전 9시 전에는 알리지 않고, 계좌를 바꾸면 두 방의 대기 송금이 바뀌며 저장본은 잠겨 있다', { skip }, async () => {
   const { emulatorStore } = await load();
   const inner = emulatorStore();
   const store = encryptedStore(inner, Buffer.alloc(32, 6));
@@ -44,7 +44,7 @@ test('Firestore: 편할 때 보내기 송금은 3일 전에는 알리지 않고,
   await orch.sendInvoices('fs-a', 'me');
   await orch.sendInvoices('fs-b', 'me');
   const ms = (await store.list('transfers', { roomId: 'fs-a' })).find((t) => t.from === 'ms');
-  assert.deepEqual([ms.manual, ms.remindAt], [true, '2026-11-13T00:00:00.000Z'], 'Firestore에도 남는다');
+  assert.deepEqual([ms.manual, ms.remindAt], [true, '2026-11-11T00:00:00.000Z'], 'Firestore에도 남는다(11/11 09:00 KST)');
   await orch.tick();
   assert.equal((await store.get('transfers', ms.id)).status, 'scheduled');
   await orch.setPayout('fs-a', 'me', { bank: '토스뱅크', accountNo: '1000-7777-8888', holder: '나' });
