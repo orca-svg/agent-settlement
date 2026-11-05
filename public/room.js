@@ -1023,11 +1023,11 @@ function settlingCard(addButtons) {
       ${blocked ? blockedHtml(blocked, state.announceBlocked) : ''}</section>`;
   }
   const live = transfers.filter((t) => t.version === room.version);
-  // 편할 때 보내기로 정한 송금은 바로 알리지 않는다. 대신 방을 열었을 때 내 차례임을 보여 준다
+  // 편할 때 보내기로 정한 송금은 알림 때(다음 날 오전 9시)까지 알리지 않는다. 대신 방을 열었을 때 내 차례임을 보여 준다
   const manual = live.find((t) => t.from === state.data.me.uid && t.status === 'scheduled' && isManual(t));
   if (manual) {
     return `<section class="next"><p class="eyebrow">편할 때 보내기</p><h2>${esc(nameOf(manual.to))}에게 ${won(manual.amount)}을 보내면 돼요</h2>
-      <p>편할 때 보내기로 정해서 비서가 바로 알리지 않아요. 준비되면 보내 주세요.${manual.remindAt ? ` ${esc(whenText(manual.remindAt))}까지 받았다는 확인이 없으면 한 번 알려 드려요.` : ''}</p><div class="actions"><button class="btn" data-action="open-transfer" data-id="${esc(manual.id)}">보내러 가기</button>${addButtons}</div></section>`;
+      <p>준비되면 편할 때 보내 주세요.${manual.remindAt ? ` ${esc(whenText(manual.remindAt))}까지 받았다는 확인이 없으면 한 번 알려 드려요.` : ''}</p><div class="actions"><button class="btn" data-action="open-transfer" data-id="${esc(manual.id)}">보내러 가기</button>${addButtons}</div></section>`;
   }
   return `<section class="next"><p class="eyebrow">기다리는 중</p><h2>다른 사람의 확인을 기다리고 있어요</h2>
     <p>누가 무엇을 하고 있는지는 아래 '누가 누구에게'와 비서끼리 기록에서 볼 수 있어요. 내 차례가 되면 여기에 올려요.</p><div class="actions">${addButtons}</div></section>`;

@@ -12,20 +12,20 @@ export const FRIENDS = [
     uid: 'cs', name: '철수', color: '#248a3d',
     memory: DEMO_MEMORY.철수,
     // 낸 돈이 가장 많다. 이의가 오면 중재 비서에게 맡긴다
-    rules: { autoAccept: 150_000, sendWhen: 'now', onDispute: 'mediator', notify: 'actions' },
+    rules: { autoAccept: 150_000, sendWhen: 'manual', onDispute: 'mediator', notify: 'actions' },
     payout: { bank: '토스뱅크', accountNo: '100000000002', holder: '철수' },
   },
   {
     uid: 'yh', name: '영희', color: '#af52de',
     memory: DEMO_MEMORY.영희,
-    rules: { autoAccept: 100_000, sendWhen: 'now', onDispute: 'ask', notify: 'actions' },
+    rules: { autoAccept: 100_000, sendWhen: 'manual', onDispute: 'ask', notify: 'actions' },
     payout: { bank: '카카오뱅크', accountNo: '333300000003', holder: '영희' },
   },
   {
     uid: 'ms', name: '민수', color: '#c93400',
     memory: DEMO_MEMORY.민수,
     // 한도가 작아서 청구서가 오면 비서가 민수에게 묻는다(진행자가 민수 대신 받는다)
-    rules: { autoAccept: 50_000, sendWhen: 'now', onDispute: 'ask', notify: 'actions' },
+    rules: { autoAccept: 50_000, sendWhen: 'manual', onDispute: 'ask', notify: 'actions' },
     payout: { bank: '국민은행', accountNo: '940200000004', holder: '민수' },
   },
 ];

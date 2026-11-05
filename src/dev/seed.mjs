@@ -5,7 +5,7 @@ import { DEMO_ROOM, DEMO_EXPENSES, DEMO_MEMORY, DEMO_RULES } from '../../public/
 
 export const DEMO_UIDS = { 나: 'me', 철수: 'cs', 영희: 'yh', 민수: 'ms' };
 const uid = (name) => DEMO_UIDS[name] ?? name;
-const SEND_WHEN = { 바로: 'now', '25일 월급날': { payday: 25 } };
+const SEND_WHEN = { 바로: 'manual', '25일 월급날': { payday: 25 } }; // 예전 시드의 '바로'는 편할 때로(사용자 테스트 11/5에 '바로'를 뺐다)
 const ON_DISPUTE = { '중재 비서에게 맡기기': 'mediator', '나에게 묻기': 'ask', '근거가 있으면 이의 제기': 'evidence' };
 const mapKeys = (obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [uid(k), v]));
 
@@ -41,7 +41,7 @@ export async function seedDemoRoom(store, { id }) {
       id: uid(m.uid),
       uid: uid(m.uid),
       memory: [...DEMO_MEMORY[m.uid]],
-      rules: { autoAccept: r.autoAccept, sendWhen: SEND_WHEN[r.sendWhen] ?? 'now', onDispute: ON_DISPUTE[r.onDispute] ?? 'ask' },
+      rules: { autoAccept: r.autoAccept, sendWhen: SEND_WHEN[r.sendWhen] ?? 'manual', onDispute: ON_DISPUTE[r.onDispute] ?? 'ask' },
       payout: { bank: '토스뱅크', accountNo: `10000000000${i + 1}`, holder: m.name },
       onboardedAt: new Date().toISOString(),
     });

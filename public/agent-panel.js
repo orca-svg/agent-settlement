@@ -3,18 +3,18 @@
 // 화면 원칙: 항상 보이는 버튼은 꼭 필요한 것만 둔다. 저장은 바꿨을 때만, 기억 고치기·지우기는 기억을 눌렀을 때만 나온다.
 import { esc, CHEVRON } from './ui.js';
 import { won } from './core.js';
-import { AUTO_ACCEPT_PRESETS, AUTO_ACCEPT_MAX, MEMORY_MAX_CHARS, MANUAL_WAIT_DAYS, NOTIFY, DEFAULT_RULES, sendWhenLabel, autoAcceptLabel } from './agent-rules.js';
+import { AUTO_ACCEPT_PRESETS, AUTO_ACCEPT_MAX, MEMORY_MAX_CHARS, NOTIFY, DEFAULT_RULES, sendWhenLabel, autoAcceptLabel, sendWhenOf, manualRemindText } from './agent-rules.js';
 
 const DISPUTE_NOTES = {
   ask: '내가 낸 지출에 이의가 오면 나에게 물어봐요.',
   evidence: '내 몫을 줄일 근거가 있으면 비서가 대신 이의를 내요.',
   mediator: '내가 낸 지출에 이의가 오면 중재 비서에게 맡겨요. 결과에는 내가 동의해야 해요.',
 };
-const SEND_MODES = [['now', '바로'], ['payday', '지정일'], ['manual', '편할 때']];
+// 보낼 시기: 정산이 끝나면 방에서 언제든 보내러 갈 수 있고, 둘은 비서가 언제 알리느냐만 다르다(사용자 테스트 11/5에 '바로'를 뺐다)
+const SEND_MODES = [['manual', '편할 때'], ['payday', '지정일']];
 const SEND_NOTES = {
-  now: '',
-  payday: '그날 오전 9시에 알려 드려요. 그달에 그날이 없으면 마지막 날에 알려요.',
-  manual: `내가 편할 때 보내요. ${MANUAL_WAIT_DAYS}일이 지나도 받는 사람이 받았다고 하지 않으면 한 번 알려 드려요.`,
+  manual: `정산이 끝나면 내가 편할 때 보내요. ${manualRemindText}까지 받는 사람이 받았다고 하지 않으면 한 번 알려 드려요.`,
+  payday: '매달 그날 오전 9시에 보낼 때라고 알려 드려요. 그달에 그날이 없으면 마지막 날에 알려요.',
 };
 
 const onlyDigits = (v) => String(v ?? '').replace(/\D/g, '');
@@ -22,7 +22,7 @@ const clockText = (iso) => new Date(iso).toLocaleString('ko-KR', { month: 'numer
 
 export const draftFromRules = (r) => ({
   autoAccept: String(r.autoAccept),
-  mode: r.sendWhen?.payday ? 'payday' : r.sendWhen,
+  mode: r.sendWhen?.payday ? 'payday' : sendWhenOf(r.sendWhen),
   payday: r.sendWhen?.payday ?? 25,
   onDispute: r.onDispute,
   notify: r.notify,
