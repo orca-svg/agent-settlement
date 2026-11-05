@@ -182,6 +182,14 @@ test('SEQ 완료 카드: 화면 가운데 대화상자로 방금 끝낸 task를 
   assert.match(chosen, /role="status"[^>]*>6점을 남겼어요</);
 });
 
+// 팀 요청(11/6): 첫 화면의 평균은 내 점수·사람 수와 다른 색으로 띄운다. '평균' 글자도 그대로 둬 색에만 기대지 않는다
+test('첫 화면 결과: 모두의 평균과 전체 평균은 강조색, 내 점수·사람 수는 보조 글자색', () => {
+  const css = readFileSync(new URL('../public/demo/demo.css', import.meta.url), 'utf8');
+  assert.match(css, /\.seq-res-avg \{[^}]*color: var\(--tint\)/);
+  assert.match(css, /\.seq-total-avg \{[^}]*color: var\(--tint\)/);
+  assert.match(css, /\.seq-res-me \{[^}]*color: var\(--label-2\)/);
+});
+
 test('첫 화면 결과: task 줄마다 모두의 평균과 내 점수, 아래에 전체 평균', () => {
   const summary = { tasks: { room: { n: 4, avg: 6 }, agent: { n: 1, avg: 3 }, expense: { n: 0, avg: null }, dispute: { n: 0, avg: null }, send: { n: 0, avg: null } }, overall: { n: 5, avg: 27 / 5 } };
   assert.match(seqRowHtml('room', { room: 6 }, summary), /class="seq-res"[\s\S]*평균 6\.0[\s\S]*나 6 · 4명/);
