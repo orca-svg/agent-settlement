@@ -159,6 +159,7 @@ Store의 `get(col, id)`·`delete(col, id)`에는 `roomId`가 없고 `tick()`은 
 | GET | `/api/rooms/:id/location` | 내 동의와 위치 요약 목록 |
 | POST | `/api/rooms/:id/location/timeline` | 이의를 낼 때 타임라인에서 찾은 결과 `{ agree: true, expenseId, leftAt, nextAt?, nextHome? }` 또는 `{ agree: true, expenseId, stayedUntil }`. 그 지출 시간대 밖의 시각·좌표·다른 필드는 거부, 지출당 한 번(409). 붙이는 순간 7일 동의 |
 | POST | `/api/rooms/:id/location/revoke` | 내 동의와 요약, 연결된 미확정 중재안 삭제 |
+| GET / POST | `/api/demo/seq` | 체험 데모의 SEQ. 로그인 없이 `{ sid, task, score }`(익명 체험 id, task 이름표, 1~7 정수)를 받아 같은 체험·task는 덮어쓰고, 둘 다 `{ tasks: { <task>: { n, avg } }, overall: { n, avg } }`를 돌려줌. IP당 10분 300회 |
 | POST | `/api/dev/seed` | 개발용 데모 방 만들기(`DEV_SEED=1`일 때만) |
 | POST | `/api/rooms` | 방 만들기 `{ name, dates?, currency?, policy? }`(로그인 필요, 탈퇴 처리 중이면 401). 만든 사람이 첫 멤버이고(이름·색은 내 프로필 `users/{uid}`), `status: 'ready'`. `currency`가 외화(`JPY` 등)면 외화 방이고 고른 정책에 동의한 상태, 없거나 `KRW`면 원화 방이라 `policy`를 보내도 쓰지 않아요 |
 | POST | `/api/rooms/:id/invite` | 초대 링크 토큰 만들기·다시 만들기(멤버). 방마다 하나라 다시 만들면 이전 링크는 무효. 7일 뒤 만료. 응답 `{ token, expiresAt }` |

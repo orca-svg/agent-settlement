@@ -20,6 +20,7 @@ import { createCache } from './agents/cache.mjs';
 import { createEvidenceProvider, counterFor } from './agents/evidence.mjs';
 import { agentsOf, memoryOf, memoryKey } from './agents/memory.mjs';
 import { verifyQrToken } from './payments/qr.mjs';
+import { registerDemoSeqRoutes } from './demo-seq.mjs';
 
 // 계좌·송금 링크는 송금 당사자에게만 보여 준다
 export const redactTransfer = (t, uid) => (t.from === uid || t.to === uid ? t : { ...t, link: null, fallback: null });
@@ -128,6 +129,8 @@ export function createApi({ store, gemini = null, clock = () => new Date(), evid
   registerAgentRoutes(routes, { orchestrator, member, store, overLimit, authenticate, fx: fxRates, clock });
   const agentSettings = createAgentSettings({ store, clock });
   registerAgentSettingsRoutes(routes, { settings: agentSettings, authenticate, member });
+  // 체험 데모의 SEQ. 로그인 없이 받는 익명 점수라 방·계정 줄에 서지 않는다(src/demo-seq.mjs)
+  registerDemoSeqRoutes(routes, { store, clock });
 
   // 때가 된 송금 알림. 배포에서는 Cloud Scheduler가 x-cron-secret을 붙여 부른다. 비밀값이 설정되지 않았으면 열지 않는다
   routes.post('/api/cron/tick', async ({ req }) => {
