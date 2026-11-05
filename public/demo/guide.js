@@ -27,12 +27,21 @@ export function tasks(s) {
     {
       title: '여행 방 만들고 친구 초대하기',
       steps: [
-        { text: '내 방에서 ‘새 방 만들기’로 방을 만들어요', note: '기간은 ‘2박 3일’ 같은 빠른 선택으로 골라요.', done: Boolean(room), show: 'a.btn[href="room.html"], [data-action="create-room"]', go: { href: 'account.html', label: '내 방으로 가기' } },
+        { text: '내 방에서 ‘새 방 만들기’로 방을 만들어요', note: '방 이름과 기간(오늘부터 2박 3일)은 미리 채워 뒀어요. 그대로 만들어도 되고, 바꿔도 돼요.', done: Boolean(room), show: 'a.btn[href="room.html"], [data-action="create-room"]', go: { href: 'account.html', label: '내 방으로 가기' } },
         room && !room.fx
           ? { text: '원화만 쓰는 방이라 환율 정책은 건너뛰었어요', note: '엔화처럼 외화를 쓰는 방에만 환율 정책이 나와요.', skipped: true }
           : { text: '‘외화도 있어요’를 골라 엔화와 환율 정책을 정해요', note: '외화를 쓰는 방에만 환율 정책이 나와요. 정산은 늘 원화로 해요.', done: Boolean(room?.fx), show: '[data-action="cf-foreign"][data-id="yes"]' },
-        { text: '참여자 줄 끝 ＋ 버튼으로 초대 링크를 만들어요', done: Boolean(s.invite) || friendsIn > 0, show: '[data-action="open-invite"]', go: inRoom },
-        { text: '친구 셋이 링크로 들어와요', note: '데모에서는 링크가 생기면 철수·영희·민수가 몇 초 뒤 들어와 각자 쓴 돈을 남겨요.', done: friendsIn === FRIENDS.length },
+        // ＋를 누르고 '이걸 어떻게 보내지' 하고 나가지 않게, 누르기만 하면 된다는 것을 이 단계에서 바로 알린다(팀 점검 11/5)
+        { text: '참여자 줄 끝 ＋를 누르면 그때부터 친구 셋이 알아서 들어와요', note: '데모라서 초대 링크를 보내지 않아도 돼요. 철수·영희·민수가 몇 초 간격으로 들어오고, 각자의 비서가 쓴 돈을 남겨요.', done: Boolean(s.invite) || friendsIn > 0, show: '[data-action="open-invite"]', go: inRoom },
+        { text: '친구 셋이 들어와요', note: '초대 시트를 닫거나 다른 화면에 가도 이어서 들어와요.', done: friendsIn === FRIENDS.length },
+      ],
+    },
+    // 받을 계좌를 먼저 정하고 지출을 남기는 편이 자연스럽다(팀 점검 11/5). 그래서 비서 설정이 지출 남기기보다 앞이다
+    {
+      title: '내 계좌와 비서에게 맡길 범위 정하기',
+      steps: [
+        { text: '내 계정의 ‘내 비서 기본 설정’에서 ‘샘플 계좌·한도로 채우기’를 누르고 ‘저장’해요', note: '숫자를 직접 넣지 않아도 가짜 계좌와 5만 원 한도가 채워져요. 한도가 청구서보다 작아서 task 4에서 비서가 먼저 물어봐요. 보낼 시기(편할 때·지정일)와 이의 처리도 골라 볼 수 있어요.', done: Boolean(s.agent?.onboardedAt), show: '[data-action="agent-sample"]', go: { href: room ? accountHref(room.id, 'agent', 'agent') : 'account.html#agent', label: '내 계정으로 가기' } }, // 저장하고 뒤로를 누르면 방의 내 비서로 돌아와 다음 단계로 간다
+        { text: '방의 ‘내 계정’ 메뉴 › ‘이 방의 내 비서’에서 ‘이 방에서만’ 값을 정해 봐요', note: '이 방에만 다른 한도나 보낼 시기를 쓸 수 있어요. 고르지 않으면 기본 설정을 따라요.', optional: true, done: Object.keys(s.agent?.roomRules?.[room?.id] ?? {}).length > 0, show: '#nav-me', go: inRoom },
       ],
     },
     {
@@ -45,18 +54,11 @@ export function tasks(s) {
       ],
     },
     {
-      title: '비서에게 맡길 범위 정하기',
-      steps: [
-        { text: '내 계정의 ‘내 비서 기본 설정’에서 ‘샘플 계좌·한도로 채우기’를 누르고 ‘저장’해요', note: '숫자를 직접 넣지 않아도 가짜 계좌와 5만 원 한도가 채워져요. 한도가 청구서보다 작아서 task 4에서 비서가 먼저 물어봐요. 보낼 시기(편할 때·지정일)와 이의 처리도 골라 볼 수 있어요.', done: Boolean(s.agent?.onboardedAt), show: '[data-action="agent-sample"]', go: { href: room ? accountHref(room.id, 'agent', 'agent') : 'account.html#agent', label: '내 계정으로 가기' } }, // 저장하고 뒤로를 누르면 방의 내 비서로 돌아와 다음 단계로 간다
-        { text: '방의 ‘내 계정’ 메뉴 › ‘이 방의 내 비서’에서 ‘이 방에서만’ 값을 정해 봐요', note: '이 방에만 다른 한도나 보낼 시기를 쓸 수 있어요. 고르지 않으면 기본 설정을 따라요.', optional: true, done: Object.keys(s.agent?.roomRules?.[room?.id] ?? {}).length > 0, show: '#nav-me', go: inRoom },
-      ],
-    },
-    {
       title: '맞지 않는 몫 바로잡기',
       steps: [
         { text: '‘비서들에게 청구서 보내기’를 눌러요', note: '각자의 비서가 맡긴 규칙대로 받거나, 한도를 넘으면 주인에게 물어요.', done: s.invoices.length > 0, show: '[data-action="send-invoices"]', go: inRoom },
         autoAccepted
-          ? { text: '자동 수락 한도 안이라 비서가 청구서를 바로 받았어요', note: '‘처음부터 다시’ 한 뒤 task 3에서 한도를 낮추면 비서가 먼저 물어봐요.', skipped: true }
+          ? { text: '자동 수락 한도 안이라 비서가 청구서를 바로 받았어요', note: '‘처음부터 다시’ 한 뒤 task 2에서 한도를 낮추면 비서가 먼저 물어봐요.', skipped: true }
           : { text: '내 청구서를 열고 ‘맞지 않는 지출이 있어요’를 눌러요', note: '영수증 줄이 있는 지출만 골라 중재를 맡길 수 있어요. 줄이 없는 1/N 지출은 이의 대신 ‘지출 고치기’로 바꿔요.', done: myDisputes.length > 0 || s.location.length > 0, show: '[data-action="open-invoice"]' },
         { text: '‘Google 지도 타임라인 올리기’ › ‘샘플 타임라인으로 해 보기’를 누르고, 골라 둔 ‘2차 바’를 그대로 ‘이의 보내기’', note: '타임라인에서 22:55쯤 자리를 떠난 걸 찾아 지출을 골라 두고, 맞지 않는 점도 채워 둬요.', done: myDisputes.length > 0, show: '[data-action="start-dispute"], [data-action="timeline-guide"]' },
         { text: '중재안을 보고 ‘중재안에 동의’를 눌러요', note: '철수의 비서는 이의를 중재 비서에게 맡기도록 정해 두었어요. 철수도 곧 동의해요.', done: myDisputes.some((d) => d.agreedBy.includes(ME) || !OPEN.includes(d.status)), show: '[data-action="open-dispute"]' },

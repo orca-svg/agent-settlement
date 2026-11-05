@@ -43,6 +43,10 @@ export function fakeRate(currency, date) {
 // '11월 7일 – 9일'·'2026년 12월 30일 – 2027년 1월 1일' 같은 방 기간 글에서 여행 첫 사흘을 읽는다(당일·1박이면 마지막 날에 멈춘다).
 // 못 읽으면 오늘부터 사흘
 export const addDays = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+// 새 방 만들기에 미리 채우는 값: 이 이야기의 방 이름과 오늘부터 2박 3일(팀 점검 11/5: 매번 적지 않게).
+// preset이면 이름 칸을 누를 때 통째로 골라, 바로 타이핑하면 덮어쓴다
+export const roomDraft = (today) => ({ name: '오사카 2박 3일', start: today, end: addDays(today, 2), preset: true });
 const DAY_RE = /(?:(\d{4})년 )?(?:(\d{1,2})월 )?(\d{1,2})일/g;
 const iso = (y, m, d) => new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);
 export function tripDays(label, today) {

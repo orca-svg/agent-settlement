@@ -66,7 +66,7 @@ export function createRoomHtml(d, { busy = false, error = '', seedFailed = false
   if (!profile && !dev) return head + signInHtml('방을 만들려면 로그인해 주세요. 내 프로필 이름으로 방에 들어가요.');
   return `${head}
     <section class="group"><div class="list">
-      <label class="row field"><span class="grow">방 이름</span><input data-cf="name" value="${esc(d.name)}" placeholder="오사카 2박 3일" maxlength="40"></label>
+      <label class="row field"><span class="grow">방 이름</span><input data-cf="name" value="${esc(d.name)}" placeholder="오사카 2박 3일" maxlength="40"${d.preset ? ' data-select-all' : ''}></label>
       ${rangePickerHtml(d, { ...picker, today })}
       ${meRow(profile, dev)}
     </div></section>
@@ -161,8 +161,11 @@ function personRow(m, { room, me, avatar, expenses, armed, removeError }) {
 
 // 친구 초대 시트: 링크 한 줄(복사·공유 아이콘), 친구에게 보일 초대 화면, 지금 참여한 사람(참가하면 여기에 바로 보인다).
 // 링크가 아직 없으면 시트를 여는 순간 만든다(그동안 '만드는 중'). 새 링크 만들기는 이전 링크를 무효로 하는 보조 동작이라 맨 아래 글자 버튼.
-// 미리보기의 환율 정책 줄은 외화 방에만 있다(#55)
-export function inviteSheetHtml({ room, me, avatar, invite, copied = false, copyError = '', canShare = false, expenses = [], armed = null, removeError = null }) {
+// 미리보기의 환율 정책 줄은 외화 방에만 있다(#55).
+// 체험 데모에는 보낼 친구가 없다. 그래서 링크를 보내지 않아도 시트를 연 순간부터 친구 셋이 들어온다고 맨 위에 알린다(팀 점검 11/5)
+const HOW = '링크를 받은 친구가 아래 화면을 보고 Google로 로그인해 바로 참가해요. 카톡으로 보내거나 복사해서 건네주세요.';
+const DEMO_HOW = '체험 데모에서는 링크를 보내지 않아도 돼요. 지금부터 철수·영희·민수가 몇 초 간격으로 알아서 들어오고, 각자의 비서가 쓴 돈을 남겨요. 실제 방에서는 이 링크를 카톡으로 보내요.';
+export function inviteSheetHtml({ room, me, avatar, invite, copied = false, copyError = '', canShare = false, expenses = [], armed = null, removeError = null, demo = false }) {
   const p = isForeign(room) ? policyOf(room.policy) : null;
   const linkRow = invite
     ? `<div class="list"><div class="row invite-row"><span class="new-room-icon" aria-hidden="true">${ICON_LINK}</span>
@@ -173,7 +176,7 @@ export function inviteSheetHtml({ room, me, avatar, invite, copied = false, copy
       ${errorHtml(copyError)}<span class="sr-only" role="status">${copied ? '링크를 복사했어요' : ''}</span>`
     : '<div class="list"><div class="row invite-row" aria-busy="true"><span class="grow meta">링크를 만드는 중…</span></div></div>';
   const people = room.members.filter(active);
-  return `<p class="how">링크를 받은 친구가 아래 화면을 보고 Google로 로그인해 바로 참가해요. 카톡으로 보내거나 복사해서 건네주세요.</p>
+  return `<p class="how">${demo ? DEMO_HOW : HOW}</p>
     <section class="group">${linkRow}</section>
     <section class="group"><h3 class="group-label"><span>친구에게 이렇게 보여요</span></h3>
       <div class="invite-preview"><p class="eyebrow">초대받았어요</p><p class="invite-preview-title">${esc(room.name)}</p>

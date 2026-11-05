@@ -11,7 +11,7 @@ import { settingRow, settingsSection } from './settings-layout.js';
 const amountHtml = (d) => `<div class="set-amount"><input id="set-auto-accept" data-ag="autoAccept" value="${esc(d.autoAccept)}" inputmode="numeric" maxlength="9" placeholder="0" aria-describedby="agent-limit-note"><span aria-hidden="true">원</span></div>
   <p class="group-note" id="agent-limit-note">${esc(limitNote(d))}</p>`;
 
-// 체험 데모에서만: 숫자를 직접 넣지 않아도 한 번 눌러 가짜 계좌와 5만 원 한도를 채운다(task 3).
+// 체험 데모에서만: 숫자를 직접 넣지 않아도 한 번 눌러 가짜 계좌와 5만 원 한도를 채운다(task 2).
 // 한도는 데모 청구서보다 작아서 task 4에서 비서가 먼저 묻는다. 채운 값은 저장해야 들어간다
 export const DEMO_SAMPLE = { accountNo: '110-555-012345', autoAccept: '50000' };
 export const sampleFill = (ui, holder) => ({

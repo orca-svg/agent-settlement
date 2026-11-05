@@ -3,7 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDemoServer, DEMO_CONFIG } from '../public/demo/server.js';
-import { tripDays, fakeRate, friendExpenses } from '../public/demo/scenario.js';
+import { readFileSync } from 'node:fs';
+import { tripDays, fakeRate, friendExpenses, roomDraft } from '../public/demo/scenario.js';
 import { tasks, nextStep } from '../public/demo/guide.js';
 
 // boot.js의 snapshot()과 같은 모양: '나'가 마지막으로 만든 방 기준
@@ -62,6 +63,33 @@ test('원화 방에서도 친구들의 지출은 원으로 들어간다', () => 
   assert.ok(list.every(({ input }) => (input.items ?? [input]).every((x) => Number.isInteger(x.unit ?? x.amount))));
 });
 
+// 팀 점검(11/5): 방 이름·기간을 매번 적지 않게 미리 채운다. 오늘부터 2박 3일이라 Demo Market 날이면 금~일이다
+test('체험 데모의 새 방은 오사카 2박 3일, 오늘부터 사흘로 미리 채운다', () => {
+  assert.deepEqual(roomDraft('2026-11-06'), { name: '오사카 2박 3일', start: '2026-11-06', end: '2026-11-08', preset: true });
+  assert.deepEqual(tripDays('11월 6일 – 8일', '2026-11-06'), ['2026-11-06', '2026-11-07', '2026-11-08'], '친구들의 지출도 그 사흘에 들어간다');
+  const room = readFileSync(new URL('../public/room.js', import.meta.url), 'utf8');
+  assert.match(room, /authOptions\(\)\.demo[^\n]*roomDraft\(todayIso\(\)\)/, '방 화면은 체험 데모일 때만 미리 채운다');
+  assert.match(room, /inviteSheetHtml\(\{[^\n]*demo: authOptions\(\)\.demo/, '초대 시트에도 체험 데모인지 알린다');
+});
+
+// 팀 점검(11/5): 받을 계좌를 정한 뒤 지출을 남기는 편이 자연스럽다. 또 ＋를 누르고 '이걸 어떻게 보내지' 하고 나가지 않게,
+// 데모에서는 누르기만 하면 친구가 들어온다고 그 단계에서 바로 알린다
+test('task 순서와 안내: 계좌·비서 범위가 지출 남기기보다 먼저, ＋는 누르기만 하면 된다고 바로 알린다', () => {
+  const room = { id: 'r-1', members: [{ uid: 'me', name: '나' }], version: 1, fx: null };
+  const s = { room, invite: null, expenses: [], invoices: [{ to: 'me', status: 'accepted', decidedBy: 'agent', version: 1 }], disputes: [], transfers: [], location: [], agent: null };
+  const list = tasks(s);
+  assert.deepEqual(list.map((t) => t.title), ['여행 방 만들고 친구 초대하기', '내 계좌와 비서에게 맡길 범위 정하기', '지출 남기기', '맞지 않는 몫 바로잡기', '보내고 마무리하기']);
+  assert.match(list[0].steps[0].note, /미리 채워/);
+  const plus = list[0].steps.find((st) => st.show === '[data-action="open-invite"]');
+  assert.match(plus.text, /＋/);
+  assert.match(`${plus.text} ${plus.note}`, /알아서 들어와요/);
+  assert.match(plus.note, /보내지 않아도/);
+  // 다른 task를 번호로 가리키는 안내는 바뀐 순서를 따른다
+  const nOf = (re) => list.find((t) => re.test(t.title)).n;
+  assert.match(list[1].steps[0].note, new RegExp(`task ${nOf(/맞지 않는 몫/)}에서 비서가 먼저`));
+  assert.match(list[3].steps.find((st) => st.skipped).note, new RegExp(`task ${nOf(/맡길 범위/)}에서 한도를 낮추면`));
+});
+
 test('task 1~5: 방 만들기부터 이의·중재, 송금, 정산 완료와 나가기까지', async () => {
   const { ok, call, server, storage } = demo();
   const base = (id) => `/api/rooms/${encodeURIComponent(id)}`;
@@ -84,9 +112,18 @@ test('task 1~5: 방 만들기부터 이의·중재, 송금, 정산 완료와 나
   assert.ok(view.expenses.every((e) => e.date >= '2026-11-07' && e.date <= '2026-11-09'));
   list = tasks(await snapshot(server));
   assert.deepEqual(list.map((t) => t.done), [true, false, false, false, false], 'task 1이 끝났다');
-  assert.equal(list[2].steps[0].go.href, `account.html?from=${room.id}&sheet=agent#agent`, 'task 3의 내 계정 버튼은 돌아올 방을 싣는다(저장하고 뒤로를 누르면 방의 내 비서로)');
+  assert.equal(list[1].steps[0].go.href, `account.html?from=${room.id}&sheet=agent#agent`, 'task 2의 내 계정 버튼은 돌아올 방을 싣는다(저장하고 뒤로를 누르면 방의 내 비서로)');
 
-  // task 2. 영수증 사진을 읽으면 샘플 영수증 초안이 오고, 그대로 남긴 뒤 비서에게 나누기를 맡긴다
+  // task 2. 내 계좌와 비서 기본 설정, 이 방에서만 쓸 규칙
+  await ok('POST', '/api/me/agent/onboarding', { rules: { autoAccept: 50_000, sendWhen: 'now', onDispute: 'ask', notify: 'actions' } });
+  await ok('POST', '/api/me/payout', { bank: '토스뱅크', accountNo: '100000000001', holder: '나' });
+  await ok('POST', `${base(room.id)}/agent/rules`, { sendWhen: 'manual' });
+  view = await ok('GET', base(room.id));
+  assert.ok(view.myAgent, '방 화면에 내 비서 요약이 온다');
+  list = tasks(await snapshot(server));
+  assert.deepEqual(list.map((t) => t.done), [true, true, false, false, false], 'task 2가 끝났다');
+
+  // task 3. 영수증 사진을 읽으면 샘플 영수증 초안이 오고, 그대로 남긴 뒤 비서에게 나누기를 맡긴다
   const { draft } = await ok('POST', `${base(room.id)}/receipts/extract`, { image: { mimeType: 'image/jpeg', data: 'AAAA' } });
   assert.equal(draft.ok, true);
   assert.equal(draft.currency, 'JPY');
@@ -98,13 +135,8 @@ test('task 1~5: 방 만들기부터 이의·중재, 송금, 정산 완료와 나
   } });
   await ok('POST', `${base(room.id)}/expenses/${encodeURIComponent(expense.id)}/allocate`, {});
   await call('POST', `${base(room.id)}/expenses/${encodeURIComponent(expense.id)}/confirm-guesses`, {});
-
-  // task 3. 내 비서 기본 설정과 이 방에서만 쓸 규칙
-  await ok('POST', '/api/me/agent/onboarding', { rules: { autoAccept: 50_000, sendWhen: 'now', onDispute: 'ask', notify: 'actions' } });
-  await ok('POST', '/api/me/payout', { bank: '토스뱅크', accountNo: '100000000001', holder: '나' });
-  await ok('POST', `${base(room.id)}/agent/rules`, { sendWhen: 'manual' });
-  view = await ok('GET', base(room.id));
-  assert.ok(view.myAgent, '방 화면에 내 비서 요약이 온다');
+  list = tasks(await snapshot(server));
+  assert.deepEqual(list.map((t) => t.done), [true, true, true, false, false], 'task 3이 끝났다');
 
   // task 4. 청구서를 보내면 한도를 넘은 내 청구서는 비서가 나에게 묻는다. 타임라인으로 2차 바에 이의를 낸다
   await ok('POST', `${base(room.id)}/invoices/send`, {});

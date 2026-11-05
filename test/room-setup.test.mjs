@@ -118,6 +118,24 @@ test('초대 시트: 링크 줄(복사·공유 아이콘), 친구에게 보일 �
   assert.ok(!copied.includes('share-invite'), '공유를 못 하는 브라우저에는 공유 버튼이 없다');
 });
 
+// 팀 점검(11/5): 체험 데모에서 ＋를 누르고 '이걸 어떻게 보내지' 하고 나가지 않게, 링크를 보내지 않아도 그때부터 친구 셋이 들어온다고 시트에서 바로 알린다
+test('초대 시트: 체험 데모에서는 링크를 보내지 않아도 친구가 알아서 들어온다고 알린다', () => {
+  globalThis.location ??= { origin: 'http://localhost:4562', pathname: '/room.html' };
+  const me = { uid: 'me', name: '나' };
+  const room = { name: '오사카 2박 3일', dates: '11월 6일 – 8일', members: [me], fx: null, policy: 'actual', policyAgreedBy: ['me'], status: 'ready' };
+  const invite = { token: 'AbCdEfGhIjKlMnOpQrStUv_-', expiresAt: '2026-11-11T03:00:00Z' };
+  assert.match(inviteSheetHtml({ room, me, avatar: () => '', invite, demo: true }), /<p class="how">[^<]*보내지 않아도[^<]*철수·영희·민수가[^<]*<\/p>/);
+  assert.doesNotMatch(inviteSheetHtml({ room, me, avatar: () => '', invite }), /체험 데모|철수/, '실제 방에는 데모 안내가 없다');
+});
+
+// 체험 데모는 방 이름·기간을 미리 채운다. 미리 채운 이름은 누르면 통째로 골라, 바로 타이핑하면 덮어쓴다(깨지기 쉬운 기본값)
+test('방 만들기: 미리 채운 방 이름은 누르면 통째로 골라 바로 덮어쓸 수 있다', () => {
+  const preset = createRoomHtml({ ...empty, name: '오사카 2박 3일', start: '2026-11-06', end: '2026-11-08', preset: true }, { profile, dev: false, today: '2026-11-06' });
+  assert.match(preset, /<input data-cf="name" value="오사카 2박 3일"[^>]*data-select-all/);
+  assert.match(preset, /11월 6일 – 8일 · 2박 3일/, '기간도 채워져 있다');
+  assert.doesNotMatch(createRoomHtml(empty, { profile, dev: false }), /data-cf="name"[^>]*data-select-all/, '직접 적는 빈 칸은 고르지 않는다');
+});
+
 test('로그인 뒤 돌아갈 곳은 이 서비스의 방·초대 주소만 받는다', () => {
   assert.equal(nextAfterLogin('?next=room.html%3Froom%3Dr-1a2b3c4d'), 'room.html?room=r-1a2b3c4d');
   assert.equal(nextAfterLogin('?next=room.html%3Finvite%3DAbCdEfGhIjKlMnOpQrStUv_-'), 'room.html?invite=AbCdEfGhIjKlMnOpQrStUv_-');
