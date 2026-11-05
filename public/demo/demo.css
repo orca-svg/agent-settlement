@@ -162,16 +162,22 @@ button.dg-task-head:active { opacity: 0.7; }
 .seq-card-task { margin: 4px 0 18px; font-size: 0.9375rem; color: var(--label-2); letter-spacing: 0; }
 .seq-card-q { margin: 0 0 10px; font-size: 1.0625rem; font-weight: 600; }
 .seq-scale { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
-.seq-btn { appearance: none; border: 0; min-height: 48px; border-radius: 12px; background: var(--fill); color: var(--label); font: inherit; font-size: 1.0625rem; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; transition: transform 100ms ease-out; }
+.seq-btn { appearance: none; border: 0; min-height: 48px; border-radius: 12px; background: var(--fill); color: var(--label); font: inherit; font-size: 1.0625rem; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; transition: transform 100ms ease-out, background-color 120ms ease-out, color 120ms ease-out, opacity 200ms ease-out; }
 .seq-btn:hover:not(:disabled) { background: var(--tint-soft); color: var(--tint); }
 .seq-btn:active:not(:disabled) { transform: scale(0.95); }
-.seq-btn[aria-pressed="true"] { background: var(--tint); color: #fff; }
+/* 고른 칸: 그 자리에서 채워지고 살짝 커진다(눌렸다는 것을 색과 크기로). 나머지 칸은 흐려진다 */
+.seq-btn[aria-pressed="true"] { background: var(--tint); color: #fff; transform: scale(1.08); }
 .seq-btn:disabled:not([aria-pressed="true"]) { opacity: 0.4; cursor: default; }
 .seq-ends { display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.75rem; color: var(--label-2); letter-spacing: 0; }
 .seq-skip { appearance: none; border: 0; background: none; margin-top: 8px; padding: 10px 12px; font: inherit; font-size: 0.875rem; color: var(--label-2); cursor: pointer; }
 .seq-card-done { margin: 8px 0 0; padding: 10px 0; font-size: 0.875rem; font-weight: 600; color: var(--green); }
 .seq-root button:focus-visible { outline: 2px solid var(--tint); outline-offset: 2px; }
 @keyframes seq-in { from { transform: scale(0.96); opacity: 0; } to { transform: none; opacity: 1; } }
+/* 닫힐 때는 열릴 때의 반대로: 작아지며 흐려지고, 뒤의 어둠도 걷힌다 */
+.seq-root.closing .seq-card { animation: seq-out 200ms cubic-bezier(0.4, 0, 1, 1) forwards; }
+.seq-root.closing .seq-scrim { animation: seq-fade-out 200ms ease-in forwards; }
+@keyframes seq-out { from { transform: none; opacity: 1; } to { transform: scale(0.96); opacity: 0; } }
+@keyframes seq-fade-out { from { opacity: 1; } to { opacity: 0; } }
 
 /* 첫 화면: task 줄 오른쪽의 SEQ 결과. 모두의 평균은 크게, 내 점수·사람 수는 작게 */
 .seq-res { flex: none; display: grid; justify-items: end; gap: 2px; margin-left: 12px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }

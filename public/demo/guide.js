@@ -126,17 +126,17 @@ export function mountGuide({ snapshot, reset, seq = null }) {
   let html = '';
   let body = null;
   const rerender = () => { html = ''; render(); };
-  // SEQ 완료 카드. 화면 가운데에 띄우고 뒤를 어둡게 한다. 고른 칸을 잠깐 보인 뒤 닫는다
+  // SEQ 완료 카드. 화면 가운데에 띄우고 뒤를 어둡게 한다. 고르면 그 칸이 그 자리에서 눌린 채로 바뀌고, 잠시 뒤 닫힌다
   const card = document.createElement('div');
   card.className = 'seq-root';
   card.hidden = true;
   document.body.append(card);
   let cardHtml = '';
-  let chosen = null; // 방금 고른 { task, score }
+  let busy = false; // 고른 뒤 닫힐 때까지. 그동안은 카드를 다시 그리지 않는다
   let lastList = [];
   function renderCard(ask) {
-    const t = chosen ? lastList.find((x) => x.id === chosen.task) : ask;
-    const next = t ? seqCardHtml(t, chosen?.score ?? null) : '';
+    if (busy) return;
+    const next = ask ? seqCardHtml(ask) : '';
     if (next === cardHtml) return;
     const opening = !cardHtml && next;
     cardHtml = next;
@@ -144,22 +144,47 @@ export function mountGuide({ snapshot, reset, seq = null }) {
     card.hidden = !next;
     if (opening) card.querySelector('.seq-card')?.focus();
   }
+  // 카드를 새로 그리지 않고 고른 칸만 바꾼다(새로 그리면 여는 애니메이션이 다시 돌아 새 카드가 뜬 것처럼 보인다)
+  function markChosen(score) {
+    for (const b of card.querySelectorAll('.seq-btn')) {
+      b.disabled = true;
+      if (Number(b.dataset.score) === score) b.setAttribute('aria-pressed', 'true');
+    }
+    const done = document.createElement('p');
+    done.className = 'seq-card-done';
+    done.setAttribute('role', 'status');
+    done.textContent = `${score}점을 남겼어요`;
+    card.querySelector('.seq-skip')?.replaceWith(done);
+  }
+  // 닫히는 애니메이션(작아지며 흐려진다)이 끝나면 비운다. 움직임 줄이기면 바로 닫는다
+  function closeCard(then) {
+    card.classList.add('closing');
+    setTimeout(() => {
+      card.classList.remove('closing');
+      card.hidden = true;
+      card.innerHTML = '';
+      cardHtml = '';
+      busy = false;
+      then();
+    }, reduceMotion.matches ? 0 : 220);
+  }
   // 다섯 task를 다 끝냈고 더 물을 것이 없으면 첫 화면으로 돌아간다. 첫 화면이 task 줄마다 모두의 평균을 보여 준다
   function afterAnswer(sending) {
     if (!lastList.length || !lastList.every((t) => t.done) || seq.pending(lastList)) return rerender();
     Promise.race([sending, new Promise((r) => setTimeout(r, 1500))]).then(() => { location.href = '../'; });
   }
   function answer(btn) {
-    if (chosen || !btn) return;
-    if (btn.dataset.seq === 'skip') { seq.skip(btn.dataset.task); return afterAnswer(); }
-    chosen = { task: btn.dataset.task, score: Number(btn.dataset.score) };
-    const sending = seq.rate(chosen.task, chosen.score); // 보내는 동안 기다리지 않는다
-    renderCard(null);
-    setTimeout(() => { chosen = null; afterAnswer(sending); }, 700);
+    if (busy || !btn) return;
+    busy = true;
+    if (btn.dataset.seq === 'skip') { seq.skip(btn.dataset.task); return closeCard(() => afterAnswer()); }
+    const score = Number(btn.dataset.score);
+    const sending = seq.rate(btn.dataset.task, score); // 보내는 동안 기다리지 않는다
+    markChosen(score);
+    setTimeout(() => closeCard(() => afterAnswer(sending)), 800); // 눌린 칸과 '남겼어요'를 보인 뒤 닫는다
   }
   card.addEventListener('click', (e) => answer(e.target.closest('[data-seq]')));
   // Esc는 건너뛰기와 같다
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && cardHtml && !chosen) answer(card.querySelector('[data-seq="skip"]')); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && cardHtml && !busy) answer(card.querySelector('[data-seq="skip"]')); });
   // 접고 펼 때 본문 높이를 스프링으로 옮긴다(감쇠 1, 튀지 않게). 움직임 줄이기면 바로 바뀐다
   const height = new Spring(0, (h) => { if (body) body.style.height = `${Math.max(0, h)}px`; });
 

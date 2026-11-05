@@ -154,3 +154,15 @@ test('첫 화면은 SEQ를 다 끝낸 사람에게만 평균을 보이고, 데�
   assert.doesNotMatch(read('demo/boot.js'), /seq\.clear\(\)/, '처음부터 다시 해도 SEQ 답은 지우지 않는다');
   assert.match(read('demo/guide.js'), /location\.href = '\.\.\/'/, '마지막 답 뒤 첫 화면으로');
 });
+
+// 고르면 카드를 새로 그리지 않는다. 새로 그리면 여는 애니메이션이 다시 돌아 '새 카드가 뜬' 것처럼 보인다(11/5).
+// 고른 칸만 그 자리에서 눌린 색이 되고, 잠시 뒤 닫히는 애니메이션으로 사라진다
+test('SEQ 완료 카드: 고른 칸은 그 자리에서 눌린 채로 바뀌고, 잠시 뒤 닫히는 애니메이션으로 사라진다', () => {
+  const guide = readFileSync(new URL('../public/demo/guide.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../public/demo/demo.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(guide, /renderCard\(null\)/, '고른 뒤 카드를 다시 그리지 않는다');
+  assert.match(guide, /markChosen\(/);
+  assert.match(guide, /classList\.add\('closing'\)/);
+  assert.match(css, /\.seq-root\.closing \.seq-card \{[^}]*animation: seq-out/);
+  assert.match(css, /@keyframes seq-out/);
+});
