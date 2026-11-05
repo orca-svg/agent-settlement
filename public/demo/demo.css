@@ -179,12 +179,16 @@ button.dg-task-head:active { opacity: 0.7; }
 @keyframes seq-out { from { transform: none; opacity: 1; } to { transform: scale(0.96); opacity: 0; } }
 @keyframes seq-fade-out { from { opacity: 1; } to { opacity: 0; } }
 
-/* 첫 화면: task 줄 오른쪽의 SEQ 결과. 모두의 평균은 크게 강조색으로, 내 점수·사람 수는 작게 보조 글자색으로(색과 크기로 함께 나눈다) */
-.seq-res { flex: none; display: grid; justify-items: end; gap: 2px; margin-left: 12px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.seq-res-avg { font-size: 0.9375rem; font-weight: 600; color: var(--tint); }
+/* 첫 화면: task 줄 오른쪽의 SEQ 결과. 모두의 평균은 앱의 다른 상태 칩(.chip.tint)과 같은 캡슐로, 내 점수·사람 수는 작게 보조 글자색으로.
+   숫자가 이 줄의 주인공이라 칩을 한 단계 크게 하고, 작은 글자도 칩 바탕 위에서 4.5:1 넘게 읽히게 글자색만 한 단계 진하게(어두운 테마는 밝게) 한다 */
+:root { --seq-chip-ink: color-mix(in srgb, var(--tint) 72%, #000); }
+@media (prefers-color-scheme: dark) { :root { --seq-chip-ink: color-mix(in srgb, var(--tint) 68%, #fff); } }
+/* .chip.tint(클래스 둘)보다 앞서도록 클래스 둘로 고른다 */
+.chip.seq-chip { font-size: 0.8125rem; padding: 3px 10px; font-variant-numeric: tabular-nums; color: var(--seq-chip-ink); }
+@media (prefers-contrast: more) { .chip.seq-chip { box-shadow: inset 0 0 0 1px currentColor; } }
+.seq-res { flex: none; display: grid; justify-items: end; gap: 4px; margin-left: 12px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .seq-res-me { font-size: 0.75rem; color: var(--label-2); letter-spacing: 0; }
-.seq-total { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 10px 16px 0; font-size: 0.875rem; font-variant-numeric: tabular-nums; }
-.seq-total-avg { font-weight: 700; color: var(--tint); }
+.seq-total { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0; padding: 10px 16px 0; font-size: 0.875rem; font-variant-numeric: tabular-nums; }
 
 /* '보여 주기': 그 버튼 둘레에 두꺼운 테두리를 두 번 퍼뜨린다(색만이 아니라 두께로 가리킨다) */
 .dg-spot { outline: 3px solid var(--tint) !important; outline-offset: 3px; animation: dg-pulse 1.1s ease-out 2; }

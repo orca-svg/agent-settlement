@@ -74,10 +74,10 @@ export function seqCardHtml(t, chosen = null) {
 const one = (x) => (x == null ? '–' : x.toFixed(1));
 const avgOf = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
-// 첫 화면의 task 줄 오른쪽: 모두의 평균(크게)과 내 점수·사람 수(작게). 평균을 불러오기 전에도 내 점수는 보인다
+// 첫 화면의 task 줄 오른쪽: 모두의 평균(앱의 tint 칩)과 내 점수·사람 수(작게). 평균을 불러오기 전에도 내 점수는 보인다
 export function seqRowHtml(id, mine, summary) {
   const all = summary?.tasks?.[id];
-  return `<span class="seq-res"><span class="seq-res-avg">평균 ${summary ? one(all?.avg) : '…'}</span><span class="seq-res-me">나 ${mine[id] ?? '–'}${summary ? ` · ${all?.n ?? 0}명` : ''}</span></span>`;
+  return `<span class="seq-res"><span class="chip tint seq-chip">평균 ${summary ? one(all?.avg) : '…'}</span><span class="seq-res-me">나 ${mine[id] ?? '–'}${summary ? ` · ${all?.n ?? 0}명` : ''}</span></span>`;
 }
 
 // 첫 화면의 task 목록 아래: 전체 평균, 내 평균, 응답 수, 그리고 척도의 뜻
@@ -87,6 +87,6 @@ export function seqTotalHtml(ids, mine, summary, status) {
   const note = status === 'loading' ? '<p class="group-note" role="status">평균을 불러오는 중이에요…</p>'
     : status === 'error' ? '<p class="group-note" role="status">모두의 평균을 불러오지 못했어요. <button type="button" class="text-btn" data-seq="retry">다시 불러오기</button></p>'
     : '';
-  return `<p class="seq-total"><span class="seq-total-avg">전체 평균 ${summary ? one(o?.avg) : '…'}</span><span>내 평균 ${one(myAvg)}</span>${summary ? `<span>응답 ${o?.n ?? 0}개</span>` : ''}</p>
+  return `<p class="seq-total"><span class="chip tint seq-chip">전체 평균 ${summary ? one(o?.avg) : '…'}</span><span>내 평균 ${one(myAvg)}</span>${summary ? `<span>응답 ${o?.n ?? 0}개</span>` : ''}</p>
     <p class="group-note">SEQ · 1 매우 어려움 ~ 7 매우 쉬움. 모두의 평균은 체험한 사람들이 task마다 남긴 점수예요.</p>${note}`;
 }

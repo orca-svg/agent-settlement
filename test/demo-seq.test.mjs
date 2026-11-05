@@ -182,11 +182,16 @@ test('SEQ 완료 카드: 화면 가운데 대화상자로 방금 끝낸 task를 
   assert.match(chosen, /role="status"[^>]*>6점을 남겼어요</);
 });
 
-// 팀 요청(11/6): 첫 화면의 평균은 내 점수·사람 수와 다른 색으로 띄운다. '평균' 글자도 그대로 둬 색에만 기대지 않는다
-test('첫 화면 결과: 모두의 평균과 전체 평균은 강조색, 내 점수·사람 수는 보조 글자색', () => {
+// 팀 요청(11/6): 첫 화면의 평균은 앱의 다른 상태 칩(.chip.tint)과 같은 캡슐로 띄운다. '평균' 글자도 그대로 둬 색에만 기대지 않는다.
+// 작은 글자라 칩 바탕 위에서도 읽히게 글자색만 한 단계 진하게(어두운 테마는 밝게) 한다
+test('첫 화면 결과: 모두의 평균과 전체 평균은 앱의 tint 칩, 내 점수·사람 수는 보조 글자색', () => {
+  const summary = { tasks: { room: { n: 4, avg: 6 } }, overall: { n: 5, avg: 5.4 } };
+  assert.match(seqRowHtml('room', { room: 6 }, summary), /<span class="chip tint seq-chip">평균 6\.0<\/span>/);
+  assert.match(seqTotalHtml(['room'], { room: 6 }, summary, 'ready'), /<span class="chip tint seq-chip">전체 평균 5\.4<\/span>/);
   const css = readFileSync(new URL('../public/demo/demo.css', import.meta.url), 'utf8');
-  assert.match(css, /\.seq-res-avg \{[^}]*color: var\(--tint\)/);
-  assert.match(css, /\.seq-total-avg \{[^}]*color: var\(--tint\)/);
+  assert.match(css, /\.chip\.seq-chip \{[^}]*color: var\(--seq-chip-ink\)/, '.chip.tint보다 앞서는 선택자');
+  assert.match(css, /--seq-chip-ink: color-mix\(in srgb, var\(--tint\) \d+%, #000\)/, '밝은 테마는 진하게');
+  assert.match(css, /prefers-color-scheme: dark\)[^{]*\{[^}]*--seq-chip-ink: color-mix\(in srgb, var\(--tint\) \d+%, #fff\)/, '어두운 테마는 밝게');
   assert.match(css, /\.seq-res-me \{[^}]*color: var\(--label-2\)/);
 });
 
