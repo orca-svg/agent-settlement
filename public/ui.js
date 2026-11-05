@@ -106,17 +106,16 @@ export function proposalLinesHtml(exp, alloc, { draft = {}, editable = false, na
   return [...lines.filter((l) => l.moved).map((l) => l.html), same.length ? `<p class="line-group">그대로인 줄 ${same.length}개</p>` : '', ...same.map((l) => l.html)].join('');
 }
 
-// 사람별 몫을 지금·중재안·차이 세 칸으로 적는다(사용자 테스트 11/5: '₩50,605 → ₩101,210' 화살표의 뜻을 몰랐다).
-// 차이는 부호와 '더 내요·덜 내요'로 말해 색에 기대지 않는다. rows: [{ uid, now, after, role? }], label: 둘째 칸 이름
+// 사람별 몫(사용자 테스트 11/5: '₩50,605 → ₩101,210' 화살표의 뜻을 몰랐다). 화살표 대신 이름 아래에 '지금 ₩…'을,
+// 오른쪽에 바뀐 몫과 차이를 적는다. 차이는 부호와 '더 내요·덜 내요'로 말해 색에 기대지 않는다.
+// 휴대폰 폭에서도 세 칸 표처럼 깨지지 않게 줄마다 두 줄로 쌓는다. rows: [{ uid, now, after, role? }], label: 바뀐 몫의 이름
 export function sharesDiffHtml(rows, { nameOf, avatar, label = '중재안' }) {
-  const head = `<div class="share-row share-head" aria-hidden="true"><span class="grow"></span><span>지금</span><span>${esc(label)}</span><span>차이</span></div>`;
-  return head + rows.map(({ uid, now, after, role = '' }) => {
+  return rows.map(({ uid, now, after, role = '' }) => {
     const d = after - now;
-    const say = d === 0 ? '그대로' : `${won(Math.abs(d))} ${d > 0 ? '더 내요' : '덜 내요'}`;
-    const delta = d === 0 ? '<span class="delta same">그대로</span>'
-      : `<span class="delta ${d > 0 ? 'up' : 'down'}"><b>${d > 0 ? '+' : '−'}${won(Math.abs(d))}</b><small>${d > 0 ? '더 내요' : '덜 내요'}</small></span>`;
-    return `<div class="share-row" role="group" aria-label="${esc(`${nameOf(uid)}: 지금 ${won(now)}, ${label} ${won(after)}, ${say}`)}">${avatar(uid)}<span class="grow">${esc(nameOf(uid))}${role ? `<small>${esc(role)}</small>` : ''}</span>
-      <span class="num">${won(now)}</span><span class="num next">${won(after)}</span>${delta}</div>`;
+    const say = d === 0 ? '그대로' : `${d > 0 ? '+' : '−'}${won(Math.abs(d))} ${d > 0 ? '더 내요' : '덜 내요'}`;
+    return `<div class="row share-row" role="group" aria-label="${esc(`${nameOf(uid)}: 지금 ${won(now)}, ${label} ${won(after)}, ${say}`)}">${avatar(uid)}
+      <span class="grow"><span class="title">${esc(nameOf(uid))}${role ? `<small>${esc(role)}</small>` : ''}</span><span class="meta" style="display:block">지금 ${won(now)}</span></span>
+      <span class="share-end"><span class="amount num">${won(after)}</span><span class="delta ${d > 0 ? 'up' : d < 0 ? 'down' : 'same'}">${say}</span></span></div>`;
   }).join('');
 }
 

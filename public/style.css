@@ -794,22 +794,15 @@ button.row:active { background: var(--fill); }
 .line-group { margin: 0; padding: 10px 16px 2px; font-size: 0.75rem; color: var(--label-2); border-top: 0.5px solid var(--sep); }
 .line-group ~ .line { opacity: 0.6; }
 .line-group + .line { border-top: 0; }
-/* 사람별 몫: 지금 | 중재안 | 차이 세 칸. 숫자는 폭이 같아 줄끼리 자리가 맞는다. 차이는 부호·'더 내요/덜 내요'로 말하고 색은 거든다 */
-.shares .share-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 5.5em 5.5em 6.5em; align-items: center; gap: 10px; padding: 10px 16px; font-variant-numeric: tabular-nums; }
-.shares .share-row + .share-row { border-top: 0.5px solid var(--sep); }
-.shares .share-head { padding-block: 8px 6px; font-size: 0.75rem; color: var(--label-2); }
-.shares .share-head span:not(.grow) { text-align: right; }
-.shares .share-head .grow { grid-column: 1 / 3; }
-.shares .grow small { display: block; font-size: 0.75rem; color: var(--label-2); }
-.shares .num { text-align: right; font-size: 0.9375rem; }
-.shares .num.next { font-weight: 600; }
-.delta { display: grid; justify-items: end; line-height: 1.25; }
-.delta b { font-weight: 600; font-size: 0.9375rem; }
-.delta small { font-size: 0.6875rem; color: var(--label-2); }
-.delta.up b { color: var(--orange); }
-.delta.down b { color: var(--green); }
-.delta.same { color: var(--label-3); font-size: 0.8125rem; }
-@media (max-width: 420px) { .shares .share-row { grid-template-columns: auto minmax(0, 1fr) 4.8em 4.8em 5.8em; gap: 6px; padding-inline: 12px; } }
+/* 사람별 몫: 이름 아래에 지금 몫, 오른쪽에 바뀐 몫과 차이. 차이는 부호·'더 내요/덜 내요'로 말하고 색은 거든다 */
+.shares .row { --inset: 56px; }
+.shares .title small { margin-left: 6px; font-size: 0.75rem; font-weight: 400; color: var(--label-2); }
+.share-end { display: grid; justify-items: end; gap: 2px; font-variant-numeric: tabular-nums; }
+.share-end .amount { font-weight: 600; }
+.delta { font-size: 0.75rem; font-weight: 600; }
+.delta.up { color: var(--orange); }
+.delta.down { color: var(--green); }
+.delta.same { color: var(--label-3); font-weight: 400; }
 
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 @media (max-width: 520px) { .split { grid-template-columns: 1fr; } }

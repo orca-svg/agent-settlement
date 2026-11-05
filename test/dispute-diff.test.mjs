@@ -38,11 +38,11 @@ test('고친 줄도 지금 배분과 견줘 더해진 사람을 적는다', () =
   assert.match(html, /내가 고친 줄/);
 });
 
-test('사람별 몫은 지금·중재안·차이를 따로 적고, 차이는 부호와 글로 말한다', () => {
+test('사람별 몫은 이름 아래에 지금 몫, 오른쪽에 바뀐 몫과 차이를 적고, 차이는 부호와 글로 말한다', () => {
   const html = sharesDiffHtml([{ uid: 'me', now: 50_605, after: 40_000, role: '이의 낸 사람' }, { uid: 'cs', now: 40_000, after: 50_605 }, { uid: 'ms', now: 1_000, after: 1_000 }], opts);
-  assert.match(html, /지금[\s\S]*중재안[\s\S]*차이/, '열 이름');
-  assert.match(html, /나[\s\S]*이의 낸 사람[\s\S]*₩50,605[\s\S]*₩40,000[\s\S]*−₩10,605[\s\S]*덜 내요/);
-  assert.match(html, /\+₩10,605[\s\S]*더 내요/);
+  assert.match(html, /나[\s\S]*이의 낸 사람[\s\S]*지금 ₩50,605[\s\S]*₩40,000[\s\S]*−₩10,605 덜 내요/);
+  assert.match(html, /\+₩10,605 더 내요/);
+  assert.match(html, /aria-label="나: 지금 ₩50,605, 중재안 ₩40,000, −₩10,605 덜 내요"/, '읽어 주는 글도 같은 말');
   assert.match(html, /그대로/);
   assert.doesNotMatch(html, /→/, '뜻을 몰랐던 화살표는 쓰지 않는다');
 });
