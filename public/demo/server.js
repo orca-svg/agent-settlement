@@ -54,7 +54,7 @@ function load(store, storage) {
   }
 }
 
-// 처음 열면 나와 친구 셋의 프로필, 친구들의 비서 설정만 있다. 방은 방문자가 만든다(task 1). 내 비서는 방문자가 정한다(task 3)
+// 처음 열면 나와 친구 셋의 프로필, 친구들의 비서 설정만 있다. 방은 방문자가 만든다(task 1). 내 비서는 방문자가 정한다(task 2)
 async function seed(store, clock) {
   await store.put('users', ME_PROFILE);
   for (const f of FRIENDS) {

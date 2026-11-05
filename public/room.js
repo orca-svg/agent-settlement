@@ -1503,7 +1503,7 @@ const agentPanel = createAgentPanel({
 // 친구 초대(#4): 참여자 줄 끝 + 버튼으로 연다. 누가 참가하면 방이 다시 그려지면서 이 시트의 참여자 목록도 바로 바뀐다
 const inviteSheet = () => ({
   title: '친구 초대',
-  html: inviteSheetHtml({ room: state.data.room, me: state.data.me, avatar, invite: setup.invite, copied: setup.copied, copyError: setup.copyError, canShare: !!navigator.share, expenses: state.data.expenses, armed: setup.armed, removeError: setup.removeError }),
+  html: inviteSheetHtml({ room: state.data.room, me: state.data.me, avatar, invite: setup.invite, copied: setup.copied, copyError: setup.copyError, canShare: !!navigator.share, expenses: state.data.expenses, armed: setup.armed, removeError: setup.removeError, demo: authOptions().demo }),
 });
 // 이 방에서 나가기(#55). 남은 돈이 있는지는 방 화면이 가진 지출·청구서·이의·송금으로 서버와 같은 규칙(public/leave.js)으로 본다
 const leaveSheet = () => ({
@@ -1876,6 +1876,7 @@ document.addEventListener('keydown', (e) => {
 // 입력칸은 다시 그리지 않고 값만 기억한다(타이핑 중 초점을 잃지 않게)
 document.addEventListener('input', (e) => {
   if (e.target.dataset?.cf) setup.create[e.target.dataset.cf] = e.target.value;
+  if (e.target.dataset?.cf === 'name' && setup.create.preset) { setup.create.preset = false; delete e.target.dataset.selectAll; } // 고쳐 적은 이름은 다시 누를 때 통째로 고르지 않는다
   if (e.target.dataset?.claim !== undefined && state.disputeDraft?.picks) state.disputeDraft.picks[e.target.dataset.claim] = e.target.value;
   if (e.target.dataset?.rd !== undefined && state.rejectDraft) state.rejectDraft.reason = e.target.value;
   if (e.target.dataset?.pf && state.payoutDraft) state.payoutDraft[e.target.dataset.pf] = e.target.value;
@@ -1966,7 +1967,11 @@ try {
     // 방 만들기·초대 화면은 이 자리에서 로그인한다. 로그인하면 내 프로필(이름·색)을 불러와 다시 그린다
     await loadProfile();
     if (inviteToken) await loadInvite();
-    else render();
+    else {
+      // 체험 데모는 방 이름·기간을 데모 이야기대로 미리 채운다(팀 점검 11/5). 실제 방은 빈 칸에서 시작한다
+      if (authOptions().demo) Object.assign(setup.create, (await import('./demo/scenario.js')).roomDraft(todayIso()));
+      render();
+    }
   }
   const sessionUid = currentUid();
   onSessionChange(user => {
