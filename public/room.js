@@ -1076,11 +1076,11 @@ function invoiceLinesHtml(inv, dd, motion = '') {
   const found = dd?.found;
   const picked = dd ? items.filter(({ exp }) => exp.id in dd.picks) : [];
   const located = picked.filter(({ exp }) => found?.[exp.id]).length;
+  const noLines = picked.filter(({ exp }) => !exp.items?.length).length; // 중재 비서가 줄마다 나눌 수 없는 지출
   const line = ({ exp, mine }) => {
     const on = Boolean(dd) && exp.id in dd.picks;
     const f = found?.[exp.id];
-    const itemless = dd && !exp.items?.length ? ' · 영수증 줄이 없어 낸 사람이 직접 고쳐요' : ''; // 중재 비서가 줄마다 나눌 수 없는 지출
-    const body = `${tile(exp.kind)}<span class="grow"><span class="title">${esc(exp.title)}</span><span class="meta" style="display:block">${esc(nameOf(exp.payer))} 냄 · ${money(amountOf(exp), exp.currency)}${f ? ` · <span class="found">${esc(f.result.leftAt)}에 떠남</span>` : ''}${itemless}</span></span>
+    const body = `${tile(exp.kind)}<span class="grow"><span class="title">${esc(exp.title)}</span><span class="meta" style="display:block">${esc(nameOf(exp.payer))} 냄 · ${money(amountOf(exp), exp.currency)}${f ? ` · <span class="found">${esc(f.result.leftAt)}에 떠남</span>` : ''}</span></span>
         ${mine == null ? '' : `<span class="end"><span class="amount">${won(mine)}</span></span>`}`;
     if (!dd) return `<div class="row">${body}</div>`;
     const claim = on ? `<div class="row claim-row"><textarea data-claim="${esc(exp.id)}" rows="2" maxlength="200" aria-label="‘${esc(exp.title)}’에서 맞지 않는 점" placeholder="맞지 않는 점(비워도 보낼 수 있어요)">${esc(dd.picks[exp.id])}</textarea></div>` : '';
@@ -1088,6 +1088,7 @@ function invoiceLinesHtml(inv, dd, motion = '') {
     return `<button type="button" class="row pickable" data-action="dispute-toggle" data-id="${esc(exp.id)}" aria-pressed="${on}">${mark}${body}</button>${claim}`;
   };
   const note = dd ? `<p class="group-note">고른 지출은 중재 비서가 양쪽 근거로 다시 나눠요. 떠난 시각이 있으면 그 뒤에 시킨 메뉴는 내 몫에서 빠져요.</p>
+      ${noLines ? `<p class="group-note">고른 지출 중 ${noLines}건은 영수증 줄이 없어 중재 비서가 나눌 수 없어요. 낸 사람이 함께한 사람이나 금액을 고쳐요.</p>` : ''}
       ${located ? `<p class="group-note">고른 지출 중 ${located}건에는 타임라인에서 찾은 떠난 시각 한 줄이 이의 상대와 중재 비서에게 가요. 파일·좌표·장소 이름은 보내지 않고, 7일 뒤 지워요.</p>` : ''}` : '';
   const end = dd ? (picked.length ? `${picked.length}건 고름` : '눌러서 골라요') : rows.length ? `합계 ${won(inv.owed)}` : '';
   return `<section class="group" id="invoice-lines"><h3 class="group-label"><span>${rows.length ? '내 몫이 들어간 지출' : '함께한 지출'} ${items.length}건</span><span>${end}</span></h3>
@@ -1544,12 +1545,14 @@ async function agentAct(name, d) {
     state.disputeDraft = { picks: {}, found: null, scan: null };
     const visits = savedVisits(); // 이 정산에 이미 올려 둔 타임라인이 있으면 바로 찾아 골라 둔다
     if (visits) scanDispute(visits);
-    // 내 몫 목록이 그 자리에서 고르는 목록이 된다. 동그라미가 들어오는 것이 보이게 목록을 시트 위로 올리고 첫 줄에 초점을 둔다
+    // 내 몫 목록이 그 자리에서 고르는 목록이 된다. 동그라미가 들어오는 것이 보이게 목록을 시트 위로 올리고,
+    // 키보드로 눌렀으면 첫 줄에 초점을 둔다(손가락·마우스로 눌렀을 때 초점 테두리가 남지 않게)
+    const keyboard = document.activeElement?.matches?.(':focus-visible');
     state.linesMotion = reduceMotion.matches ? '' : 'enter';
     renderSheet();
     state.linesMotion = '';
     $('#invoice-lines')?.scrollIntoView({ block: 'start', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
-    $('#invoice-lines .pickable')?.focus({ preventScroll: true });
+    if (keyboard) $('#invoice-lines .pickable')?.focus({ preventScroll: true });
   } else if (name === 'cancel-dispute') {
     // 그만두면 동그라미가 들어온 길로 나간 뒤 원래 청구서로 돌아간다. 고른 것은 버린다
     state.disputeDraft = null;
