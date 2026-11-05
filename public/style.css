@@ -753,6 +753,20 @@ button.row:active { background: var(--fill); }
   line-height: 1.45;
 }
 .claim-row textarea::placeholder { color: var(--label-3); }
+/* 동의가 끝난 환율 정책: 한 줄로 접고 줄 전체를 눌러 펼친다(iOS 목록의 펼침 줄). 화살표는 펼치면 아래를 향하고,
+   높이는 grid 0fr→1fr로 열어 내용 높이를 재지 않아도 된다. 전환은 지금 값에서 시작하므로 중간에 다시 누르면 그 자리에서 되돌아간다.
+   곡선은 감쇠 1.0 스프링(반응 0.35초)에 가까운 감속 곡선 */
+.row.disclosure .chip { margin-left: auto; }
+.row.disclosure .chev { flex: none; color: var(--label-3); transition: transform 350ms cubic-bezier(0.2, 0.9, 0.25, 1); }
+.row.disclosure[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.collapsible { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 350ms cubic-bezier(0.2, 0.9, 0.25, 1), opacity 220ms ease; }
+.collapsible.open { grid-template-rows: 1fr; opacity: 1; }
+.collapsible-inner { min-height: 0; overflow: hidden; }
+.collapsible-inner > .row:first-child::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 0.5px; background: var(--sep); }
+@media (prefers-reduced-motion: reduce) {
+  .collapsible { transition: opacity 150ms ease; }
+  .row.disclosure .chev { transition: none; }
+}
 .big { padding: 6px 4px 18px; }
 .big .amt { font-size: 2.125rem; font-weight: 700; letter-spacing: -0.025em; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .big .sub { color: var(--label-2); font-size: 0.9375rem; margin-top: 4px; letter-spacing: 0; }

@@ -1,6 +1,6 @@
 // 방 만들기·참가하기·환율 정책 동의·초대 링크 화면(#4), 나가기·내보내기(#55). HTML만 만들고, 상태와 서버 호출은 room.js가 한다.
 // 환율 정책은 외화로 쓴 돈을 정산하는 방에만 보이고 묻는다(#55). 원화 방에는 정책 칸·동의 버튼·안내가 없다.
-import { esc, chip, avatarHtml, GOOGLE_G, ICON_LINK, ICON_COPY, ICON_SHARE, ICON_DONE } from './ui.js';
+import { esc, chip, avatarHtml, GOOGLE_G, ICON_LINK, ICON_COPY, ICON_SHARE, ICON_DONE, CHEVRON } from './ui.js';
 import { POLICIES } from './data.js';
 import { active, isForeign } from './core.js';
 import { CURRENCIES, unitOf } from './currencies.js';
@@ -102,25 +102,40 @@ export function joinHtml(inv, d, { busy = false, error = '', profile = null, dev
       <div class="actions"><button class="btn" data-action="join-room" ${busy ? 'disabled' : ''}>${busy ? '들어가는 중…' : '동의하고 참가하기'}</button></div></section>`;
 }
 
-// 방 화면: 환율 정책과 초대 링크. 방을 만들 때 이미 정한 정책이라, 모두 동의했으면 한 줄과 '바꾸기'만 둔다.
+// 방 화면: 환율 정책. 방을 만들 때 이미 정한 정책이라, 모두 동의했으면 한 줄로 접는다(아래 setupHtml).
 // 아직 동의하지 않은 사람이 있을 때만 누가 남았는지 펼친다. 안내는 경고가 아니므로 주황 상자 대신 보통 글로 쓴다
 // 링크 줄 오른쪽의 원형 아이콘 버튼. 보이는 원은 작게, 누르는 자리는 44px(애플 최소 크기)로 둔다
 const iconBtn = (action, label, svg, done = false) => `<button type="button" class="icon-btn${done ? ' done' : ''}" data-action="${action}" aria-label="${label}" title="${label}"><span>${svg}</span></button>`;
 
-export function setupHtml({ room, me, avatar, policyEdit, error }) {
+// 모두 동의한 정책은 끝난 일이라 한 줄로 접는다(사용자 테스트 11/5: "처음에만 보였으면", "모두 동의함 정도로").
+// 줄 전체가 누르는 자리이고(더보기 버튼을 따로 두지 않는다), 펼치면 설명·동의한 사람·바꾸기가 같은 카드 안에서 열린다.
+// policyOpen: 사람이 펼쳐 둔 상태(다시 그려도 지킨다). 바꾸는 중(policyEdit)에는 늘 펼쳐 둔다
+export function setupHtml({ room, me, avatar, policyEdit, policyOpen = false, error }) {
   if (!isForeign(room)) return error ? `<section class="group">${errorHtml(error)}</section>` : ''; // 원화 방에는 환율 정책 칸이 없다(#55)
   const settling = hasStarted(room);
   const p = policyOf(room.policy);
   const waiting = notAgreed(room);
   const iAgreed = (room.policyAgreedBy ?? []).includes(me.uid);
-  const people = waiting.length ? `<div class="list" style="margin-top:8px">${room.members.filter(active).map((m) => `<div class="row">${avatar(m.uid)}<span class="grow">${esc(m.name)}${m.uid === me.uid ? ' (나)' : ''}</span>
-      ${(room.policyAgreedBy ?? []).includes(m.uid) ? chip('동의함', 'ok') : chip('동의 전')}</div>`).join('')}</div>` : '';
+  const memberRows = room.members.filter(active).map((m) => `<div class="row">${avatar(m.uid)}<span class="grow">${esc(m.name)}${m.uid === me.uid ? ' (나)' : ''}</span>
+      ${(room.policyAgreedBy ?? []).includes(m.uid) ? chip('동의함', 'ok') : chip('동의 전')}</div>`).join('');
   const change = settling ? '' : `<button class="btn plain sm" data-action="edit-policy">${policyEdit ? '그만 바꾸기' : '바꾸기'}</button>`;
+  const picker = policyEdit && !settling ? `<p class="group-note">바꾸면 모두 다시 동의해야 해요.</p>${policyPicker(room.policy, 'set-policy')}` : '';
+  if (!waiting.length) {
+    const open = Boolean(policyOpen || policyEdit);
+    return `<section class="group"><h2 class="group-label"><span>환율 정책 · ${esc(unitOf(room.fx.currency))}</span><span>${settling ? '정산을 시작해서 바꿀 수 없어요' : ''}</span></h2>
+    <div class="list"><button type="button" class="row disclosure" data-action="toggle-policy" aria-expanded="${open}" aria-controls="policy-detail"><span class="grow"><span class="title">${esc(p.label)}</span></span>${chip('모두 동의함', 'ok')}${CHEVRON}</button>
+      <div class="collapsible${open ? ' open' : ''}" id="policy-detail"${open ? '' : ' inert'}><div class="collapsible-inner">
+        <div class="row"><span class="grow"><span class="meta" style="display:block">${esc(p.desc)}</span></span>${change}</div>
+        ${memberRows}</div></div></div>
+    ${picker}
+    ${errorHtml(error)}</section>`;
+  }
+  const people = `<div class="list" style="margin-top:8px">${memberRows}</div>`;
   const policy = `<section class="group"><h2 class="group-label"><span>환율 정책 · ${esc(unitOf(room.fx.currency))}</span><span>${settling ? '정산을 시작해서 바꿀 수 없어요' : waiting.length ? `${waiting.length}명 동의 전` : ''}</span></h2>
     <div class="list"><div class="row"><span class="grow"><span class="title">${esc(p.label)}</span><span class="meta" style="display:block">${esc(p.desc)}</span></span>${change}</div></div>
     ${people}
     ${!settling && !iAgreed ? '<div class="actions" style="margin-top:10px"><button class="btn" data-action="agree-policy">이 정책에 동의해요</button></div>' : ''}
-    ${policyEdit && !settling ? `<p class="group-note">바꾸면 모두 다시 동의해야 해요.</p>${policyPicker(room.policy, 'set-policy')}` : ''}
+    ${picker}
     ${errorHtml(error)}</section>`;
   return policy;
 }
