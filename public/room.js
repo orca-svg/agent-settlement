@@ -22,7 +22,7 @@ const roomId = new URLSearchParams(location.search).get('room');
 const inviteToken = roomId ? null : new URLSearchParams(location.search).get('invite');
 // #4 방 만들기·참가하기·정책 동의·초대 링크 화면 상태. 방에 보일 이름·색은 입력받지 않고 내 프로필(profile)을 쓴다
 // foreign: 외화도 쓰는 방인지(#55). 그때만 fxCurrency·policy를 보낸다. armed·removeError: 초대 시트의 내보내기, leaving·leaveError: 나가기 시트
-const setup = { create: { name: '', start: '', end: '', foreign: false, fxCurrency: 'JPY', policy: 'actual' }, picker: { open: false, month: '', focus: '', entering: false }, join: {}, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, copied: false, busy: false, error: '', armed: null, removeError: null, leaving: false, leaveError: '' };
+const setup = { create: { name: '', start: '', end: '', foreign: false, fxCurrency: 'JPY', policy: 'actual' }, picker: { open: false, month: '', focus: '', entering: false }, join: {}, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, policyOpen: false, copied: false, busy: false, error: '', armed: null, removeError: null, leaving: false, leaveError: '' };
 // 로그인이 없는 개발용 서버에서만: 처음 방을 만들거나 참가할 때 이 브라우저용 uid를 하나 만든다. 배포에서는 Google 로그인 신원을 쓴다
 const ensureUid = () => currentUid() || (authOptions().dev ? (setCurrentUid(`u-${crypto.randomUUID().slice(0, 8)}`), currentUid()) : null);
 const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null, disputeDone: null, rejectDraft: null, reviseDraft: null, sendBlocked: false, announceBlocked: false, focusLine: null };
@@ -423,7 +423,7 @@ function closePhoto() {
 const lineSum = (items) => items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit) || 0), 0);
 
 // #4 방 만들기·참가하기·정책·초대. 복사·공유는 클릭 처리기 안에서 바로 불러야 브라우저가 허락한다
-const SETUP_ACTIONS = new Set(['open-invite', 'range-toggle', 'range-day', 'range-month', 'range-preset', 'range-clear', 'cf-policy', 'cf-foreign', 'sign-in', 'create-room', 'join-room', 'agree-policy', 'edit-policy', 'set-policy', 'make-invite', 'copy-invite', 'share-invite', 'open-leave', 'leave-room', 'remove-member']);
+const SETUP_ACTIONS = new Set(['open-invite', 'range-toggle', 'range-day', 'range-month', 'range-preset', 'range-clear', 'cf-policy', 'cf-foreign', 'sign-in', 'create-room', 'join-room', 'agree-policy', 'edit-policy', 'toggle-policy', 'set-policy', 'make-invite', 'copy-invite', 'share-invite', 'open-leave', 'leave-room', 'remove-member']);
 // 기간 고르기(방 만들기 폼). 화면을 통째로 다시 그리므로, 방금 누른 자리로 초점을 돌려놓아 키보드로 이어 고를 수 있게 한다
 function rangeAct(name, d) {
   const p = setup.picker;
@@ -519,6 +519,17 @@ async function setupAct(name, d) {
   if (name === 'edit-policy') {
     setup.policyEdit = !setup.policyEdit;
     return render();
+  }
+  // 접힌 환율 정책: 다시 그리지 않고 그 자리에서 펼친다. 그래야 높이·화살표가 지금 모습에서 이어 움직이고, 중간에 다시 누르면 그 자리에서 되돌아간다
+  if (name === 'toggle-policy') {
+    setup.policyOpen = !setup.policyOpen;
+    document.querySelector('[data-action="toggle-policy"]')?.setAttribute('aria-expanded', String(setup.policyOpen));
+    const detail = document.getElementById('policy-detail');
+    if (detail) {
+      detail.classList.toggle('open', setup.policyOpen);
+      detail.inert = !setup.policyOpen;
+    }
+    return;
   }
   // 시트를 먼저 열고, 링크가 없으면 그때 만든다. 처음 불러오는 중에 눌러도 이미 보낸 링크를 새 링크로 덮지 않게 있는지부터 본다
   if (name === 'open-invite') {
@@ -1719,7 +1730,7 @@ function render() {
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
   meMenu.update();
-  const roomSetup = setupHtml({ room: state.data.room, me: state.data.me, avatar, policyEdit: setup.policyEdit, error: setup.error });
+  const roomSetup = setupHtml({ room: state.data.room, me: state.data.me, avatar, policyEdit: setup.policyEdit, policyOpen: setup.policyOpen, error: setup.error });
   main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), nextCard(), roomSetup, disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
   mountSegs(main);
   // 이의·청구서 시트는 글을 쓰는 중이면 다시 그리지 않는다(타이핑 중 초점을 잃지 않게)
