@@ -349,6 +349,10 @@ a.row:active { background: var(--fill); }
 }
 .nav-text:active { opacity: 0.5; }
 .nav-text:disabled { opacity: 0.4; cursor: default; }
+/* 내 계정의 뒤로에 단 방 이름(사용자 테스트 11/5): 길면 말줄임으로 줄여 가운데 제목을 밀지 않는다 */
+.solo-page .nav-inner > div:first-child { min-width: 0; }
+.nav-text:has(> .nav-back-label) { max-width: 100%; }
+.nav-back-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 내 아바타 버튼. 보이는 원은 32px지만 누를 수 있는 곳은 44px */
 .nav-avatar { appearance: none; border: 0; background: none; padding: 6px; margin: -6px; border-radius: 50%; cursor: pointer; transition: transform 100ms ease-out; }
 .nav-avatar:active { transform: scale(0.92); }
