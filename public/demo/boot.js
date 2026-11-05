@@ -15,11 +15,20 @@ const server = createDemoServer({ onChange: () => guide?.render() });
 // ---------------------------------------------------------------- /api 가로채기
 const realFetch = globalThis.fetch.bind(globalThis);
 const apiOrigin = API_BASE ? new URL(API_BASE).origin : location.origin;
+// 느린 연결 흉내(불러오는 동안의 뼈대 확인용): ?slow=1500이면 /api 응답마다 1.5초 늦춘다. 이 탭에서는 계속 늦추고 ?slow=0이면 끈다
+const SLOW_KEY = 'agent-settlement.demo.slow';
+const slowParam = new URLSearchParams(location.search).get('slow');
+try {
+  if (slowParam != null && Number(slowParam) > 0) sessionStorage.setItem(SLOW_KEY, String(Number(slowParam)));
+  else if (slowParam != null) sessionStorage.removeItem(SLOW_KEY);
+} catch {}
+const slowMs = (() => { try { return Number(sessionStorage.getItem(SLOW_KEY)) || 0; } catch { return 0; } })();
 globalThis.fetch = async (input, init = {}) => {
   const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, location.href);
   if (!url.pathname.startsWith('/api/') || ![location.origin, apiOrigin].includes(url.origin)) return realFetch(input, init);
   const method = String(init.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
   const body = typeof init.body === 'string' && init.body ? JSON.parse(init.body) : null;
+  if (slowMs) await new Promise((r) => setTimeout(r, slowMs));
   const out = await server.handle(method, url.pathname + url.search, { body });
   return new Response(JSON.stringify(out.body ?? {}), { status: out.status, headers: { 'content-type': 'application/json' } });
 };

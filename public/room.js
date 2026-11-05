@@ -5,6 +5,7 @@ import { unitOf, decimalsOf } from './currencies.js';
 import { leaveBlock } from './leave.js';
 import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, CROSS, ICON_DONE, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, flaggedLines, blockedNotice, askedBy, nudge, COMPUTER_QUERY, disputeWaiting, disputeChoices, disputeNote, disputeRejected, disputeLive, disputeStatus, changedLines, proposalLinesHtml, reviseChoicesHtml, invoiceRows } from './ui.js';
 import { reduceMotion } from './motion.js';
+import { startSkeleton, roomSkeleton } from './skeleton.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
 import { API_BASE } from './api.js';
@@ -22,6 +23,8 @@ import { payoutFieldsHtml, payoutDraftFrom } from './payout-form.js';
 const $ = (s, el = document) => el.querySelector(s);
 const roomId = new URLSearchParams(location.search).get('room');
 const inviteToken = roomId ? null : new URLSearchParams(location.search).get('invite');
+// 방을 불러오는 동안 같은 자리에 방의 뼈대를 보인다(skeleton.js, 응답 시간 임계값). 처음 그리기 직전에 거둔다
+let pageSkeleton = roomId ? startSkeleton($('#main'), roomSkeleton()) : null;
 // 내 계정의 뒤로로 돌아왔으면(sheet=agent) 떠날 때 보던 내 비서를 다시 연다. 새로 고쳐도 또 열리지 않게 주소에서 바로 지운다
 const reopenAgent = Boolean(roomId) && new URLSearchParams(location.search).get('sheet') === 'agent';
 if (reopenAgent) history.replaceState(null, '', `room.html?room=${encodeURIComponent(roomId)}`);
@@ -122,6 +125,7 @@ async function load() {
   } catch (e) {
     state.error = e;
   }
+  if (pageSkeleton) { await pageSkeleton.done(); pageSkeleton = null; }
   render();
 }
 
@@ -1969,4 +1973,8 @@ try {
     if (!roomId) return void loadProfile().then(render);
     if (!user || user.uid !== sessionUid) { unsubscribe(); state.data = null; state.events = []; location.replace('account.html'); }
   });
-} catch (e) { state.error = e; render(); }
+} catch (e) {
+  state.error = e;
+  if (pageSkeleton) { await pageSkeleton.done(); pageSkeleton = null; }
+  render();
+}

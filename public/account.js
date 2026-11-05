@@ -14,6 +14,7 @@ import { defaultsHtml, defaultsBody, defaultsChanges, sampleFill } from './agent
 import { draftFromRules, limitNote } from './agent-panel.js';
 import { payoutDraftFrom } from './payout-form.js';
 import { SETTINGS_IDS, tocHtml, settingRow, settingsSection } from './settings-layout.js';
+import { startSkeleton, roomsSkeleton, settingsSkeleton } from './skeleton.js';
 const panel = document.querySelector('#account-view'); // 화면 전체. #account는 내 계정의 '계정' 칸 주소라 쓰지 않는다
 const nav = document.querySelector('#nav-inner');
 // 알림은 방금 누른 버튼 바로 아래에 띄운다. 화면을 다시 그릴 때마다 #message 자리도 함께 그린다.
@@ -119,10 +120,19 @@ const next = nextAfterLogin(location.search);
 // 방의 '기본 설정 바꾸기'·'내 계정'으로 왔을 때 돌아갈 방. 내 방 목록에 있는 방일 때만 { href, name }
 const back = backToRoom(location.search);
 let backRoom = null;
+// 첫 화면을 불러오는 동안 같은 자리에 뼈대를 보인다(skeleton.js, 응답 시간 임계값). 첫 화면을 그리기 직전에 거둔다
+let pageSkeleton = startSkeleton(panel, onProfile() ? settingsSkeleton() : roomsSkeleton());
+async function settle() {
+  if (!pageSkeleton) return;
+  const sk = pageSkeleton;
+  pageSkeleton = null;
+  await sk.done();
+}
 
 async function render() {
   const config = await initAuth();
   if (!currentUser()) {
+    await settle();
     // 로그인이 먼저, 둘러보기는 그 아래. 이 서버에 로그인이 연결되지 않았으면 버튼을 막고 바로 아래에서 이유를 말한다
     const ready = Boolean(config.firebase);
     setView('login');
@@ -141,6 +151,7 @@ async function render() {
   }
   const { pending } = await api('/api/me/deletion');
   if (pending) {
+    await settle();
     setView('login');
     setNav(BRAND);
     panel.innerHTML = `<section class="hero"><h1>탈퇴 마무리</h1></section>
@@ -154,7 +165,9 @@ async function render() {
   const from = back && rooms.find((r) => r.id === back.id);
   backRoom = from ? { href: back.href, name: from.name } : null;
   panel.onclick = panel.oninput = panel.onchange = null; // 비서 기본 설정 화면이 단 처리기를 다른 화면에 남기지 않는다
-  if (onProfile()) profileView(profile, await api('/api/me/agent'));
+  const agent = onProfile() ? await api('/api/me/agent') : null;
+  await settle();
+  if (onProfile()) profileView(profile, agent);
   else roomsView(profile, rooms, config);
 }
 
@@ -426,5 +439,13 @@ function profileView(profile, agent, status = '') {
   }
   spy();
 }
-async function run(fn) { try { return await fn(); } catch (e) { say(e.message, true); } }
+async function run(fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    await settle(); // 첫 화면을 그리기 전에 실패했으면 뼈대를 거두고 그 자리에 까닭을 적는다
+    if (!document.querySelector('#message')) panel.innerHTML = MESSAGE;
+    say(e.message, true);
+  }
+}
 run(render);
