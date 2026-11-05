@@ -7,6 +7,7 @@ import { OPEN } from '#src/agents/disputes.mjs';
 import { active } from '../core.js';
 import { esc, ICON_DONE, accountHref } from '../ui.js';
 import { Spring, reduceMotion } from '../motion.js';
+import { seqCardHtml } from './seq.js';
 
 const roomHref = (room) => (room ? `room.html?room=${encodeURIComponent(room.id)}` : 'account.html');
 
@@ -25,6 +26,7 @@ export function tasks(s) {
 
   const list = [
     {
+      id: 'room', // SEQ 이름표(src/demo-seq.mjs SEQ_TASKS)
       title: '여행 방 만들고 친구 초대하기',
       steps: [
         { text: '내 방에서 ‘새 방 만들기’로 방을 만들어요', note: '방 이름과 기간(오늘부터 2박 3일)은 미리 채워 뒀어요. 그대로 만들어도 되고, 바꿔도 돼요.', done: Boolean(room), show: 'a.btn[href="room.html"], [data-action="create-room"]', go: { href: 'account.html', label: '내 방으로 가기' } },
@@ -38,6 +40,7 @@ export function tasks(s) {
     },
     // 받을 계좌를 먼저 정하고 지출을 남기는 편이 자연스럽다(팀 점검 11/5). 그래서 비서 설정이 지출 남기기보다 앞이다
     {
+      id: 'agent',
       title: '내 계좌와 비서에게 맡길 범위 정하기',
       steps: [
         { text: '내 계정의 ‘내 비서 기본 설정’에서 ‘샘플 계좌·한도로 채우기’를 누르고 ‘저장’해요', note: '숫자를 직접 넣지 않아도 가짜 계좌와 5만 원 한도가 채워져요. 한도가 청구서보다 작아서 task 4에서 비서가 먼저 물어봐요. 보낼 시기(편할 때·지정일)와 이의 처리도 골라 볼 수 있어요.', done: Boolean(s.agent?.onboardedAt), show: '[data-action="agent-sample"]', go: { href: room ? accountHref(room.id, 'agent', 'agent') : 'account.html#agent', label: '내 계정으로 가기' } }, // 저장하고 뒤로를 누르면 방의 내 비서로 돌아와 다음 단계로 간다
@@ -45,6 +48,7 @@ export function tasks(s) {
       ],
     },
     {
+      id: 'expense',
       title: '지출 남기기',
       steps: [
         { text: '‘지출 남기기’에서 ‘영수증 사진’이나 ‘직접 입력’으로 남겨요', note: '사진은 ‘샘플 영수증으로 해 보기’로 읽어 볼 수 있어요. 통화가 엔이면 결제한 날의 환율로 원화를 셈해요. 함께한 사람도 골라요.', done: mine.length > 0, show: '#nav-add:not([hidden]), [data-action="add-expense"]', go: inRoom },
@@ -54,6 +58,7 @@ export function tasks(s) {
       ],
     },
     {
+      id: 'dispute',
       title: '맞지 않는 몫 바로잡기',
       steps: [
         { text: '‘비서들에게 청구서 보내기’를 눌러요', note: '각자의 비서가 맡긴 규칙대로 받거나, 한도를 넘으면 주인에게 물어요.', done: s.invoices.length > 0, show: '[data-action="send-invoices"]', go: inRoom },
@@ -65,6 +70,7 @@ export function tasks(s) {
       ],
     },
     {
+      id: 'send',
       title: '보내고 마무리하기',
       steps: [
         { text: '다시 온 청구서를 ‘이대로 받기’로 받아요', note: '중재안대로 다시 나눈 금액이에요.', done: myPay.length > 0 || left, show: '[data-action="open-invoice"]', go: inRoom },
@@ -106,8 +112,9 @@ function stepHtml(st, current) {
 
 // 데모 화면에 붙인다. snapshot()은 지금 저장소 상태(Promise), reset()은 처음부터 다시.
 // 펼친 체크리스트는 화면을 가린다. 그래서 방문자가 화면을 누르기 시작하면 접히고, 접힌 머리에는 다음에 할 한 가지와 '보여 주기'만 남긴다.
-// task 하나를 끝내면 다시 펼쳐 다음 task를 보여 준다
-export function mountGuide({ snapshot, reset }) {
+// task 하나를 끝내면 다시 펼쳐 다음 task를 보여 준다. seq(./seq.js)가 있으면 끝낸 task마다 화면 가운데 카드로 SEQ를 묻고,
+// 마지막 답 뒤에는 모두의 평균이 보이는 첫 화면으로 돌아간다
+export function mountGuide({ snapshot, reset, seq = null }) {
   const root = document.createElement('aside');
   root.className = 'demo-guide';
   root.setAttribute('aria-label', '체험 데모 task');
@@ -118,6 +125,66 @@ export function mountGuide({ snapshot, reset }) {
   let lastCurrent = null;
   let html = '';
   let body = null;
+  const rerender = () => { html = ''; render(); };
+  // SEQ 완료 카드. 화면 가운데에 띄우고 뒤를 어둡게 한다. 고르면 그 칸이 그 자리에서 눌린 채로 바뀌고, 잠시 뒤 닫힌다
+  const card = document.createElement('div');
+  card.className = 'seq-root';
+  card.hidden = true;
+  document.body.append(card);
+  let cardHtml = '';
+  let busy = false; // 고른 뒤 닫힐 때까지. 그동안은 카드를 다시 그리지 않는다
+  let lastList = [];
+  function renderCard(ask) {
+    if (busy) return;
+    const next = ask ? seqCardHtml(ask) : '';
+    if (next === cardHtml) return;
+    const opening = !cardHtml && next;
+    cardHtml = next;
+    card.innerHTML = next;
+    card.hidden = !next;
+    if (opening) card.querySelector('.seq-card')?.focus();
+  }
+  // 카드를 새로 그리지 않고 고른 칸만 바꾼다(새로 그리면 여는 애니메이션이 다시 돌아 새 카드가 뜬 것처럼 보인다)
+  function markChosen(score) {
+    for (const b of card.querySelectorAll('.seq-btn')) {
+      b.disabled = true;
+      if (Number(b.dataset.score) === score) b.setAttribute('aria-pressed', 'true');
+    }
+    const done = document.createElement('p');
+    done.className = 'seq-card-done';
+    done.setAttribute('role', 'status');
+    done.textContent = `${score}점을 남겼어요`;
+    card.querySelector('.seq-skip')?.replaceWith(done);
+  }
+  // 닫히는 애니메이션(작아지며 흐려진다)이 끝나면 비운다. 움직임 줄이기면 바로 닫는다
+  function closeCard(then) {
+    card.classList.add('closing');
+    setTimeout(() => {
+      card.classList.remove('closing');
+      card.hidden = true;
+      card.innerHTML = '';
+      cardHtml = '';
+      busy = false;
+      then();
+    }, reduceMotion.matches ? 0 : 220);
+  }
+  // 다섯 task를 다 끝냈고 더 물을 것이 없으면 첫 화면으로 돌아간다. 첫 화면이 task 줄마다 모두의 평균을 보여 준다
+  function afterAnswer(sending) {
+    if (!lastList.length || !lastList.every((t) => t.done) || seq.pending(lastList)) return rerender();
+    Promise.race([sending, new Promise((r) => setTimeout(r, 1500))]).then(() => { location.href = '../'; });
+  }
+  function answer(btn) {
+    if (busy || !btn) return;
+    busy = true;
+    if (btn.dataset.seq === 'skip') { seq.skip(btn.dataset.task); return closeCard(() => afterAnswer()); }
+    const score = Number(btn.dataset.score);
+    const sending = seq.rate(btn.dataset.task, score); // 보내는 동안 기다리지 않는다
+    markChosen(score);
+    setTimeout(() => closeCard(() => afterAnswer(sending)), 800); // 눌린 칸과 '남겼어요'를 보인 뒤 닫는다
+  }
+  card.addEventListener('click', (e) => answer(e.target.closest('[data-seq]')));
+  // Esc는 건너뛰기와 같다
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && cardHtml && !busy) answer(card.querySelector('[data-seq="skip"]')); });
   // 접고 펼 때 본문 높이를 스프링으로 옮긴다(감쇠 1, 튀지 않게). 움직임 줄이기면 바로 바뀐다
   const height = new Spring(0, (h) => { if (body) body.style.height = `${Math.max(0, h)}px`; });
 
@@ -129,6 +196,9 @@ export function mountGuide({ snapshot, reset }) {
       lastCurrent = current?.n ?? 0;
       peek = null;
     }
+    // 끝낸 task를 하나씩 묻는다. 다섯 task를 다 끝냈고 더 물을 것이 없으면 모두의 평균을 한 번 불러온다
+    lastList = list;
+    if (seq) renderCard(seq.pending(list));
     const finished = list.filter((t) => t.done).length;
     const shown = peek ?? current?.n;
     const items = list.map((t) => {
@@ -157,6 +227,7 @@ export function mountGuide({ snapshot, reset }) {
       <div class="dg-body" id="dg-body"${open ? '' : ' hidden'}><div class="dg-inner">
         <p class="dg-fake">금액·환율·계좌·위치는 모두 가짜예요. 돈은 움직이지 않아요.</p>
         ${current ? '' : '<p class="dg-done-note">방 만들기부터 나가기까지 비서끼리 정산을 끝까지 따라왔어요.</p>'}
+        ${!current && seq?.complete(list.map((t) => t.id)) ? '<p class="dg-done-note"><a href="../">첫 화면에서 모두의 SEQ 평균 보기</a></p>' : ''}
         <ol class="dg-tasks">${items}</ol>
         <div class="dg-foot"><button type="button" class="dg-reset${armed ? ' armed' : ''}" data-dg="reset">${armed ? '한 번 더 누르면 처음부터 다시 해요' : '처음부터 다시'}</button></div>
       </div></div>`;
@@ -197,7 +268,7 @@ export function mountGuide({ snapshot, reset }) {
 
   // 화면의 다른 곳을 누르면(방문자가 하기 시작하면) 접는다
   document.addEventListener('pointerdown', (e) => {
-    if (open && !root.contains(e.target) && !e.target.closest?.('.demo-toss-root')) toggle();
+    if (open && !root.contains(e.target) && !e.target.closest?.('.demo-toss-root, .seq-root')) toggle();
   });
 
   root.addEventListener('click', (e) => {

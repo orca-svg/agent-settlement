@@ -30,7 +30,7 @@ const MESSAGE = '<p id="message" class="group-note" role="status"></p>';
 const PRIVACY = 'https://github.com/orca-svg/agent-settlement/blob/main/PRIVACY.md';
 
 // 상단바는 왼쪽·가운데·오른쪽 세 칸이다. 빈 칸도 자리를 지켜 가운데 제목이 가운데에 오게 한다
-const BRAND = '<a class="nav-brand" href="./">정산은 비서끼리</a>';
+const BRAND = '<a class="nav-brand" href="./">Bill:ION</a>';
 const BACK = '<svg width="10" height="17" viewBox="0 0 10 17" aria-hidden="true"><path d="M8.5 1.5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const setNav = (left, center = '', right = '') => { nav.innerHTML = `<div>${left}</div><div class="nav-heading">${center}</div><div class="nav-end">${right}</div>`; };
 // 화면마다 읽기 좋은 폭이 다르다(로그인은 좁게, 내 방은 목록 폭, 내 계정은 목차 + 설정). 상단바·본문·꼬리말이 같이 따른다

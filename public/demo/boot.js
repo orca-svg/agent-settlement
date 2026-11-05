@@ -1,12 +1,13 @@
 // 체험 데모 페이지(demo/room.html·demo/account.html)에서 실제 화면 코드(room.js·account.js)보다 먼저 돈다.
 // 1) 화면이 서버로 보내는 /api 요청을 브라우저 안의 데모 서버(server.js)로 돌린다. 화면 코드는 바뀌지 않는다
-// 2) task 체크리스트(guide.js)를 붙인다
+// 2) task 체크리스트(guide.js)를 붙인다. 끝낸 task마다 묻는 SEQ(seq.js)만은 진짜 서버로 보낸다
 // 3) 토스 송금 화면이 열릴 자리(#demo-toss)에 데모 안내를 띄운다
 import { API_BASE } from '../api.js';
 import { won } from '../core.js';
 import { esc } from '../ui.js';
 import { createDemoServer } from './server.js';
 import { mountGuide } from './guide.js';
+import { createSeq } from './seq.js';
 import { ME } from './scenario.js';
 
 let guide = null;
@@ -49,12 +50,15 @@ async function snapshot() {
     agent: await store.get('agents', ME),
   };
 }
+// SEQ는 가로채기 전의 fetch로 Cloud Run 서버(로컬 npm start면 같은 서버)에 보낸다. 내 점수는 이 브라우저에 남아,
+// '처음부터 다시' 해도 답한 task는 다시 묻지 않는다
+const seq = createSeq({ fetch: realFetch, base: API_BASE, storage: (() => { try { return localStorage; } catch { return null; } })() });
 function reset() {
   server.reset();
   try { sessionStorage.removeItem('agent-settlement.demo.guide'); } catch {}
   location.href = 'account.html';
 }
-server.ready.then(() => { guide = mountGuide({ snapshot, reset }); });
+server.ready.then(() => { guide = mountGuide({ snapshot, reset, seq }); });
 
 // ---------------------------------------------------------------- 토스 대신 데모 안내
 // 데모 서버가 송금 링크를 #demo-toss=<송금 id>로 바꿔 둔다. 방 화면이 '밀어서 보내기'로 그 주소를 열면 여기서 안내를 띄우고,

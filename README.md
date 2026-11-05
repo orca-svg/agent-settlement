@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src=".github/assets/logo.png" width="112" alt="정산은 비서끼리 로고">
+<img src=".github/assets/logo.png" width="112" alt="Bill:ION 로고">
 
 <sub><a href="https://gdgoc-devfest-2026.vercel.app"><b>GDGoC DevFest 2026 「Tell the Vision」</b></a> - Team 6</sub>
 
-# 정산은 비서끼리
+# Bill:ION
 
 **돈 얘기는 각자의 AI 비서끼리, 사람은 확인만 해요.**
 
@@ -45,6 +45,15 @@
 
 > [!NOTE]
 > [데모 화면](https://orca-svg.github.io/agent-settlement/)은 로그인 없이 ‘나’가 되어 오사카 여행 정산을 다섯 task로 따라가는 체험 데모예요. 실제 방·내 계정 화면을 그대로 쓰고, 친구 셋은 데모가 대신 움직여요. 그래서 금액·환율·계좌·위치는 모두 가상의 값이고 돈이 움직이지 않아요. 영수증·계좌·타임라인은 샘플로 한 번에 채울 수 있어요. [실제 방](https://orca-svg.github.io/agent-settlement/room.html)은 Google로 로그인한 뒤 직접 방을 만들어 써요. 어느 쪽이든 우리 서비스는 돈을 보관하거나 옮기지 않고, 금액이 채워진 송금 앱을 열어 줄 뿐이에요.
+
+<p align="center">
+<a href="https://orca-svg.github.io/agent-settlement/"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://agent-settlement-1081397156656.asia-northeast1.run.app/api/demo/seq.svg?theme=dark">
+  <img src="https://agent-settlement-1081397156656.asia-northeast1.run.app/api/demo/seq.svg?theme=light" width="560" alt="체험 데모 SEQ: task마다 '얼마나 쉬웠나'(1 매우 어려움 ~ 7 매우 쉬움)의 평균과 응답 수">
+</picture></a>
+</p>
+
+체험 데모를 해 본 사람들이 task를 끝낼 때마다 남긴 SEQ(얼마나 쉬웠나, 1 매우 어려움 ~ 7 매우 쉬움)의 평균이에요. 서버가 볼 때마다 새로 그리지만, GitHub의 이미지 캐시 때문에 몇 분 늦을 수 있어요.
 
 ## 무엇을 해결하나
 
@@ -304,7 +313,7 @@ gcloud secrets add-iam-policy-binding payout-enc-key \
 
 ## 한계
 
-- 체험 데모(`demo/`)는 실제 서버 규칙을 한 브라우저 안에서 돌리고 친구 셋을 흉내 내요. Gemini 대신 규칙으로 나누고 중재하며, 영수증·계좌·타임라인은 샘플을 써요. 송금은 송금 앱을 열기 직전에서 멈추고, 체험 기록은 그 탭에만 있다가 탭을 닫으면 사라져요.
+- 체험 데모(`demo/`)는 실제 서버 규칙을 한 브라우저 안에서 돌리고 친구 셋을 흉내 내요. Gemini 대신 규칙으로 나누고 중재하며, 영수증·계좌·타임라인은 샘플을 써요. 송금은 송금 앱을 열기 직전에서 멈추고, 체험 기록은 그 탭에만 있다가 탭을 닫으면 사라져요. 다만 task를 끝낼 때마다 가운데 카드로 묻는 SEQ 점수(1~7)는 익명 체험 id와 함께 서버로 보내요. 다섯 task에 다 답하면 첫 화면의 task 줄마다 모두의 평균과 내 점수가 보이고, 이미 답한 task는 다시 묻지 않아요.
 - 서버 인스턴스는 1대로 묶여 있어요. 요청 줄·데스크톱 QR 토큰·AI 캐시가 서버 메모리에 있기 때문이에요.
 - 카드사·은행 직접 연동과 구독 결제는 범위 밖이에요.
 - 실제 방에서는 Gemini 호출 한 번에 4~11초 걸려요. 그래서 같은 입력은 이전 답을 다시 쓰고, 실패하면 규칙 모드로 나눠요. 반면 체험 데모는 Gemini를 부르지 않아 기다리지 않아요.

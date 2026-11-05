@@ -1,4 +1,4 @@
-// 정산은 비서끼리 — 서버 진입점(로컬·Cloud Run). 환경변수를 읽고 src/app.mjs로 앱을 만들어 연다.
+// Bill:ION — 서버 진입점(로컬·Cloud Run). 환경변수를 읽고 src/app.mjs로 앱을 만들어 연다.
 // 구조와 확장 지점은 ARCHITECTURE.md를 본다.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -53,6 +53,6 @@ setInterval(async () => {
 }, 30_000).unref();
 
 app.listen(PORT, () => {
-  console.log(`정산은 비서끼리: http://localhost:${PORT}`);
+  console.log(`Bill:ION — http://localhost:${PORT}`);
   console.log(KEY ? `Gemini 모드 — 모델 ${MODEL}` : '규칙 모드 — GEMINI_API_KEY가 없어 규칙으로 배분·중재합니다');
 });
