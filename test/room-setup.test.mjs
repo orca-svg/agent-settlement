@@ -197,6 +197,14 @@ test('나가기 시트: 돈이 남아 있으면 까닭만 보이고 나가기 �
   assert.match(leaveSheetHtml({ room: {}, why: null, busy: true }), /disabled>나가는 중…/);
 });
 
+// 나가기 시트는 다음 할 일 카드(.next) 밖, 시트 안에 그려진다. 버튼 줄 간격이 .next에만 있으면 '이 방에서 나가기'와 '그대로 있기'가 붙는다(11/5)
+test('버튼 줄(.actions)은 어디에 있든 버튼 사이가 8px 떨어진다(나가기 시트 포함)', () => {
+  assert.match(leaveSheetHtml({ room: { status: 'done' }, why: null }), /<div class="actions"><button[^>]*data-action="leave-room"[\s\S]*data-action="close-sheet">그대로 있기<\/button><\/div>/);
+  const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
+  assert.match(css, /^\.actions \{ display: flex; gap: 8px; flex-wrap: wrap; \}$/m, '카드·알림·시트 어디서든 같은 규칙');
+  assert.doesNotMatch(css, /\.(next|pop-todo) \.actions \{/, '같은 규칙을 자리마다 따로 두지 않는다');
+});
+
 // ---------------------------------------------------------------- #55 내 방 목록
 test('내 방 목록: 끝난 방이 있을 때만 진행 중 | 끝남 탭으로 나눈다', () => {
   const live = [{ id: 'a', status: 'ready' }, { id: 'b', status: 'settling' }];

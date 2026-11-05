@@ -226,7 +226,8 @@ h1, h2, h3, p { margin: 0; }
 .next.done .eyebrow { color: var(--green); }
 .next h2 { font-size: 1.375rem; line-height: 1.25; font-weight: 700; letter-spacing: -0.02em; }
 .next p { color: var(--label-2); font-size: 0.9375rem; letter-spacing: 0; }
-.next .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+/* 버튼 줄. 다음 할 일 카드·알림의 할 일·시트(나가기 등) 어디서든 버튼 사이를 같은 8px로 띄운다 */
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
 /* 영수증 사진 카드: 샘플 영수증 줄과 찍기·고르기 줄은 한 묶음이라 줄 사이도 버튼 사이와 같은 간격 */
 .receipt-picks { display: grid; gap: 8px; }
 /* 방금 한 일(중재안 동의). 시트가 닫힌 뒤 다음 할 일 카드 바로 위에 한 줄로 남긴다.
@@ -1016,7 +1017,6 @@ body.pop-open { overflow: hidden; }
 .pop-todo { margin: 0 12px 10px; background: var(--orange-soft); border-radius: 12px; padding: 10px 12px; }
 .pop-todo b { display: block; font-size: 0.75rem; color: var(--orange); font-weight: 600; letter-spacing: 0; }
 .pop-todo p { margin: 2px 0 8px; font-size: 0.9375rem; font-weight: 600; }
-.pop-todo .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .log details.more { margin-top: 4px; }
 .log details.more > summary { list-style: none; cursor: pointer; font-size: 0.8125rem; color: var(--tint); font-weight: 600; letter-spacing: 0; }
 .log details.more > summary::-webkit-details-marker { display: none; }
