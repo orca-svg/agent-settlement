@@ -3,7 +3,7 @@
 import { won, money, dayLabel, amountOf, toKrw, shares, settle, active } from './core.js';
 import { unitOf, decimalsOf } from './currencies.js';
 import { leaveBlock } from './leave.js';
-import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, CROSS, ICON_DONE, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, flaggedLines, blockedNotice, askedBy, nudge, COMPUTER_QUERY, disputeWaiting, disputeChoices, disputeNote, disputeRejected, disputeLive, disputeStatus, changedLines, proposalLinesHtml, reviseChoicesHtml } from './ui.js';
+import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, CROSS, ICON_DONE, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, flaggedLines, blockedNotice, askedBy, nudge, COMPUTER_QUERY, disputeWaiting, disputeChoices, disputeNote, disputeRejected, disputeLive, disputeStatus, changedLines, proposalLinesHtml, reviseChoicesHtml, invoiceRows } from './ui.js';
 import { reduceMotion } from './motion.js';
 import { api, subscribeRoom, currentUid, setCurrentUid } from './room-api.js';
 import { createLogPop } from './log-pop.js';
@@ -25,7 +25,7 @@ const inviteToken = roomId ? null : new URLSearchParams(location.search).get('in
 const setup = { create: { name: '', start: '', end: '', foreign: false, fxCurrency: 'JPY', policy: 'actual' }, picker: { open: false, month: '', focus: '', entering: false }, join: {}, invitePreview: {}, invite: undefined, profile: null, policyEdit: false, copied: false, busy: false, error: '', armed: null, removeError: null, leaving: false, leaveError: '' };
 // 로그인이 없는 개발용 서버에서만: 처음 방을 만들거나 참가할 때 이 브라우저용 uid를 하나 만든다. 배포에서는 Google 로그인 신원을 쓴다
 const ensureUid = () => currentUid() || (authOptions().dev ? (setCurrentUid(`u-${crypto.randomUUID().slice(0, 8)}`), currentUid()) : null);
-const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null, disputeDone: null, rejectDraft: null, reviseDraft: null, sendBlocked: false, announceBlocked: false, focusLine: null };
+const state = { data: null, events: [], error: null, renderedLog: 0, sheet: null, draft: null, formError: '', saving: false, addMode: 'manual', reading: null, readNotes: [], aiReady: false, editing: null, lastImage: null, armedDelete: null, expId: null, edits: {}, allocating: null, allocSource: {}, ref: null, busy: null, disputeDraft: null, payoutDraft: null, transferNote: null, pendingSend: null, copied: null, qr: null, disputeDone: null, rejectDraft: null, reviseDraft: null, linesMotion: '', justPicked: null, sendBlocked: false, announceBlocked: false, focusLine: null };
 let unsubscribe = () => {};
 
 const members = () => state.data?.room.members ?? [];
@@ -1056,8 +1056,43 @@ function alertBlocked() {
 const formError = () => (state.formError ?`<p class="form-error" role="alert">${esc(state.formError)}</p>` : '');
 const notFound = (title) => ({ title, html: '<p class="empty">찾을 수 없어요. 지출이 바뀌어 대체됐을 수 있어요.</p>' });
 
-// 이의를 낼 수 있는 지출: 그 청구서를 받은 사람이 함께 있던 지출
-const disputable = (inv) => state.data.expenses.filter((e) => e.present.includes(inv.to));
+// 청구서의 지출별 내 몫. 지난 청구서(지출이 바뀌어 대체됨)에는 지금 지출로 셈한 몫을 붙이지 않는다
+const currentRows = (inv) => (inv.version === state.data.room.version ? invoiceRows(inv, state.data.room, state.data.expenses) : []);
+// 이의를 낼 수 있는 지출: 이 청구서에 내 몫이 들어간 지출(청구서의 그 목록에서 바로 고른다).
+// 몫을 셀 수 없는 지난 청구서면 그 청구서를 받은 사람이 함께 있던 지출
+function disputable(inv) {
+  const rows = currentRows(inv);
+  return rows.length ? rows.map((r) => r.exp) : state.data.expenses.filter((e) => e.present.includes(inv.to));
+}
+
+// 청구서에 든 지출과 내 몫. 이의를 쓰는 동안에는 같은 목록이 그 자리에서 고르는 목록이 된다(사용자 테스트 11/5:
+// 따로 된 '맞지 않는 지출' 목록이 같은 지출을 두 번 보여 줬다). iOS 목록의 '선택'처럼 줄 앞에 동그라미가 밀고 들어오고,
+// 고른 줄 바로 아래에 맞지 않는 점을 적는 칸이 열린다. motion: 'enter'·'leave'는 동그라미가 들어오고 나가는 한 번의 그림
+const LEAVE_MS = 220; // 그만둘 때 동그라미가 나가는 시간(style.css의 pick-out과 같게)
+function invoiceLinesHtml(inv, dd, motion = '') {
+  const rows = currentRows(inv);
+  const items = rows.length ? rows : dd ? disputable(inv).map((exp) => ({ exp, mine: null })) : [];
+  if (!items.length) return '';
+  const found = dd?.found;
+  const picked = dd ? items.filter(({ exp }) => exp.id in dd.picks) : [];
+  const located = picked.filter(({ exp }) => found?.[exp.id]).length;
+  const line = ({ exp, mine }) => {
+    const on = Boolean(dd) && exp.id in dd.picks;
+    const f = found?.[exp.id];
+    const itemless = dd && !exp.items?.length ? ' · 영수증 줄이 없어 낸 사람이 직접 고쳐요' : ''; // 중재 비서가 줄마다 나눌 수 없는 지출
+    const body = `${tile(exp.kind)}<span class="grow"><span class="title">${esc(exp.title)}</span><span class="meta" style="display:block">${esc(nameOf(exp.payer))} 냄 · ${money(amountOf(exp), exp.currency)}${f ? ` · <span class="found">${esc(f.result.leftAt)}에 떠남</span>` : ''}${itemless}</span></span>
+        ${mine == null ? '' : `<span class="end"><span class="amount">${won(mine)}</span></span>`}`;
+    if (!dd) return `<div class="row">${body}</div>`;
+    const claim = on ? `<div class="row claim-row"><textarea data-claim="${esc(exp.id)}" rows="2" maxlength="200" aria-label="‘${esc(exp.title)}’에서 맞지 않는 점" placeholder="맞지 않는 점(비워도 보낼 수 있어요)">${esc(dd.picks[exp.id])}</textarea></div>` : '';
+    const mark = `<span class="sel-mark${state.justPicked === exp.id ? ' just' : ''}" aria-hidden="true">${on ? ICON_DONE : '<span class="choice-empty"></span>'}</span>`;
+    return `<button type="button" class="row pickable" data-action="dispute-toggle" data-id="${esc(exp.id)}" aria-pressed="${on}">${mark}${body}</button>${claim}`;
+  };
+  const note = dd ? `<p class="group-note">고른 지출은 중재 비서가 양쪽 근거로 다시 나눠요. 떠난 시각이 있으면 그 뒤에 시킨 메뉴는 내 몫에서 빠져요.</p>
+      ${located ? `<p class="group-note">고른 지출 중 ${located}건에는 타임라인에서 찾은 떠난 시각 한 줄이 이의 상대와 중재 비서에게 가요. 파일·좌표·장소 이름은 보내지 않고, 7일 뒤 지워요.</p>` : ''}` : '';
+  const end = dd ? (picked.length ? `${picked.length}건 고름` : '눌러서 골라요') : rows.length ? `합계 ${won(inv.owed)}` : '';
+  return `<section class="group" id="invoice-lines"><h3 class="group-label"><span>${rows.length ? '내 몫이 들어간 지출' : '함께한 지출'} ${items.length}건</span><span>${end}</span></h3>
+      <div class="list lines${dd ? ' selecting' : ''}${motion ? ` ${motion}` : ''}"${dd ? ' role="group" aria-label="맞지 않는 지출 고르기"' : ''}>${items.map(line).join('')}</div>${note}</section>`;
+}
 
 // 한도를 넘어 비서가 물은 청구서: 이대로 받거나, 맞지 않는 지출을 골라 이의를 낸다
 function invoiceSheet() {
@@ -1066,12 +1101,15 @@ function invoiceSheet() {
   const dd = state.disputeDraft;
   const answering = inv.status === 'asked' && inv.to === state.data.me.uid;
   const form = dd ? disputeForm(inv, dd) : '';
+  // 받기 전에 무엇이 들었는지 보이게 지출별 내 몫을 붙인다. 이의를 쓰는 동안에는 이 목록에서 바로 고른다
+  const lines = invoiceLinesHtml(inv, answering ? dd : null, state.linesMotion);
   return {
     title: '청구서',
     html: `<div class="big"><div class="amt">${won(Math.max(0, -inv.net))}</div>
-        <p class="sub">낸 돈 ${won(inv.paid)} · 내 몫 ${won(inv.owed)} · 방 version ${inv.version}</p>
+        <p class="sub">낸 돈 ${won(inv.paid)} · 내 몫 ${won(inv.owed)}</p>
         ${inv.hasLocationSummary ? `<p class="badges">${chip('위치 요약 · 확인 전')}</p>` : ''}</div>
       <p class="how">${esc(inv.reasons.join(' · '))}</p>
+      ${lines}
       ${answering && !dd ? `${formError()}<div style="display:grid;gap:8px"><button class="btn" data-action="answer-invoice" data-decision="accept">이대로 받기</button>
         <button class="btn secondary" data-action="start-dispute">맞지 않는 지출이 있어요</button></div>` : ''}
       ${answering ? form : `<p class="group-note">${inv.status === 'accepted' ? '받기로 했어요.' : inv.status === 'disputed' ? '이의를 제기했어요.' : '지출이 바뀌어 대체된 청구서예요.'}</p>`}`,
@@ -1129,33 +1167,20 @@ function locationSection() {
 // 타임라인은 이의에 쓰려고 올린 것이라 따로 묻지 않고, 보낼 때 찾은 지출에 위치 요약(떠난 시각 한 줄)을 함께 붙인다.
 // dd: { picks: { [지출 id]: 맞지 않는 점 }, found: { [지출 id]: { result, summary, claim } } | null, scan: null | 'reading' | { error } }
 function disputeForm(inv, dd) {
-  const choices = disputable(inv);
-  const found = dd.found;
-  const foundCount = found ? Object.keys(found).length : 0;
-  const picked = choices.filter((e) => e.id in dd.picks);
-  const located = picked.filter((e) => found?.[e.id]).length;
+  const picked = disputable(inv).filter((e) => e.id in dd.picks);
+  const foundCount = dd.found ? Object.keys(dd.found).length : 0;
   const scan = dd.scan === 'reading'
     ? `<div class="list" aria-busy="true"><div class="row">${tile('pin')}${rowText('타임라인에서 찾는 중…')}</div></div>`
-    : found
-    ? `<div class="list"><div class="row">${tile('pin')}${rowText(foundCount ? `자리를 떠난 지출 ${foundCount}건을 골라 뒀어요` : '타임라인과 맞지 않는 지출이 없어요', foundCount ? '아니면 아래에서 눌러 빼요' : '맞지 않는 지출을 직접 골라요')}
+    : dd.found
+    ? `<div class="list"><div class="row">${tile('pin')}${rowText(foundCount ? `자리를 떠난 지출 ${foundCount}건을 골라 뒀어요` : '타임라인과 맞지 않는 지출이 없어요', foundCount ? '아니면 위에서 눌러 빼요' : '맞지 않는 지출을 위에서 직접 골라요')}
         <button type="button" class="text-btn" data-action="timeline-pick">다른 파일 고르기</button></div></div>`
-    : `<div class="list"><button type="button" class="row" data-action="timeline-guide" aria-haspopup="dialog">${tile('pin')}${rowText('Google 지도 타임라인 올리기', '자리를 떠난 지출을 찾아 골라 둬요', CHEVRON)}</button></div>`;
+    : `<div class="list"><button type="button" class="row" data-action="timeline-guide" aria-haspopup="dialog">${tile('pin')}${rowText('Google 지도 타임라인 올리기', '자리를 떠난 지출을 찾아 위에서 골라 둬요', CHEVRON)}</button></div>`;
   const sample = authOptions().dev && dd.scan !== 'reading' ? '<div class="group-actions"><button type="button" class="text-btn" data-action="timeline-sample">개발용 가짜 기록</button></div>' : '';
-  const rows = choices.map((e) => {
-    const on = e.id in dd.picks;
-    const f = found?.[e.id];
-    const claim = on ? `<div class="row claim-row"><textarea data-claim="${esc(e.id)}" rows="2" maxlength="200" aria-label="‘${esc(e.title)}’에서 맞지 않는 점" placeholder="맞지 않는 점(비워도 보낼 수 있어요)">${esc(dd.picks[e.id])}</textarea></div>` : '';
-    return `<button type="button" class="row choice" data-action="dispute-toggle" data-id="${esc(e.id)}" aria-pressed="${on}">
-        ${tile(e.kind)}<span class="grow"><span class="title">${esc(e.title)}</span><span class="meta" style="display:block">${esc(nameOf(e.payer))} · ${money(amountOf(e), e.currency)}${f ? ` · <span class="found">${esc(f.result.leftAt)}에 떠남</span>` : ''}</span></span>
-        <span class="choice-mark" aria-hidden="true">${on ? ICON_DONE : ''}</span></button>${claim}`;
-  }).join('');
-  const note = located ? `<p class="group-note">고른 지출 중 ${located}건에는 타임라인에서 찾은 떠난 시각 한 줄이 이의 상대와 중재 비서에게 가요. 파일·좌표·장소 이름은 보내지 않고, 7일 뒤 지워요.</p>` : '';
   return `<section class="group"><h3 class="group-label"><span>위치 기록으로 찾기</span><span>선택</span></h3>${scan}
       ${dd.scan?.error ? `<p class="form-error" role="alert">${esc(dd.scan.error)}</p>` : ''}${sample}</section>
-    <section class="group"><h3 class="group-label"><span>맞지 않는 지출</span><span>${picked.length ? `${picked.length}건 고름` : '눌러서 골라요'}</span></h3>
-      <div class="list">${rows}</div>${note}</section>
     ${formError()}
-    <button class="btn" style="width:100%" id="dispute-send" data-action="answer-invoice" data-decision="dispute" ${picked.length ? '' : 'disabled'}>${picked.length > 1 ? `이의 ${picked.length}건 보내기` : '이의 보내기'}</button>`;
+    <div class="stack"><button class="btn" id="dispute-send" data-action="answer-invoice" data-decision="dispute" ${picked.length ? '' : 'disabled'}>${picked.length > 1 ? `이의 ${picked.length}건 보내기` : '이의 보내기'}</button>
+      <button type="button" class="btn plain" data-action="cancel-dispute">취소</button></div>`;
 }
 
 // 타임라인 방문에서 이 청구서의 맞지 않는 지출을 찾아 골라 둔다. 사람이 이미 고르거나 고쳐 쓴 지출은 그대로 둔다
@@ -1472,7 +1497,7 @@ function followUp(event) {
 }
 document.addEventListener('visibilitychange', () => followUp(document.hidden ? 'hidden' : 'visible'));
 
-const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'dispute-toggle', 'timeline-pick', 'timeline-guide', 'tl-os', 'timeline-file', 'close-guide', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'reject-ask', 'reject-cancel', 'reject', 'revise-pick', 'revise-reset', 'revise-send', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
+const AGENT_ACTIONS = new Set(['send-invoices', 'open-invoice', 'start-dispute', 'cancel-dispute', 'dispute-toggle', 'timeline-pick', 'timeline-guide', 'tl-os', 'timeline-file', 'close-guide', 'timeline-forget', 'timeline-sample', 'revoke-location', 'answer-invoice', 'open-dispute', 'mediate', 'agree', 'reject-ask', 'reject-cancel', 'reject', 'revise-pick', 'revise-reset', 'revise-send', 'open-transfer', 'reopen-link', 'mark-sent', 'confirm-receipt', 'not-received', 'open-payout', 'save-payout', 'copy']);
 
 
 async function agentAct(name, d) {
@@ -1519,13 +1544,28 @@ async function agentAct(name, d) {
     state.disputeDraft = { picks: {}, found: null, scan: null };
     const visits = savedVisits(); // 이 정산에 이미 올려 둔 타임라인이 있으면 바로 찾아 골라 둔다
     if (visits) scanDispute(visits);
+    // 내 몫 목록이 그 자리에서 고르는 목록이 된다. 동그라미가 들어오는 것이 보이게 목록을 시트 위로 올리고 첫 줄에 초점을 둔다
+    state.linesMotion = reduceMotion.matches ? '' : 'enter';
     renderSheet();
+    state.linesMotion = '';
+    $('#invoice-lines')?.scrollIntoView({ block: 'start', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+    $('#invoice-lines .pickable')?.focus({ preventScroll: true });
+  } else if (name === 'cancel-dispute') {
+    // 그만두면 동그라미가 들어온 길로 나간 뒤 원래 청구서로 돌아간다. 고른 것은 버린다
+    state.disputeDraft = null;
+    const list = $('#invoice-lines .lines');
+    if (!list || reduceMotion.matches) return renderSheet();
+    list.classList.add('leave');
+    setTimeout(renderSheet, LEAVE_MS);
   } else if (name === 'dispute-toggle') {
     // 누를 때마다 고르고 뺀다. 다시 고르면 타임라인에서 찾은 글을 다시 채운다. 다시 그린 뒤에도 그 줄에 초점을 둔다
     const dd = state.disputeDraft;
+    if (!dd) return; // 그만두기로 동그라미가 나가는 중
     if (d.id in dd.picks) delete dd.picks[d.id];
     else dd.picks[d.id] = dd.found?.[d.id]?.claim ?? '';
+    state.justPicked = d.id in dd.picks ? d.id : null; // 방금 고른 줄의 체크만 한 번 튀어 오른다
     renderSheet();
+    state.justPicked = null;
     $(`[data-action="dispute-toggle"][data-id="${CSS.escape(d.id)}"]`)?.focus({ preventScroll: true });
   } else if (name === 'timeline-pick') {
     pickTimeline();

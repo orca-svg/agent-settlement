@@ -718,12 +718,25 @@ button.row:active { background: var(--fill); }
 .guide-actions { display: grid; gap: 10px; margin-top: 20px; }
 .guide-actions .btn svg { margin-left: 6px; }
 @media (prefers-reduced-motion: reduce) { #sheet { scale: none; } }
-/* 이의 쓰기(#7): 맞지 않는 지출은 눌러서 고르고 빼는 줄. 고른 줄은 끝에 체크가 붙고, 바로 아래에 맞지 않는 점을 적는 칸이
-   제목 들여쓰기에 맞춰 붙는다(같은 지출이라 사이 구분선은 없다) */
-.row.choice .choice-mark { width: 22px; height: 22px; flex: none; display: grid; place-items: center; color: var(--tint); }
-.row.choice .found { color: var(--tint); }
-.row.claim-row { min-height: 0; padding: 0 16px 12px 58px; }
-.row.choice + .row.claim-row::before { display: none; }
+/* 이의 쓰기(#7, 사용자 테스트 11/5): 청구서의 내 몫 목록이 그 자리에서 고르는 목록이 된다(iOS 목록의 '선택').
+   줄 앞에 동그라미가 밀고 들어오며 내용을 오른쪽으로 밀고, 그만두면 같은 길로 나간다(곡선도 거꾸로).
+   들어오는 곡선은 감쇠 1.0 스프링(반응 0.3초)에 가까운 감속 곡선. 고른 줄은 체크가 차고(방금 고른 체크만 한 번 튀어 오른다),
+   바로 아래에 맞지 않는 점을 적는 칸이 제목 들여쓰기에 맞춰 붙는다(같은 지출이라 사이 구분선은 없다) */
+.lines.selecting .row { --inset: 92px; }
+.lines .sel-mark { width: 22px; height: 22px; flex: none; display: grid; place-items: center; color: var(--tint); }
+.lines .found { color: var(--tint); }
+.lines.enter .sel-mark { animation: pick-in 300ms cubic-bezier(0.2, 0.9, 0.25, 1) both; }
+.lines.leave .sel-mark { animation: pick-out 220ms cubic-bezier(0.75, 0, 0.8, 0.1) both; }
+.lines.leave { pointer-events: none; }
+.lines .sel-mark.just svg { animation: pick-pop 260ms cubic-bezier(0.2, 0.9, 0.25, 1); }
+@keyframes pick-in { from { width: 0; margin-right: -12px; opacity: 0; } }
+@keyframes pick-out { to { width: 0; margin-right: -12px; opacity: 0; } }
+@keyframes pick-pop { from { transform: scale(0.6); } }
+@media (prefers-reduced-motion: reduce) { .lines .sel-mark, .lines .sel-mark svg { animation: none !important; } }
+/* 고르지 않은 줄도 고를 수 있어 보이게 빈 동그라미(iOS 선택 목록과 같은 모양) */
+.lines .sel-mark .choice-empty { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--label-3); }
+.lines .row.claim-row { min-height: 0; padding: 0 16px 12px 92px; }
+.lines .pickable + .row.claim-row::before { display: none; }
 .claim-row textarea {
   flex: 1;
   min-width: 0;
