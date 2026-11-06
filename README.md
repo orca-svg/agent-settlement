@@ -14,6 +14,7 @@
 
 [![Live demo](https://img.shields.io/badge/Live%20demo-orca--svg.github.io-007aff?style=flat-square)](https://orca-svg.github.io/agent-settlement/)
 [![Tests](https://img.shields.io/github/actions/workflow/status/orca-svg/agent-settlement/test.yml?branch=main&label=tests&style=flat-square)](https://github.com/orca-svg/agent-settlement/actions/workflows/test.yml)
+[![GDGoC DevFest 2026 Honorable Mention](https://img.shields.io/badge/GDGoC%20DevFest%202026-Honorable%20Mention-9a6700?style=flat-square)](https://gdgoc-devfest-2026.vercel.app)
 
 [데모 열기](https://orca-svg.github.io/agent-settlement/) · [실제 방 만들기](https://orca-svg.github.io/agent-settlement/room.html) · [아키텍처](ARCHITECTURE.md) · [개인정보 처리방침](PRIVACY.md)
 
