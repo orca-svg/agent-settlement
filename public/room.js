@@ -1,6 +1,8 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle, active } from './core.js';
+import { progressOf, doneSummary } from './progress.js';
+import { stepperHtml } from './progress-ui.js';
 import { unitOf, decimalsOf } from './currencies.js';
 import { leaveBlock } from './leave.js';
 import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, CROSS, ICON_DONE, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, flaggedLines, blockedNotice, askedBy, nudge, COMPUTER_QUERY, disputeWaiting, disputeChoices, disputeNote, disputeRejected, disputeLive, disputeStatus, changedLines, proposalLinesHtml, reviseChoicesHtml, invoiceRows } from './ui.js';
@@ -770,9 +772,12 @@ function hero() {
     <div class="people">${here.map(person).join('')}${hasStarted(room) ? '' : inviteButtonHtml()}</div></section>`;
 }
 
+// 정산이 어디까지 왔는지(단계 막대와 한 줄 요약, progress.js). 다음 할 일 카드 바로 위에 둬서 '어디까지'와 '내 차례'를 한 묶음으로 읽게 한다
+const stepsSection = () => stepperHtml(progressOf(state.data, state.data.me.uid));
+
 function nextCard() {
   const mine = state.data.actions ?? [];
-  if (state.data.room.status === 'done') return doneCardHtml(); // 끝난 방은 지출을 더 받지 않고, 남은 일은 나가기뿐이다(#55)
+  if (state.data.room.status === 'done') return doneCardHtml(doneSummary(state.data, state.data.me.uid)); // 끝난 방은 지출을 더 받지 않고, 남은 일은 나가기뿐이다(#55)
   if (!mine.length) {
     // 영수증 사진은 지출 남기기 시트 맨 위에서 '직접 입력'과 나란히 고른다. 카드에는 입구 하나만 둔다
     const add = '<button class="btn" data-action="add-expense">지출 남기기</button>';
@@ -1841,7 +1846,7 @@ function render() {
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
   meMenu.update();
   const roomSetup = setupHtml({ room: state.data.room, me: state.data.me, avatar, policyEdit: setup.policyEdit, policyOpen: setup.policyOpen, error: setup.error });
-  main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), nextCard(), roomSetup, disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
+  main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), stepsSection(), nextCard(), roomSetup, disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
   mountSegs(main);
   // 이의·청구서 시트는 글을 쓰는 중이면 다시 그리지 않는다(타이핑 중 초점을 잃지 않게)
   if (['exp', 'transfer', 'invite', 'leave'].includes(state.sheet) || (state.sheet === 'dispute' && !state.rejectDraft) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();

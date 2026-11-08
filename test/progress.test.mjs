@@ -1,0 +1,246 @@
+// 정산 진행 상태(단계 막대·한 줄 요약·완료 요약). 방 화면·내 방 목록·서버가 같은 판정을 쓴다.
+// 완료 기준: 지금 몇 번째 단계인지, 무엇이 누구를 기다리는지, 끝난 방이 무엇을 했는지를 상태 값만으로 말한다.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { STEPS, progressOf, overallRatio, doneSummary } from '../public/progress.js';
+import { stepperHtml } from '../public/progress-ui.js';
+import { roomRowsHtml } from '../public/room-list.js';
+import { doneCardHtml } from '../public/room-setup.js';
+import { createApp } from '../src/app.mjs';
+import { MemoryStore } from '../src/store/memory.mjs';
+
+const members = [
+  { uid: 'me', name: '재윤' },
+  { uid: 'cs', name: '철수' },
+  { uid: 'yh', name: '영희' },
+  { uid: 'ms', name: '민수' },
+];
+const room = (extra = {}) => ({ id: 'r1', name: '오사카', members, version: 2, status: 'ready', ...extra });
+const everyone = members.map((m) => m.uid);
+const dinner = (extra = {}) => ({
+  id: 'e1', title: '저녁', payer: 'me', present: everyone, currency: 'KRW', split: 'equal', amount: 40000,
+  date: '2026-11-05', time: '19:00', createdBy: 'me', ...extra,
+});
+const izakaya = (alloc) => ({
+  id: 'e2', title: '이자카야', payer: 'cs', present: everyone, currency: 'KRW', split: 'items', createdBy: 'cs',
+  date: '2026-11-05', time: '22:00',
+  items: [{ id: 'i1', name: '하이볼', qty: 2, unit: 6000 }, { id: 'i2', name: '오차즈케', qty: 1, unit: 8000 }],
+  ...(alloc ? { alloc } : {}),
+});
+const sure = (consumers) => ({ consumers, confidence: 0.9, reason: '' });
+const invoice = (to, status, version = 2) => ({ id: `inv-${to}-${version}`, to, status, version, net: -10000 });
+
+test('단계 이름은 여섯 개이고 순서가 정해져 있다', () => {
+  assert.deepEqual(STEPS, ['모으기', '나누기', '청구', '응답', '보내기', '끝']);
+});
+
+test('지출이 없으면 1단계 모으기', () => {
+  const p = progressOf({ room: room(), expenses: [] }, 'me');
+  assert.equal(p.step, 1);
+  assert.equal(p.label, '모으기');
+  assert.match(p.summary, /지출/);
+});
+
+test('외화 방에서 환율 정책에 아직 동의하지 않은 사람이 있으면 1단계에 머물고 그 사람을 이름으로 적는다', () => {
+  const r = room({ fx: { currency: 'JPY' }, policyAgreedBy: ['me', 'cs', 'ms'] });
+  const p = progressOf({ room: r, expenses: [dinner()] }, 'me');
+  assert.equal(p.step, 1);
+  assert.equal(p.summary, '환율 정책 동의 3/4');
+  assert.deepEqual(p.remaining, ['영희의 환율 정책 동의']);
+  assert.equal(p.ratio, 3 / 4);
+});
+
+test('메뉴별로 아직 나누지 않은 영수증이 있으면 2단계 나누기', () => {
+  const p = progressOf({ room: room(), expenses: [dinner(), izakaya()] }, 'me');
+  assert.equal(p.step, 2);
+  assert.equal(p.summary, '메뉴별로 나누지 않은 지출 1건');
+  assert.deepEqual(p.remaining, ['‘이자카야’ 나누기']);
+});
+
+test('확인이 필요한 줄(확신 0.7 미만)이 남아 있어도 2단계이고, 누가 확인할지 적는다', () => {
+  const alloc = { i1: sure(['cs', 'ms']), i2: { consumers: ['yh'], confidence: 0.4, reason: '' } };
+  const p = progressOf({ room: room(), expenses: [izakaya(alloc)] }, 'me');
+  assert.equal(p.step, 2);
+  assert.equal(p.summary, '확인할 줄 1개');
+  assert.deepEqual(p.remaining, ['철수의 ‘오차즈케’ 확인']);
+});
+
+test('모두 나눴고 청구서를 아직 안 보냈으면 3단계 청구', () => {
+  const p = progressOf({ room: room(), expenses: [dinner(), izakaya({ i1: sure(['cs']), i2: sure(['yh']) })] }, 'me');
+  assert.equal(p.step, 3);
+  assert.equal(p.summary, '청구서를 보내면 비서들이 확인해요');
+  assert.equal(p.ratio, null);
+});
+
+test('지출이 바뀌어 이전 버전 청구서만 있으면 다시 보내야 한다고 말한다', () => {
+  const p = progressOf({ room: room({ status: 'settling' }), expenses: [dinner()], invoices: [invoice('cs', 'accepted', 1)] }, 'me');
+  assert.equal(p.step, 3);
+  assert.equal(p.summary, '지출이 바뀌어서 청구서를 다시 보내야 해요');
+});
+
+test('주인에게 물은 청구서가 있으면 4단계 응답이고, 응답한 비율을 센다', () => {
+  const invoices = [invoice('cs', 'accepted'), invoice('yh', 'asked'), invoice('ms', 'accepted')];
+  const p = progressOf({ room: room({ status: 'settling' }), expenses: [dinner()], invoices }, 'me');
+  assert.equal(p.step, 4);
+  assert.equal(p.label, '응답');
+  assert.equal(p.summary, '청구서 3개 중 2개 응답');
+  assert.deepEqual(p.remaining, ['영희의 확인']);
+  assert.equal(p.ratio, 2 / 3);
+});
+
+test('진행 중인 이의가 있으면 4단계에 머물고, 중재를 기다리는 사람을 적는다', () => {
+  const invoices = [invoice('cs', 'accepted'), invoice('yh', 'accepted'), invoice('ms', 'disputed')];
+  const disputes = [
+    { id: 'd1', expenseId: 'e1', by: 'ms', status: 'proposed', agreedBy: ['me'] },
+    { id: 'd0', expenseId: 'e1', by: 'cs', status: 'resolved', agreedBy: [] },
+  ];
+  const p = progressOf({ room: room({ status: 'settling' }), expenses: [dinner()], invoices, disputes }, 'me');
+  assert.equal(p.step, 4);
+  assert.equal(p.summary, '청구서 3개 중 3개 응답 · 이의 1건 진행 중');
+  assert.deepEqual(p.remaining, ['민수의 ‘저녁’ 중재안 동의']);
+});
+
+test('중재를 아직 맡기지 않은 이의는 지출을 낸 사람을 기다린다', () => {
+  const disputes = [{ id: 'd1', expenseId: 'e1', by: 'ms', status: 'open', agreedBy: [] }];
+  const p = progressOf({ room: room({ status: 'settling' }), expenses: [dinner()], invoices: [invoice('ms', 'disputed')], disputes }, 'me');
+  assert.deepEqual(p.remaining, ['나의 ‘저녁’ 중재 맡기기']);
+});
+
+test('응답이 끝나면 5단계 보내기이고, 받은 송금 비율과 남은 송금을 사람 기준으로 적는다', () => {
+  const invoices = [invoice('cs', 'accepted'), invoice('yh', 'accepted'), invoice('ms', 'accepted')];
+  const transfers = [
+    { id: 't1', from: 'yh', to: 'me', amount: 10000, version: 2, status: 'confirmed' },
+    { id: 't2', from: 'cs', to: 'me', amount: 10000, version: 2, status: 'sent' },
+    { id: 't3', from: 'ms', to: 'me', amount: 10000, version: 2, status: 'scheduled' },
+    { id: 't0', from: 'ms', to: 'me', amount: 9000, version: 1, status: 'superseded' },
+  ];
+  const p = progressOf({ room: room({ status: 'settling' }), expenses: [dinner()], invoices, transfers }, 'me');
+  assert.equal(p.step, 5);
+  assert.equal(p.summary, '송금 3번 중 1번 받음');
+  assert.deepEqual(p.remaining, ['나의 받음 확인(철수 → 나)', '민수 → 나 보내기']);
+  assert.equal(p.ratio, 1 / 3);
+});
+
+test('정산이 끝난 방은 6단계 끝', () => {
+  const p = progressOf({ room: room({ status: 'done' }), expenses: [dinner()] }, 'me');
+  assert.equal(p.step, 6);
+  assert.equal(p.label, '끝');
+  assert.equal(p.summary, '정산이 끝났어요');
+  assert.deepEqual(p.remaining, []);
+});
+
+test('전체 진행 비율은 지난 단계 수에 지금 단계의 비율을 더해 다섯 칸으로 나눈다', () => {
+  assert.equal(overallRatio({ step: 1, ratio: null }), 0);
+  assert.equal(overallRatio({ step: 5, ratio: 1 / 2 }), 0.9);
+  assert.equal(overallRatio({ step: 6, ratio: null }), 1);
+});
+
+test('완료 요약: 함께 쓴 돈, 내 몫, 송금 횟수와 지출마다 보냈을 때의 횟수, 비서가 대신 처리한 일', () => {
+  const lunch = dinner({ id: 'e3', title: '점심', payer: 'cs', amount: 20000 });
+  const invoices = [
+    { ...invoice('cs', 'accepted'), decidedBy: 'agent' },
+    { ...invoice('yh', 'accepted'), decidedBy: 'human' },
+    { ...invoice('ms', 'disputed') },
+  ];
+  const disputes = [{ id: 'd1', expenseId: 'e1', by: 'ms', status: 'resolved', agreedBy: ['me', 'ms'] }];
+  const transfers = [
+    { id: 't1', from: 'yh', to: 'me', amount: 15000, version: 2, status: 'confirmed' },
+    { id: 't2', from: 'ms', to: 'me', amount: 15000, version: 2, status: 'confirmed' },
+  ];
+  const s = doneSummary({ room: room({ status: 'done' }), expenses: [dinner(), lunch], invoices, disputes, transfers }, 'me');
+  assert.equal(s.total, 60000);
+  assert.equal(s.mine, 15000);
+  assert.equal(s.transfers, 2);
+  assert.equal(s.naive, 6); // 지출마다 낸 사람에게 나머지 셋이 보내면 3 + 3번
+  assert.equal(s.autoAccepted, 1);
+  assert.equal(s.mediated, 1);
+});
+
+// ---------- 화면 ----------
+
+const sending = { step: 5, label: '보내기', summary: '송금 3번 중 1번 받음', remaining: ['나 → 민수 보내기', '영희의 받음 확인(철수 → 영희)', '민수 → 철수 보내기'], ratio: 1 / 3 };
+
+test('단계 막대: 지금 단계만 aria-current, 끝난 단계는 ✓와 함께 "끝남"으로 읽히고, 남은 단계는 번호만', () => {
+  const html = stepperHtml(sending);
+  assert.match(html, /<section class="settle-steps" aria-label="정산 단계">/);
+  assert.doesNotMatch(html, /class="steps"/, '타임라인 안내의 번호 목록(.steps)과 클래스가 겹치면 그 규칙이 칸을 깨뜨린다');
+  assert.equal(html.match(/aria-current="step"/g).length, 1);
+  assert.match(html, /<li class="now" aria-current="step"><span class="step-dot">5<\/span><span class="step-label">보내기<\/span><\/li>/);
+  assert.equal(html.match(/<li class="done">/g).length, 4);
+  assert.equal(html.match(/<span class="sr-only">끝남<\/span>/g).length, 4, '색과 ✓를 못 봐도 끝난 단계를 안다');
+  assert.match(html, /<li><span class="step-dot">6<\/span><span class="step-label">끝<\/span><\/li>/);
+  assert.match(html, /5\/6 보내기<\/b> · 송금 3번 중 1번 받음/);
+  assert.match(html, /남은 일: 나 → 민수 보내기 · 영희의 받음 확인\(철수 → 영희\) 외 1개/, '남은 일은 둘까지 보이고 나머지는 개수로');
+  assert.match(html, /<div class="meter" aria-hidden="true"><i style="width:33%"><\/i><\/div>/, '막대는 글로 쓴 요약을 따라 그리기만 한다');
+});
+
+test('단계 막대: 셀 비율이 없으면 막대를, 남은 일이 없으면 그 줄을 그리지 않는다', () => {
+  const html = stepperHtml({ step: 3, label: '청구', summary: '청구서를 보내면 비서들이 확인해요', remaining: [], ratio: null });
+  assert.doesNotMatch(html, /class="meter"/);
+  assert.doesNotMatch(html, /남은 일/);
+});
+
+test('단계 막대: 남은 일에 들어가는 지출 이름은 이스케이프한다', () => {
+  const html = stepperHtml({ step: 2, label: '나누기', summary: '메뉴별로 나누지 않은 지출 1건', remaining: ['‘<img src=x>’ 나누기'], ratio: null });
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /&lt;img src=x&gt;/);
+});
+
+test('단계 막대: 끝난 방은 여섯 단계 모두 ✓이고 요약 상자 대신 완료 카드가 말한다', () => {
+  const html = stepperHtml({ step: 6, label: '끝', summary: '정산이 끝났어요', remaining: [], ratio: null });
+  assert.equal(html.match(/<li class="done">/g).length, 6);
+  assert.doesNotMatch(html, /aria-current/);
+  assert.doesNotMatch(html, /class="step-note"/);
+});
+
+test('방 화면: 단계 막대를 다음 할 일 카드 바로 위에 둔다', () => {
+  const src = readFileSync(new URL('../public/room.js', import.meta.url), 'utf8');
+  assert.match(src, /stepsSection\(\), nextCard\(\)/);
+});
+
+test('내 방 목록: 진행 중인 방은 이름 아래에 단계와 내 할 일, 진행 막대를 보인다', () => {
+  const html = roomRowsHtml([
+    { id: 'r', name: '오사카', progress: { step: 5, label: '보내기', summary: '송금 3번 중 1번 받음', ratio: 0.9, mine: 1 } },
+    { id: 'q', name: 'MT', progress: { step: 4, label: '응답', summary: '청구서 3개 중 2개 응답', ratio: 0.7, mine: 0 } },
+    { id: 'old', name: '회식' },
+  ]);
+  assert.match(html, /<span class="room-step">5\/6 보내기 · 내 할 일 1개<\/span>/, '내 차례인 방은 할 일 수를 먼저');
+  assert.match(html, /<span class="room-step">4\/6 응답 · 청구서 3개 중 2개 응답<\/span>/, '기다리기만 하면 되는 방은 무엇을 기다리는지');
+  assert.match(html, /<span class="meter mine" aria-hidden="true"><i style="width:90%"><\/i><\/span>/, '내 할 일이 있는 방의 막대만 강조색');
+  assert.match(html, /<span class="meter" aria-hidden="true"><i style="width:70%"><\/i><\/span>/);
+  assert.match(html, /id="room-name-2">회식<\/span><\/span>/, '진행 정보가 없는 방은 이름만');
+});
+
+test('완료 카드: 요약을 받으면 함께 쓴 돈·내 몫·송금 횟수·비서가 대신 처리한 일과 옮겨 간 곳을 보인다', () => {
+  const html = doneCardHtml({ total: 482300, mine: 120575, transfers: 3, naive: 21, autoAccepted: 5, mediated: 1 });
+  assert.match(html, /<p class="eyebrow">정산 완료<\/p><h2>정산이 끝났어요<\/h2>/);
+  assert.match(html, /<dt>함께 쓴 돈<\/dt><dd class="num">₩482,300<\/dd>/);
+  assert.match(html, /<dt>내 몫<\/dt><dd class="num">₩120,575<\/dd>/);
+  assert.match(html, /<dt>송금<\/dt><dd>3번 <span class="meta">지출마다 보냈다면 21번<\/span><\/dd>/);
+  assert.match(html, /<dt>비서가 대신 처리<\/dt><dd>자동 수락 5 · 중재 1<\/dd>/);
+  assert.match(html, /내 방 목록의 ‘끝남’으로 옮겨졌어요/, '방을 나간 게 아니라 끝남으로 옮겨졌음을 그 자리에서 알린다');
+  assert.match(doneCardHtml({ total: 10000, mine: 5000, transfers: 1, naive: 1, autoAccepted: 0, mediated: 0 }), /<dt>송금<\/dt><dd>1번<\/dd>/, '줄지 않았으면 비교하지 않는다');
+  assert.doesNotMatch(doneCardHtml({ total: 10000, mine: 5000, transfers: 1, naive: 1, autoAccepted: 0, mediated: 0 }), /비서가 대신 처리/);
+});
+
+test('/api/rooms는 방마다 진행 단계와 내 할 일 수를 함께 준다', async () => {
+  const store = new MemoryStore();
+  const server = createApp({ store, gemini: null, clock: () => new Date('2026-11-06T10:00:00Z'), env: { DEV_SEED: '1' } });
+  await new Promise((r) => server.listen(0, r));
+  try {
+    const two = [{ uid: 'me', name: '재윤' }, { uid: 'cs', name: '철수' }];
+    await store.put('rooms', { id: 'r-live', name: '오사카', members: two, version: 2, status: 'settling' });
+    await store.put('rooms', { id: 'r-done', name: '회식', members: two, version: 1, status: 'done' });
+    await store.put('expenses', { id: 'r-live:e1', roomId: 'r-live', title: '저녁', payer: 'cs', present: ['me', 'cs'], currency: 'KRW', split: 'equal', amount: 20000, date: '2026-11-05', time: '19:00', createdBy: 'cs' });
+    await store.put('invoices', { id: 'r-live:i1', roomId: 'r-live', to: 'me', status: 'accepted', version: 2, net: -10000 });
+    await store.put('transfers', { id: 'r-live:t1', roomId: 'r-live', from: 'me', to: 'cs', amount: 10000, version: 2, status: 'due', link: 'toss://x' });
+    const res = await fetch(`http://localhost:${server.address().port}/api/rooms`, { headers: { 'x-demo-user': 'me' } });
+    const { rooms } = await res.json();
+    const live = rooms.find((r) => r.id === 'r-live');
+    assert.deepEqual(live.progress, { step: 5, label: '보내기', summary: '송금 1번 중 0번 받음', ratio: 0.8, mine: 1 });
+    assert.deepEqual(rooms.find((r) => r.id === 'r-done').progress, { step: 6, label: '끝', summary: '정산이 끝났어요', ratio: 1, mine: 0 });
+  } finally {
+    server.close();
+  }
+});

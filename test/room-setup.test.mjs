@@ -268,5 +268,5 @@ test('정산이 끝난 방의 카드에서 바로 나가기 시트를 연다(메
   assert.match(html, /<button type="button" class="btn secondary" data-action="open-leave" aria-haspopup="dialog">이 방에서 나가기<\/button>/, '메뉴와 같은 이름으로, 시트가 열린다는 걸 알린다');
   assert.match(html, /내 방 목록에서도 빠져요/, '누르면 무엇이 달라지는지 버튼 가까이에 적는다');
   const src = readFileSync(new URL('../public/room.js', import.meta.url), 'utf8');
-  assert.match(src, /room\.status === 'done'\) return doneCardHtml\(\)/, '방 화면의 다음 할 일 카드가 이 카드를 쓴다');
+  assert.match(src, /room\.status === 'done'\) return doneCardHtml\(doneSummary\(/, '방 화면의 다음 할 일 카드가 이 카드를 요약과 함께 쓴다');
 });
