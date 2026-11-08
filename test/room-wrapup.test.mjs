@@ -157,17 +157,80 @@ test('주고받을 돈이 없으면 청구서를 보내자마자 완료된다', 
   assert.equal((await room(roomId)).status, 'done');
 });
 
-test('정산이 끝난 방은 닫힌다: 지출·이의·초대를 더 받지 않는다', async () => {
+test('정산이 끝난 방은 이의·초대를 더 받지 않는다(늦게 찾은 지출은 추가 정산으로 받는다)', async () => {
   const { roomId, token } = await roomOf(['me', 'cs']);
   const { json } = await spend(roomId, 'me', ['me']);
   await post(`/api/rooms/${roomId}/invoices/send`, 'me');
-  assert.equal((await spend(roomId, 'me', ['me', 'cs'])).status, 409);
-  assert.equal((await post(`/api/rooms/${roomId}/expenses/${json.expense.id}/delete`, 'me')).status, 409);
+  assert.equal((await room(roomId)).status, 'done');
   assert.equal((await post(`/api/rooms/${roomId}/disputes`, 'cs', { expenseId: json.expense.id, claim: '안 먹었어요' })).status, 409);
   assert.equal((await post(`/api/rooms/${roomId}/invite`, 'me')).status, 409);
   const preview = await get(`/api/invites/${token}`);
   assert.equal(preview.json.done, true);
   assert.equal((await post(`/api/invites/${token}/join`, 'yh', { agree: true })).status, 409);
+});
+
+// ---------------------------------------------------------------- 늦게 찾은 지출(추가 정산)
+// 끝난 방에 지출을 남기면 추가 정산이 열린다. 이미 오간 돈은 그대로 두고 차액만 다시 청구·송금한다
+async function settledRoom() {
+  const { roomId } = await roomOf(['me', 'cs']);
+  await spend(roomId, 'me', ['me', 'cs']); // 철수가 재윤에게 ₩15,000
+  await post(`/api/rooms/${roomId}/invoices/send`, 'me');
+  const [t] = await store.list('transfers', { roomId });
+  await post(`/api/rooms/${roomId}/transfers/${encodeURIComponent(t.id)}/confirm`, 'me');
+  assert.equal((await room(roomId)).status, 'done');
+  return roomId;
+}
+const currentTransfers = async (roomId) => {
+  const { version } = await room(roomId);
+  return (await store.list('transfers', { roomId })).filter((t) => t.version === version).map((t) => [t.from, t.to, t.amount]);
+};
+
+test('끝난 방에 지출을 남기면 추가 정산이 열리고, 이미 오간 돈은 두고 차액만 보낸다', async () => {
+  const roomId = await settledRoom();
+  const late = await spend(roomId, 'cs', ['me', 'cs'], { title: '택시', amount: 10000 });
+  assert.equal(late.status, 201);
+  const reopened = await room(roomId);
+  assert.equal(reopened.status, 'settling');
+  assert.equal(reopened.doneAt, undefined);
+  assert.ok((await kinds(roomId)).includes('room_reopened'));
+  assert.equal((await get('/api/rooms', 'me')).json.rooms.find((r) => r.id === roomId).status, 'settling', '내 방 목록의 끝남에서 다시 진행 중으로');
+  await post(`/api/rooms/${roomId}/invoices/send`, 'me');
+  assert.deepEqual(await currentTransfers(roomId), [['me', 'cs', 5000]], '택시 ₩10,000의 재윤 몫만큼만 재윤이 철수에게');
+});
+
+test('나간 사람이 낀 지출은 끝난 방에서도 지울 수 없다(나간 사람의 몫이 바뀐다)', async () => {
+  const { roomId } = await roomOf(['me', 'cs', 'yh']);
+  const { json } = await spend(roomId, 'me', ['me', 'cs']);
+  await post(`/api/rooms/${roomId}/invoices/send`, 'me');
+  const [t] = await store.list('transfers', { roomId });
+  await post(`/api/rooms/${roomId}/transfers/${encodeURIComponent(t.id)}/confirm`, 'me');
+  assert.equal((await post(`/api/rooms/${roomId}/leave`, 'cs')).status, 200);
+  const del = await post(`/api/rooms/${roomId}/expenses/${json.expense.id}/delete`, 'me');
+  assert.equal(del.status, 409);
+  assert.match(del.json.error, /나간 사람/);
+  assert.equal((await room(roomId)).status, 'done');
+});
+
+// 각자 낸 돈·몫이 그대로인 수정(제목 고치기 등)은 방 version을 올리지 않는다. 보낸 청구서가 그대로 살아 있다
+test('금액이 그대로인 수정은 방 version을 올리지 않아, 보낸 청구서를 다시 보내지 않아도 된다', async () => {
+  const { roomId } = await roomOf(['me', 'cs']);
+  const { json } = await spend(roomId, 'me', ['me', 'cs']);
+  await post(`/api/rooms/${roomId}/invoices/send`, 'me');
+  const before = await room(roomId);
+  const edit = await post(`/api/rooms/${roomId}/expenses/${json.expense.id}`, 'me', { expense: { ...json.expense, title: '저녁 식사' } });
+  assert.equal(edit.status, 200);
+  assert.equal((await store.get('expenses', json.expense.id)).title, '저녁 식사');
+  assert.equal((await room(roomId)).version, before.version);
+  const amount = await post(`/api/rooms/${roomId}/expenses/${json.expense.id}`, 'me', { expense: { ...json.expense, amount: 40000 } });
+  assert.equal(amount.status, 200);
+  assert.equal((await room(roomId)).version, before.version + 1, '금액이 바뀌면 올린다');
+});
+
+test('끝난 방에서 금액이 그대로인 수정은 추가 정산을 열지 않는다', async () => {
+  const roomId = await settledRoom();
+  const [exp] = await store.list('expenses', { roomId });
+  assert.equal((await post(`/api/rooms/${roomId}/expenses/${exp.id}`, 'me', { expense: { ...exp, title: '늦은 저녁' } })).status, 200);
+  assert.equal((await room(roomId)).status, 'done');
 });
 
 // ---------------------------------------------------------------- 내보내기

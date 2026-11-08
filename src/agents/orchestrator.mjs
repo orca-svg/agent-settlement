@@ -318,7 +318,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
   }
 
   // 지금 묶음의 송금이 모두 '받았어요'로 끝나면(보낼 돈이 없으면 바로) 방을 완료로 바꾼다(#55).
-  // 완료된 방은 내 방 목록의 '끝남'에 보이고, 지출·이의·초대를 더 받지 않는다(src/rooms/policy.mjs)
+  // 완료된 방은 내 방 목록의 '끝남'에 보이고, 이의·초대를 더 받지 않는다. 지출이 바뀌면 추가 정산으로 다시 열린다(src/rooms/policy.mjs)
   async function finishIfDone(roomId) {
     const { room, expenses } = await load(roomId);
     if (room.status !== 'settling' || !expenses.length) return; // 지출 없이 보낸 방은 닫지 않는다(닫히면 지출을 남길 수 없다)
