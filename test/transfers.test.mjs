@@ -435,3 +435,45 @@ test('tick은 처리할 송금만 읽고, 방은 한 번만 읽고, 지출은 �
   await orch.tick();
   assert.deepEqual(read, { transfers: active.length, rooms: 1, expenses: 0 });
 });
+
+// 지출이 바뀌어 송금을 다시 만들 때, 이미 오간 돈(보냈어요·받았어요)은 다시 보내게 하지 않는다. 남은 차액만 보낸다
+async function bump(ctx) {
+  await ctx.store.put('rooms', { ...(await ctx.store.get('rooms', 'demo-t')), version: 2 }); // 누군가 지출을 고쳤다(금액은 그대로)
+  await ctx.orch.sendInvoices('demo-t', 'me');
+  return (await ctx.transfers()).filter((t) => t.version === 2);
+}
+
+test('지출이 바뀌어도 이미 받은 송금은 새 송금에 다시 넣지 않는다', async () => {
+  const ctx = await setup();
+  const id = await sentCsYh(ctx);
+  await ctx.orch.confirmReceipt('demo-t', id, 'yh');
+  const v2 = await bump(ctx);
+  assert.deepEqual(v2.map((t) => [t.from, t.to, t.amount]).sort(), [['cs', 'me', 91462], ['ms', 'me', 260453]]);
+});
+
+test('보냈다고만 한 송금(받았어요 전)도 이미 오간 돈으로 보고 빼고, 그 송금이 확인돼야 방이 끝난다', async () => {
+  const ctx = await setup();
+  const id = await sentCsYh(ctx);
+  const v2 = await bump(ctx);
+  assert.deepEqual(v2.map((t) => [t.from, t.to, t.amount]).sort(), [['cs', 'me', 91462], ['ms', 'me', 260453]]);
+  for (const t of v2) {
+    await ctx.orch.markSent('demo-t', t.id, t.from);
+    await ctx.orch.confirmReceipt('demo-t', t.id, t.to);
+  }
+  assert.equal((await ctx.store.get('rooms', 'demo-t')).status, 'settling', '예전 묶음의 송금이 아직 받았어요 전이다');
+  await ctx.orch.confirmReceipt('demo-t', id, 'yh');
+  assert.equal((await ctx.store.get('rooms', 'demo-t')).status, 'done');
+});
+
+test('지출이 바뀌었는데 남은 돈이 모두 이미 오갔으면 새 송금 없이 끝난다', async () => {
+  const ctx = await setup();
+  for (const t of await ctx.transfers()) {
+    await ctx.orch.markSent('demo-t', t.id, t.from); // 셋 다 보냈어요(아직 받았어요 전)
+  }
+  const v2 = await bump(ctx);
+  assert.deepEqual(v2, []);
+  assert.equal((await ctx.store.get('rooms', 'demo-t')).status, 'settling');
+  for (const t of (await ctx.transfers()).filter((x) => x.version === 1)) await ctx.orch.confirmReceipt('demo-t', t.id, t.to);
+  const room = await ctx.store.get('rooms', 'demo-t');
+  assert.equal(room.status, 'done');
+});
