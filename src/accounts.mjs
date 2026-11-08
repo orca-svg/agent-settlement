@@ -16,7 +16,7 @@ async function progressIn(store, room, uid) {
     VIEW.forEach((col, i) => { view[col] = lists[i]; });
   }
   const p = progressOf(view, uid);
-  return { step: p.step, label: p.label, summary: p.summary, ratio: overallRatio(p), mine: pendingActions(view).filter((a) => a.for === uid).length };
+  return { step: p.step, label: p.label, summary: p.summary, ratio: overallRatio(p), mine: pendingActions(view).filter((a) => a.for === uid).length, extra: Boolean(p.extra) };
 }
 // 내 프로필(방에 보일 이름·색). 처음 들어온 사람은 로그인 이름과 견본 중 무작위 색으로 시작한다.
 // 저장해 두어 다시 열어도 같은 색이고, 동시에 와도 하나로 정해지게 없을 때만 넣는다. 방 만들기·참가(#4)도 이 값을 멤버에 넣는다

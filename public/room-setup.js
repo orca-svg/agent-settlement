@@ -201,7 +201,7 @@ export function doneCardHtml(s) {
         ${handled ? `<div><dt>비서가 대신 처리</dt><dd>${handled}</dd></div>` : ''}
       </dl>` : '';
   return `<section class="next done"><p class="eyebrow">정산 완료</p><h2>정산이 끝났어요</h2>${sum}
-      <p>아무도 단톡방에서 돈 얘기를 꺼내지 않았어요. 이 방은 내 방 목록의 ‘끝남’으로 옮겨졌어요. 기록으로 남고, 지출을 더 남기거나 고칠 수 없어요. 더 볼 일이 없으면 나가도 돼요. 나가면 내 방 목록에서도 빠져요.</p>
+      <p>아무도 단톡방에서 돈 얘기를 꺼내지 않았어요. 이 방은 내 방 목록의 ‘끝남’으로 옮겨졌어요. 늦게 찾은 영수증이 있으면 장부에 지출을 추가해요. 바뀐 만큼만 추가로 정산해요. 더 볼 일이 없으면 나가도 돼요. 나가면 내 방 목록에서도 빠져요.</p>
       <div class="actions"><button type="button" class="btn secondary" data-action="open-leave" aria-haspopup="dialog">이 방에서 나가기</button></div></section>`;
 }
 

@@ -26,7 +26,7 @@ export function roomTabs(rooms, tab = 'live') {
 // 진행 중인 방은 이름 아래에 몇 번째 단계인지와 내 할 일(없으면 무엇을 기다리는지), 그 아래 진행 막대를 둔다(progress.js).
 // 내 할 일이 있는 방의 막대만 강조색이라, 목록에서 어디부터 들어갈지 고를 수 있다
 const stepLine = (p) => (p && p.step < STEPS.length
-  ? `<span class="room-step">${p.step}/${STEPS.length} ${esc(p.label)} · ${p.mine ? `내 할 일 ${p.mine}개` : esc(p.summary)}</span>`
+  ? `<span class="room-step">${p.extra ? '추가 정산 · ' : ''}${p.step}/${STEPS.length} ${esc(p.label)} · ${p.mine ? `내 할 일 ${p.mine}개` : esc(p.summary)}</span>`
     + `<span class="meter${p.mine ? ' mine' : ''}" aria-hidden="true"><i style="width:${Math.round(p.ratio * 100)}%"></i></span>`
   : '');
 
