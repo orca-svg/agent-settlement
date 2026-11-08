@@ -1,6 +1,8 @@
 // 실제 방 화면. 지금은 방 불러오기, (개발용) 신원 고르기, 지출, 누가 누구에게, 비서끼리 기록까지 보여 준다.
 // 지출 추가(#6)와 비서 처리(#9) 화면은 이 파일에 이어 붙인다.
 import { won, money, dayLabel, amountOf, toKrw, shares, settle, active } from './core.js';
+import { progressOf, doneSummary, changeNotice } from './progress.js';
+import { stepperHtml } from './progress-ui.js';
 import { unitOf, decimalsOf } from './currencies.js';
 import { leaveBlock } from './leave.js';
 import { esc, chip, avatarHtml, tile, CHEVRON, CHECK, CROSS, ICON_DONE, logItemHtml, minuteLabels, createSheet, mountSegs, resetSegs, mountSliders, segArrowKeys, topic, subj, restNote, allocLabel, allocButton, ARROW, ALERT, qrImageUrl, qrIsFresh, receiptPickers, sendMode, sendFollowUp, flaggedLines, blockedNotice, askedBy, nudge, COMPUTER_QUERY, disputeWaiting, disputeChoices, disputeNote, disputeRejected, disputeLive, disputeStatus, changedLines, proposalLinesHtml, reviseChoicesHtml, invoiceRows } from './ui.js';
@@ -404,10 +406,17 @@ function expSheetHtml(exp) {
       <div class="list">${room.members.filter((m) => s.krwShare[m.uid] !== undefined).map((m) => `<div class="row" style="--inset:52px">${avatar(m.uid)}
         <span class="grow">${esc(m.name)}${m.uid === exp.payer ? ' <span class="meta">· 낸 사람</span>' : ''}</span>
         <span class="amount num">${won(s.krwShare[m.uid])}</span></div>`).join('')}</div>${restNote(s.rest)}</section>
-    ${room.status === 'done' ? '<p class="group-note">정산이 끝난 방이라 지출을 고치거나 지울 수 없어요.</p>' : `<div style="display:grid;gap:8px">
+    ${noticeHtml('expense')}<div style="display:grid;gap:8px">
       <button class="btn plain" data-action="edit-exp" data-id="${esc(exp.id)}">지출 고치기</button>
       <button class="btn danger ${state.armedDelete === exp.id ? 'armed' : ''}" data-action="delete-exp" data-id="${esc(exp.id)}">${state.armedDelete === exp.id ? '한 번 더 누르면 지워요' : '지출 지우기'}</button>
-    </div>`}`;
+    </div>`;
+}
+
+// 저장 전 알림(D, progress.js의 changeNotice). 청구서가 나갔거나 끝난 방에서, 누르면 정산이 어떻게 바뀌는지 그 버튼 바로 위에서 미리 말한다.
+// 주의할 일이라 주황(미리 보기 알림과 같은 색)이고, 알릴 게 없으면 아무것도 그리지 않는다
+function noticeHtml(mode) {
+  const text = changeNotice(state.data, mode);
+  return text ? `<p class="preview-note save-note">${esc(text)}</p>` : '';
 }
 
 // ---------------------------------------------------------------- 영수증 사진 모달
@@ -770,9 +779,12 @@ function hero() {
     <div class="people">${here.map(person).join('')}${hasStarted(room) ? '' : inviteButtonHtml()}</div></section>`;
 }
 
+// 정산이 어디까지 왔는지(단계 막대와 한 줄 요약, progress.js). 다음 할 일 카드 바로 위에 둬서 '어디까지'와 '내 차례'를 한 묶음으로 읽게 한다
+const stepsSection = () => stepperHtml(progressOf(state.data, state.data.me.uid));
+
 function nextCard() {
   const mine = state.data.actions ?? [];
-  if (state.data.room.status === 'done') return doneCardHtml(); // 끝난 방은 지출을 더 받지 않고, 남은 일은 나가기뿐이다(#55)
+  if (state.data.room.status === 'done') return doneCardHtml(doneSummary(state.data, state.data.me.uid)); // 끝난 방의 남은 일은 나가기뿐이다(#55). 늦게 찾은 지출은 장부 줄에서 더한다(추가 정산)
   if (!mine.length) {
     // 영수증 사진은 지출 남기기 시트 맨 위에서 '직접 입력'과 나란히 고른다. 카드에는 입구 하나만 둔다
     const add = '<button class="btn" data-action="add-expense">지출 남기기</button>';
@@ -824,7 +836,7 @@ function expensesSection() {
       <span class="end"><span class="amount">${won(toKrw(e, room, room.policy).krw)}</span></span>
       ${CHEVRON}
     </button>`).join('');
-  return `<section class="group"><h2 class="group-label"><span>지출 ${expenses.length}건</span>${room.status === 'done' ? '' : '<button class="text-btn" data-action="add-expense">지출 추가</button>'}</h2>
+  return `<section class="group"><h2 class="group-label"><span>지출 ${expenses.length}건</span><button class="text-btn" data-action="add-expense">지출 추가</button></h2>
     <div class="list">${rows || '<p class="empty">아직 지출이 없어요.</p>'}</div></section>`;
 }
 
@@ -873,6 +885,7 @@ function addSheetHtml() {
     <section class="group"><div class="list"><div class="row field"><span class="grow">날짜</span>${dateField}</div>
       <label class="row field"><span class="grow">시각</span><input type="time" data-field="time" value="${esc(d.time)}" aria-label="시각"></label></div></section>
     ${state.formError ? `<p class="form-error" role="alert">${esc(state.formError)}</p>` : ''}
+    ${noticeHtml(state.editing ? 'edit' : 'add')}
     <button class="btn" style="width:100%" data-action="save-expense" ${state.saving ? 'disabled' : ''}>${state.saving ? '저장하는 중…' : state.editing ? '고친 내용 저장' : '지출 남기기'}</button>`;
 }
 
@@ -1836,12 +1849,12 @@ function render() {
     return;
   }
   $('#nav-title').textContent = state.data.room.name;
-  $('#nav-add').hidden = state.data.room.status === 'done';
+  $('#nav-add').hidden = false; // 지출은 끝난 방에도 더할 수 있다(추가 정산). 방을 열기 전에만 숨긴다
   logPop.show(true);
   logPop.update(state.events); // 할 일이 바뀌었을 수 있다
   meMenu.update();
   const roomSetup = setupHtml({ room: state.data.room, me: state.data.me, avatar, policyEdit: setup.policyEdit, policyOpen: setup.policyOpen, error: setup.error });
-  main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), nextCard(), roomSetup, disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
+  main.innerHTML = [hero(), whoPicker(), agentPanel.nudgeHtml(), disputeLine(), stepsSection(), nextCard(), roomSetup, disputesSection(), expensesSection(), transfersSection(), locationSection()].join('');
   mountSegs(main);
   // 이의·청구서 시트는 글을 쓰는 중이면 다시 그리지 않는다(타이핑 중 초점을 잃지 않게)
   if (['exp', 'transfer', 'invite', 'leave'].includes(state.sheet) || (state.sheet === 'dispute' && !state.rejectDraft) || (state.sheet === 'invoice' && !state.disputeDraft)) renderSheet();

@@ -2,6 +2,22 @@ import { HttpError, readJson } from './http.mjs';
 import { revokeQrLinks, revokeUserQr } from './payments/qr.mjs';
 import { randomProfileColor } from '../public/profile-colors.js';
 import { forgetVerified } from './identity.mjs';
+import { pendingActions } from './actions.mjs';
+import { progressOf, overallRatio } from '../public/progress.js';
+
+const VIEW = ['expenses', 'invoices', 'disputes', 'transfers'];
+// 내 방 목록의 진행 줄: 몇 번째 단계인지(progress.js)와 내 할 일 수. 방 화면과 같은 판정이다.
+// 끝난 방은 목록을 읽지 않아도 '끝'이다. 진행 중인 방은 방 화면과 같은 네 목록을 읽는데,
+// Firestore 읽기가 방 수만큼 늘지만 읽기 캐시(#53)가 반복 요청을 메모리에서 답한다
+async function progressIn(store, room, uid) {
+  const view = { room };
+  if (room.status !== 'done') {
+    const lists = await Promise.all(VIEW.map((col) => store.list(col, { roomId: room.id })));
+    VIEW.forEach((col, i) => { view[col] = lists[i]; });
+  }
+  const p = progressOf(view, uid);
+  return { step: p.step, label: p.label, summary: p.summary, ratio: overallRatio(p), mine: pendingActions(view).filter((a) => a.for === uid).length, extra: Boolean(p.extra) };
+}
 // 내 프로필(방에 보일 이름·색). 처음 들어온 사람은 로그인 이름과 견본 중 무작위 색으로 시작한다.
 // 저장해 두어 다시 열어도 같은 색이고, 동시에 와도 하나로 정해지게 없을 때만 넣는다. 방 만들기·참가(#4)도 이 값을 멤버에 넣는다
 export const profileOf = async (store, me) => await store.get('users', me.uid) || await store.putIfAbsent('users', { id: me.uid, name: me.name, color: randomProfileColor() });
@@ -30,7 +46,8 @@ export function registerAccountRoutes(routes, { store, authenticate, auth, clock
     const me = await authenticate(req);
     // 서비스의 모든 방이 아니라 내가 멤버인 방만 읽는다(Firestore는 읽은 문서 수가 비용, #3).
     // status로 화면이 진행 중인 방과 끝난 방('done', #55)을 나눈다. 없으면 준비 중이다
-    return { rooms: (await store.roomsOf(me.uid)).map(({ id, name, dates, status }) => ({ id, name, dates, status: status ?? 'ready' })) };
+    const rooms = await store.roomsOf(me.uid);
+    return { rooms: await Promise.all(rooms.map(async (room) => ({ id: room.id, name: room.name, dates: room.dates, status: room.status ?? 'ready', progress: await progressIn(store, room, me.uid) }))) };
   });
   routes.post('/api/me/delete', async ({ req }) => {
     const me = await authenticate(req, { allowDeleting: true });

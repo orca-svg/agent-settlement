@@ -2,7 +2,7 @@
 // 환율 정책은 외화로 쓴 돈을 정산하는 방에만 보이고 묻는다(#55). 원화 방에는 정책 칸·동의 버튼·안내가 없다.
 import { esc, chip, avatarHtml, GOOGLE_G, ICON_LINK, ICON_COPY, ICON_SHARE, ICON_DONE, CHEVRON } from './ui.js';
 import { POLICIES } from './data.js';
-import { active, isForeign } from './core.js';
+import { active, isForeign, won } from './core.js';
 import { CURRENCIES, unitOf } from './currencies.js';
 import { leaveBlock } from './leave.js';
 import { initial } from './profile-form.js';
@@ -189,10 +189,19 @@ export function inviteSheetHtml({ room, me, avatar, invite, copied = false, copy
 }
 
 // 정산이 끝난 방의 다음 할 일 카드. 끝난 방에서 남은 일은 나가기뿐이라 메뉴에 숨기지 않고 여기 둔다.
-// 누르면 바로 나가지 않고 나가기 시트(무엇을 잃는지 + 확인)를 연다
-export function doneCardHtml() {
-  return `<section class="next done"><p class="eyebrow">정산 완료</p><h2>정산이 끝났어요</h2>
-      <p>아무도 단톡방에서 돈 얘기를 꺼내지 않았어요. 이 방은 기록으로 남고, 지출을 더 남기거나 고칠 수 없어요. 더 볼 일이 없으면 나가도 돼요. 나가면 내 방 목록에서도 빠져요.</p>
+// 누르면 바로 나가지 않고 나가기 시트(무엇을 잃는지 + 확인)를 연다.
+// s(progress.js의 doneSummary)를 받으면 함께 쓴 돈·내 몫·송금 횟수·비서가 대신 처리한 일을 위에 보이고,
+// 방이 '끝남'으로 옮겨졌다고 그 자리에서 알린다(사용자 테스트에서 끝난 방을 '나갔다'로 이해했다)
+export function doneCardHtml(s) {
+  const handled = s ? [s.autoAccepted && `자동 수락 ${s.autoAccepted}`, s.mediated && `중재 ${s.mediated}`].filter(Boolean).join(' · ') : '';
+  const sum = s ? `<dl class="done-sum">
+        <div><dt>함께 쓴 돈</dt><dd class="num">${won(s.total)}</dd></div>
+        <div><dt>내 몫</dt><dd class="num">${won(s.mine)}</dd></div>
+        <div><dt>송금</dt><dd>${s.transfers}번${s.naive > s.transfers ? ` <span class="meta">지출마다 보냈다면 ${s.naive}번</span>` : ''}</dd></div>
+        ${handled ? `<div><dt>비서가 대신 처리</dt><dd>${handled}</dd></div>` : ''}
+      </dl>` : '';
+  return `<section class="next done"><p class="eyebrow">정산 완료</p><h2>정산이 끝났어요</h2>${sum}
+      <p>아무도 단톡방에서 돈 얘기를 꺼내지 않았어요. 이 방은 내 방 목록의 ‘끝남’으로 옮겨졌어요. 늦게 찾은 영수증이 있으면 장부에 지출을 추가해요. 바뀐 만큼만 추가로 정산해요. 더 볼 일이 없으면 나가도 돼요. 나가면 내 방 목록에서도 빠져요.</p>
       <div class="actions"><button type="button" class="btn secondary" data-action="open-leave" aria-haspopup="dialog">이 방에서 나가기</button></div></section>`;
 }
 

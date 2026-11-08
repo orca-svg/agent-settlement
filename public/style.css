@@ -250,6 +250,41 @@ h1, h2, h3, p { margin: 0; }
 /* 거부로 끝난 이의는 초록 체크가 아니라 회색 ✕. 색을 못 봐도 동의와 구분된다 */
 .done-note.ended { background: var(--fill); }
 .done-note.ended svg { color: var(--label-2); }
+/* ---------- 정산 단계 막대(progress-ui.js) ----------
+   21st.dev Stepper(@kevingirelli)의 모양을 옮겼다. 끝난 단계 ✓(초록), 지금 단계 채운 원(파랑)과 굵은 이름, 남은 단계 빈 원과 번호.
+   단계는 순서가 있어 위치로 나타내고, 색만으로 구분하지 않게 ✓·번호·굵기를 함께 쓴다. 다음 할 일 카드와 한 묶음이라 사이를 좁게 둔다 */
+.settle-steps { background: var(--card); border-radius: 16px; padding: 16px 12px 14px; margin-bottom: 12px; display: grid; gap: 14px; }
+/* 장부 줄. 늘 열려 있는 지출 장부라 단계와 성격이 달라서, 단계 막대 위에 가는 선으로 떼어 둔다 */
+.book { display: flex; align-items: center; gap: 10px; padding: 0 4px 12px; border-bottom: 0.5px solid var(--sep); }
+.book-label { font-size: 0.8125rem; font-weight: 600; color: var(--label-2); letter-spacing: 0; }
+.book-sum { flex: 1; min-width: 0; font-size: 0.9375rem; color: var(--label); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.book .text-btn { padding: 4px 2px; font-size: 0.9375rem; }
+.stepper { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stepper li { position: relative; display: grid; justify-items: center; gap: 5px; text-align: center; }
+.stepper li + li::before { content: ""; position: absolute; top: 11px; left: calc(-50% + 16px); right: calc(50% + 16px); height: 2px; border-radius: 1px; background: var(--fill-2); }
+.stepper li.done + li::before { background: var(--green); }
+.step-dot { position: relative; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 0.8125rem; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--label-2); box-shadow: inset 0 0 0 1.5px var(--fill-2); }
+.stepper .done .step-dot { box-shadow: none; background: var(--green-soft); color: var(--green); }
+.stepper .done .step-dot svg { width: 14px; height: 14px; }
+.stepper .now .step-dot { box-shadow: none; background: var(--tint); color: #fff; }
+.step-label { font-size: 0.75rem; line-height: 1.3; color: var(--label-2); letter-spacing: 0; white-space: nowrap; }
+.stepper .now .step-label { color: var(--tint); font-weight: 600; }
+/* 한 줄 요약. 옅은 파랑 바탕에서도 대비가 모자라지 않게 글자는 본문색, 파랑은 막대에만 쓴다 */
+.step-note { background: var(--tint-soft); border-radius: 12px; padding: 10px 12px; display: grid; gap: 2px; }
+.step-sum { font-size: 0.9375rem; color: var(--label); letter-spacing: 0; }
+.step-sum b { font-weight: 600; }
+.step-left { font-size: 0.8125rem; color: var(--label-2); letter-spacing: 0; }
+/* 추가 정산 줄. 단계가 다시 도는 까닭이라 남은 일보다 앞에, 본문색으로 */
+.step-extra { font-size: 0.8125rem; color: var(--label); letter-spacing: 0; }
+.meter { display: block; height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; }
+.step-note .meter { margin-top: 6px; background: var(--card); }
+.meter i { display: block; height: 100%; border-radius: 2px; background: var(--tint); }
+/* 끝난 방의 요약. '이름표: 값'을 늘어놓지 않고 짧은 이름표와 오른쪽 정렬 숫자로 */
+.done-sum { margin: 0; display: grid; border-top: 0.5px solid var(--sep); }
+.done-sum div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0; border-bottom: 0.5px solid var(--sep); font-size: 0.9375rem; letter-spacing: 0; }
+.done-sum dt { color: var(--label-2); }
+.done-sum dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.done-sum .meta { display: block; font-size: 0.8125rem; color: var(--label-2); }
 .progress { height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; }
 .progress i {
   display: block;
@@ -527,6 +562,8 @@ button.row:active { background: var(--fill); }
   border-radius: 8px;
   letter-spacing: 0;
 }
+/* 저장 전 알림(D): 누르는 버튼 바로 위에 둔다 */
+.save-note { margin-bottom: 10px; line-height: 1.5; }
 .num { font-variant-numeric: tabular-nums; }
 
 /* ---------- 비서 기억 ---------- */
@@ -1288,6 +1325,12 @@ button.person { appearance: none; border: 0; font-family: inherit; line-height: 
 .room-table a:active { background: var(--fill); }
 .room-table a:focus-visible { outline-offset: -3px; }
 .room-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 방 이름 아래의 진행 줄(room-list.js). 내 할 일이 있는 방만 막대가 강조색이다 */
+.room-main { display: grid; gap: 4px; min-width: 0; }
+.room-main .room-name { display: block; }
+.room-step { font-size: 0.8125rem; color: var(--label-2); letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-main .meter { margin-top: 2px; }
+.room-main .meter:not(.mine) i { background: var(--label-3); }
 .room-dates { font-size: 0.875rem; color: var(--label-2); font-variant-numeric: tabular-nums; letter-spacing: 0; }
 .room-table .chev { color: var(--label-3); }
 .room-empty { background: var(--card); border-radius: var(--radius); padding: 20px 16px; }

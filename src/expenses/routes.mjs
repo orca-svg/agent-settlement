@@ -1,7 +1,7 @@
 // 지출 API. member(req, roomId)는 app.mjs가 넘겨주는 멤버 확인 함수다.
 import { randomUUID } from 'node:crypto';
 import { readJson, send, HttpError } from '../http.mjs';
-import { toKrw, won } from '../../public/core.js';
+import { toKrw, won, ledger, active } from '../../public/core.js';
 import { subj, topic, obj, whose } from '../../public/ui.js';
 import { MAX_RECEIPT } from '../http.mjs';
 import { allocateWithGemini, publicReason } from '../agents/allocate.mjs';
@@ -15,30 +15,51 @@ import { withDayRate } from '../rooms/fx.mjs';
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
-// 정산이 끝난 방은 닫힌다(#55). 지출을 바꾸면 이미 '받았어요'로 끝난 돈을 다시 나눠 또 보내게 된다
-function open(room) {
-  if (isDone(room)) throw new HttpError(409, '정산이 끝난 방이라 지출을 더 남기거나 고칠 수 없어요');
+// 나간 사람(#55)은 끝난 방에서만 지출에 남아 있다. 그 지출을 바꾸면 나간 사람의 몫이 바뀌는데, 그 사람은 청구서도 송금도 받지 않는다
+function guardLeft(room, exp) {
+  const gone = new Set(room.members.filter((m) => !active(m)).map((m) => m.uid));
+  if ([exp.payer, ...(exp.present ?? [])].some((u) => gone.has(u))) throw new HttpError(409, '방에서 나간 사람이 낀 지출이라 고치거나 지울 수 없어요');
 }
 
+// 청구서가 담는 것(사람마다 낸 돈·몫)과 비서가 근거를 볼 때 쓰는 날짜·시각·함께한 사람. 이것이 같으면 보낸 청구서는 그대로 맞다
+const billKey = (room, expenses) => JSON.stringify([
+  ledger(room, expenses, room.policy),
+  expenses.map((e) => [e.id, e.date, e.time, e.present]).sort(),
+]);
+
 export function registerExpenseRoutes(routes, { store, gemini, member, overLimit, allocCache, fx }) {
+  // 지출을 바꾼 뒤 방을 저장한다. 청구서에 담기는 것이 바뀔 때만 version을 올려 보낸 청구서를 밀어낸다(제목만 고치면 그대로).
+  // 끝난 방에서 바뀌면 추가 정산을 연다. 이미 오간 돈은 그대로 두고 차액만 다시 청구·송금한다(orchestrator의 afterMoved)
+  async function commitRoom({ found, room = found, before, after, event }) {
+    const changed = billKey(room, before) !== billKey(room, after);
+    const reopen = changed && isDone(room);
+    const { doneAt, ...open } = room;
+    const next = reopen ? { ...open, status: 'settling', version: room.version + 1 } : changed ? { ...room, version: room.version + 1 } : room;
+    if (next !== found) await store.put('rooms', next);
+    if (event) await store.appendEvent(room.id, event);
+    if (reopen) {
+      await store.appendEvent(room.id, { from: 'system', to: 'all', kind: 'room_reopened', text: '정산이 끝난 뒤 지출이 바뀌어서 추가 정산을 시작해요. 이미 오간 돈은 그대로 두고 바뀐 만큼만 주고받아요' });
+    }
+    return changed;
+  }
+  const expensesOf = (roomId) => store.list('expenses', { roomId });
+  const replaced = (list, saved) => list.map((e) => (e.id === saved.id ? saved : e));
+
   routes.post('/api/rooms/:id/expenses', async ({ req, res, params }) => {
     const { room: found, me } = await member(req, params.id);
-    open(found);
     const body = await readJson(req, { limit: MAX_RECEIPT });
     const room = await withDayRate(fx, found, body.expense); // 외화 지출이면 결제일 환율을 받아 방 표에 넣는다(#55)
     const checked = validateExpense(body.expense, room);
     if (!checked.ok) throw new HttpError(400, checked.errors.join(' '));
     const photo = checked.expense.source === 'receipt' && IMAGE_TYPES.includes(body.receipt?.mimeType) && typeof body.receipt?.data === 'string' && body.receipt.data ? body.receipt : null;
     const expense = { ...checked.expense, id: `${room.id}-${randomUUID().slice(0, 8)}`, roomId: room.id, createdBy: me.uid, ...(photo ? { hasReceipt: true } : {}) };
+    const before = await expensesOf(room.id);
     await store.put('expenses', expense);
     // 영수증 사진은 지출과 따로 둔다(목록을 불러올 때마다 사진을 싣지 않도록). #3에서 Firebase Storage로 옮긴다
     if (photo) await store.put('receipts', { id: expense.id, roomId: room.id, mimeType: photo.mimeType, data: photo.data });
-    await store.put('rooms', { ...room, version: room.version + 1 });
-    await store.appendEvent(room.id, {
-      from: 'system',
-      to: 'all',
-      kind: 'expense_added',
-      text: `${subj(me.name)} ${expense.title} ${won(toKrw(expense, room, room.policy).krw)}을 남겼어요`,
+    await commitRoom({
+      found, room, before, after: [...before, expense],
+      event: { from: 'system', to: 'all', kind: 'expense_added', text: `${subj(me.name)} ${expense.title} ${won(toKrw(expense, room, room.policy).krw)}을 남겼어요` },
     });
     send(res, 201, { expense });
   });
@@ -57,9 +78,9 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
 
   async function roomExpense(req, roomId, eid, { read = false } = {}) {
     const { room, me } = await member(req, roomId);
-    if (!read) open(room);
     const exp = await store.get('expenses', eid);
     if (!exp || exp.roomId !== room.id) throw new HttpError(404, '지출을 찾을 수 없어요');
+    if (!read) guardLeft(room, exp);
     return { room, me, exp };
   }
 
@@ -74,9 +95,9 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     const lineKey = (e) => JSON.stringify((e.items ?? []).map((it) => [it.id, it.qty, it.unit]));
     const keepAlloc = exp.alloc && next.items && lineKey(next) === lineKey(exp) && next.present.join() === exp.present.join();
     const saved = { ...next, id: exp.id, roomId: room.id, createdBy: exp.createdBy, ...(exp.hasReceipt ? { hasReceipt: true } : {}), ...(keepAlloc ? { alloc: exp.alloc, allocMemory: exp.allocMemory } : {}) };
+    const before = await expensesOf(room.id);
     await store.put('expenses', saved);
-    await store.put('rooms', { ...room, version: room.version + 1 });
-    await store.appendEvent(room.id, { from: 'system', to: 'all', kind: 'expense_edited', text: `${subj(me.name)} ${obj(`‘${saved.title}’`)} 고쳤어요` });
+    await commitRoom({ found, room, before, after: replaced(before, saved), event: { from: 'system', to: 'all', kind: 'expense_edited', text: `${subj(me.name)} ${obj(`‘${saved.title}’`)} 고쳤어요` } });
     await supersedeDisputes(store, room.id, exp, saved);
     return { expense: saved };
   });
@@ -84,10 +105,10 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
   // 지출 지우기. 영수증 사진도 함께 지운다
   routes.post('/api/rooms/:id/expenses/:eid/delete', async ({ req, params }) => {
     const { room, me, exp } = await roomExpense(req, params.id, params.eid);
+    const before = await expensesOf(room.id);
     await store.delete('expenses', exp.id);
     await store.delete('receipts', exp.id);
-    await store.put('rooms', { ...room, version: room.version + 1 });
-    await store.appendEvent(room.id, { from: 'system', to: 'all', kind: 'expense_deleted', text: `${subj(me.name)} ${obj(`‘${exp.title}’`)} 지웠어요` });
+    await commitRoom({ found: room, before, after: before.filter((e) => e.id !== exp.id), event: { from: 'system', to: 'all', kind: 'expense_deleted', text: `${subj(me.name)} ${obj(`‘${exp.title}’`)} 지웠어요` } });
     await supersedeDisputes(store, room.id, exp);
     return { deleted: exp.id };
   });
@@ -116,16 +137,19 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     const reasonOf = (id, a) => (out.how === 'obvious' ? a.reason : publicReason(exp.items.find((it) => it.id === id), a, exp, room));
     const alloc = Object.fromEntries(Object.entries(out.alloc).map(([id, a]) => [id, { consumers: a.consumers, confidence: a.confidence, reason: reasonOf(id, a) }]));
     const saved = { ...exp, split: 'items', alloc, allocMemory: memoryKey(memory) };
+    const before = await expensesOf(room.id);
     await store.put('expenses', saved);
-    await store.put('rooms', { ...room, version: room.version + 1 });
     const used = Object.values(memory).reduce((n, list) => n + list.length, 0);
     const label = out.source === 'rules' ? '규칙' : out.source;
-    await store.appendEvent(room.id, {
-      from: exp.createdBy, to: 'all', kind: 'allocated',
-      text: out.how === 'obvious' ? `${topic(`‘${exp.title}’`)} ${out.why}` : `${exp.title} 영수증 ${exp.items.length}줄을 비서들이 공유한 기억 ${used}개로 나눴어요.`,
-      meta: out.how === 'obvious' ? '나눈 방법: AI 없이 규칙으로'
-        : out.how === 'cache' ? `나눈 방법: ${label} · 이전 답 재사용`
-        : `나눈 방법: ${label} · ${(latencyMs / 1000).toFixed(1)}초 걸렸어요`,
+    await commitRoom({
+      found: room, before, after: replaced(before, saved),
+      event: {
+        from: exp.createdBy, to: 'all', kind: 'allocated',
+        text: out.how === 'obvious' ? `${topic(`‘${exp.title}’`)} ${out.why}` : `${exp.title} 영수증 ${exp.items.length}줄을 비서들이 공유한 기억 ${used}개로 나눴어요.`,
+        meta: out.how === 'obvious' ? '나눈 방법: AI 없이 규칙으로'
+          : out.how === 'cache' ? `나눈 방법: ${label} · 이전 답 재사용`
+          : `나눈 방법: ${label} · ${(latencyMs / 1000).toFixed(1)}초 걸렸어요`,
+      },
     });
     for (const it of exp.items.filter((x) => isFlagged(alloc[x.id]))) {
       await store.appendEvent(room.id, {
@@ -152,14 +176,17 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     }
     return { before: exp, saved: { ...exp, split: 'items', alloc }, count: lines.length };
   }
-  // 확정한 지출을 저장하고 방 version은 한 번만 올린다(청구서는 한 번만 다시 보내면 된다)
+  // 확정한 지출을 저장하고 방 version은 한 번만 올린다(청구서는 한 번만 다시 보내면 된다). 짐작 그대로라 몫이 같으면 올리지 않는다
   async function saveGuesses(room, me, done) {
     if (!done.length) return { expenses: [], confirmed: 0 };
+    const before = await expensesOf(room.id);
     for (const { saved } of done) await store.put('expenses', saved);
-    await store.put('rooms', { ...room, version: room.version + 1 });
     const count = done.reduce((n, d) => n + d.count, 0);
     const what = done.length === 1 ? `‘${done[0].saved.title}’의 ${count}줄을` : `지출 ${done.length}건의 ${count}줄을`;
-    await store.appendEvent(room.id, { from: me.uid, to: 'all', kind: 'lines_confirmed', text: `${what} 비서가 짐작한 대로 확인했어요` });
+    await commitRoom({
+      found: room, before, after: done.reduce((list, d) => replaced(list, d.saved), before),
+      event: { from: me.uid, to: 'all', kind: 'lines_confirmed', text: `${what} 비서가 짐작한 대로 확인했어요` },
+    });
     for (const { before, saved } of done) await supersedeDisputes(store, room.id, before, saved);
     return { expenses: done.map((d) => d.saved), confirmed: count };
   }
@@ -175,8 +202,8 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
   // 방의 모든 지출에서 확인할 줄을 짐작대로 확정한다(청구서 보내기가 막혔을 때 한 번에)
   routes.post('/api/rooms/:id/confirm-guesses', async ({ req, params }) => {
     const { room, me } = await member(req, params.id);
-    open(room);
     const done = (await store.list('expenses', { roomId: room.id })).map((e) => confirmGuesses(e, me.uid)).filter(Boolean);
+    for (const { before } of done) guardLeft(room, before);
     return saveGuesses(room, me, done);
   });
 
@@ -194,10 +221,10 @@ export function registerExpenseRoutes(routes, { store, gemini, member, overLimit
     const same = prev.consumers && prev.consumers.length === consumers.length && prev.consumers.every((u) => consumers.includes(u));
     const reason = same ? prev.reason : '직접 고쳤어요';
     const saved = { ...exp, split: 'items', alloc: { ...exp.alloc, [item.id]: { ...prev, consumers, reason, confirmed: true, confirmedBy: me.uid } } };
+    const before = await expensesOf(room.id);
     await store.put('expenses', saved);
-    await store.put('rooms', { ...room, version: room.version + 1 });
     const names = consumers.map((u) => room.members.find((m) => m.uid === u)?.name ?? u).join('·');
-    await store.appendEvent(room.id, { from: me.uid, to: 'all', kind: 'line_confirmed', text: `${topic(`‘${item.name}’`)} ${whose(names)} 몫으로 확인했어요` });
+    await commitRoom({ found: room, before, after: replaced(before, saved), event: { from: me.uid, to: 'all', kind: 'line_confirmed', text: `${topic(`‘${item.name}’`)} ${whose(names)} 몫으로 확인했어요` } });
     await supersedeDisputes(store, room.id, exp, saved);
     return { expense: saved };
   });

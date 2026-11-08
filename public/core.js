@@ -102,6 +102,19 @@ export function settle(rows) {
   return out;
 }
 
+// 이미 오간 돈: 지금 묶음(version) 전에 보냈다고 했거나 받았다고 한 송금. 지출이 바뀌어도 이 돈은 다시 보내게 하지 않는다
+export const movedBefore = (transfers, version) => transfers.filter((t) => t.version < version && ['sent', 'confirmed'].includes(t.status));
+
+// 차액(net)에서 이미 오간 돈을 뺀다. 보낸 사람은 보낼 돈이, 받은 사람은 받을 돈이 그만큼 준다. settle()에 넘기면 남은 차액만 송금이 된다
+export function afterMoved(rows, moved) {
+  const out = Object.fromEntries(Object.entries(rows).map(([uid, r]) => [uid, { ...r }]));
+  for (const t of moved) {
+    if (out[t.from]) out[t.from].net += t.amount;
+    if (out[t.to]) out[t.to].net -= t.amount;
+  }
+  return out;
+}
+
 // --- Gemini가 없을 때 쓰는 규칙 배분. 서버의 대체 응답과 화면의 오프라인 모드가 함께 쓴다. ---
 const mentions = (memory, p, re) => (memory[p] || []).find((m) => re.test(m));
 const NO_ALCOHOL = /술을\s*(마시지|안\s*마시|못\s*마시)/;
