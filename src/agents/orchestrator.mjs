@@ -2,7 +2,7 @@
 // 상태는 Store(invoices·disputes·transfers)에 두고, 사람에게 보이는 일은 비서 기록과 pendingActions(현재 상태에서 계산)로 알린다.
 // LLM은 중재안만 낸다. 금액은 public/core.js가 계산한다.
 import { randomUUID } from 'node:crypto';
-import { ledger, settle, won, dayLabel } from '../../public/core.js';
+import { ledger, settle, won, dayLabel, movedBefore, afterMoved } from '../../public/core.js';
 import { topic, subj, obj, disputeRejected } from '../../public/ui.js';
 import { HttpError } from '../http.mjs';
 import { isFlagged, awaitsSender } from '../actions.mjs';
@@ -325,10 +325,14 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     const invoices = (await store.list('invoices', { roomId })).filter((i) => i.version === room.version);
     const disputes = await store.list('disputes', { roomId });
     if (!invoices.length || invoices.some((i) => i.status === 'asked') || disputes.some((d) => OPEN.includes(d.status))) return;
-    const live = (await store.list('transfers', { roomId })).filter((t) => t.version === room.version);
-    if (live.length ? !live.every((t) => t.status === 'confirmed') : settle(ledger(room, expenses, room.policy)).length) return;
+    const all = await store.list('transfers', { roomId });
+    const live = all.filter((t) => t.version === room.version);
+    // 지출이 바뀌기 전에 보냈다고 한 송금은 새 송금에서 빠졌으니(이미 오간 돈), 받았어요로 끝나야 방도 끝난다
+    if (all.some((t) => t.version < room.version && t.status === 'sent')) return;
+    const moved = movedBefore(all, room.version);
+    if (live.length ? !live.every((t) => t.status === 'confirmed') : settle(afterMoved(ledger(room, expenses, room.policy), moved)).length) return;
     await store.put('rooms', { ...room, status: 'done', doneAt: clock().toISOString() });
-    await say(roomId, { from: 'system', to: 'all', kind: 'room_done', text: live.length ? '모든 송금이 확인돼서 정산이 끝났어요' : '주고받을 돈이 없어서 정산이 끝났어요' });
+    await say(roomId, { from: 'system', to: 'all', kind: 'room_done', text: live.length || moved.length ? '모든 송금이 확인돼서 정산이 끝났어요' : '주고받을 돈이 없어서 정산이 끝났어요' });
   }
 
   // ---------------------------------------------------------------- 송금
@@ -347,7 +351,8 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     return new Date(t.remindAt) > now ? `${whenText(t.remindAt)}에 알려 드릴게요` : '곧 알려 드릴게요';
   };
 
-  // 지금 version의 송금을 한 번만 만든다. 이전 version의 아직 보내지 않은 송금은 대체한다
+  // 지금 version의 송금을 한 번만 만든다. 이전 version의 아직 보내지 않은 송금은 대체하고,
+  // 이미 보냈다고 했거나 받은 송금(이미 오간 돈)은 차액에서 빼서 남은 돈만 보낸다. 빼지 않으면 같은 돈을 두 번 보내게 된다
   async function createTransfers(roomId) {
     const { room, expenses, name } = await load(roomId);
     const all = await store.list('transfers', { roomId });
@@ -358,7 +363,7 @@ export function createOrchestrator({ store, gemini = null, clock = () => new Dat
     }
     const now = clock();
     const out = [];
-    for (const [i, edge] of settle(ledger(room, expenses, room.policy)).entries()) {
+    for (const [i, edge] of settle(afterMoved(ledger(room, expenses, room.policy), movedBefore(all, room.version))).entries()) {
       const sender = await settingsIn(edge.from, roomId);
       const receiver = await settingsOf(edge.to);
       const transfer = {
